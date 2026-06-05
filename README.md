@@ -1,6 +1,6 @@
 # Pinterest board sync MVP
 
-This project includes TypeScript scripts to authenticate with Pinterest, list the authenticated user's boards, and sync board pins into SQLite using Drizzle ORM.
+This project includes TypeScript scripts to authenticate with Pinterest, list the authenticated user's boards, sync board pins into SQLite using Drizzle ORM, and extract structured recipe data from recipe pages linked by those pins.
 
 ## Setup
 
@@ -23,7 +23,12 @@ This project includes TypeScript scripts to authenticate with Pinterest, list th
 
 ## Database
 
-The SQLite schema is defined in [src/db/schema.ts](/Users/mattyp/Documents/food-picker/src/db/schema.ts:1), and SQL migrations live in `drizzle/`.
+The SQLite schema is defined in [src/db/schema.ts](/Users/mattyp/Documents/food-picker/src/db/schema.ts:1), and SQL migrations live in `drizzle/`. It includes:
+
+- `boards` and `pins` for Pinterest sync data
+- `ratings` for per-pin scoring history
+- `recipe_sources` and `recipe_extractions` for fetch/extraction history
+- `recipes`, `recipe_steps`, and `recipe_ingredients` for the current extracted recipe data tied to a pin
 
 Generate a new migration after schema changes:
 
@@ -38,6 +43,8 @@ npm run db:migrate
 ```
 
 The board sync script also runs pending migrations automatically before writing data.
+
+The recipe extraction script also runs pending migrations automatically before writing data.
 
 ## Usage
 
@@ -66,3 +73,29 @@ npm run sync:board -- <board-id> ./data/custom.sqlite
 ```
 
 The sync script paginates through the board, stores one row per pin keyed by `pin_id`, and updates existing rows when the same pin is seen again in later syncs.
+
+Extract recipes for linked pins that have not been extracted yet:
+
+```bash
+npm run extract:recipes
+```
+
+Extract only one pin for debugging:
+
+```bash
+npm run extract:recipes -- --pin-id <pin-id>
+```
+
+Extract all linked pins from one board:
+
+```bash
+npm run extract:recipes -- --board-id <board-id>
+```
+
+Manually rerun extraction for pins that already have recipe data:
+
+```bash
+npm run extract:recipes -- --board-id <board-id> --rerun
+```
+
+The extractor uses structured recipe markup first, currently supporting JSON-LD and microdata/RDFa pages. It stores fetch and extraction history separately from the current `recipes` row so normal Pinterest sync does not rerun recipe parsing automatically.

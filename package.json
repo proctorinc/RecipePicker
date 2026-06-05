@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
+    "extract:recipes": "tsx src/extract-recipes.ts",
     "list:boards": "tsx src/pinterest-list-boards.ts",
     "oauth:pinterest": "tsx src/pinterest-oauth.ts",
     "refresh:pinterest-token": "tsx src/pinterest-refresh-token.ts",
@@ -17,8 +18,9 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
-    "drizzle-orm": "^0.36.4",
-    "dotenv": "^16.4.5"
+    "cheerio": "^1.2.0",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
