@@ -1,6 +1,6 @@
 # Pinterest board sync MVP
 
-This project includes TypeScript scripts to list the authenticated user's boards and to fetch every pin from a Pinterest board into SQLite with upsert semantics.
+This project includes TypeScript scripts to authenticate with Pinterest, list the authenticated user's boards, and sync board pins into SQLite using Drizzle ORM.
 
 ## Setup
 
@@ -20,6 +20,24 @@ This project includes TypeScript scripts to list the authenticated user's boards
    ```
 
 6. If you already have a token, you can set `PINTEREST_ACCESS_TOKEN` manually instead.
+
+## Database
+
+The SQLite schema is defined in [src/db/schema.ts](/Users/mattyp/Documents/food-picker/src/db/schema.ts:1), and SQL migrations live in `drizzle/`.
+
+Generate a new migration after schema changes:
+
+```bash
+npm run db:generate
+```
+
+Apply migrations manually:
+
+```bash
+npm run db:migrate
+```
+
+The board sync script also runs pending migrations automatically before writing data.
 
 ## Usage
 
@@ -47,4 +65,4 @@ Override the SQLite output path:
 npm run sync:board -- <board-id> ./data/custom.sqlite
 ```
 
-The script paginates through the board, stores one row per pin keyed by `pin_id`, and updates existing rows when the same pin is seen again in later syncs.
+The sync script paginates through the board, stores one row per pin keyed by `pin_id`, and updates existing rows when the same pin is seen again in later syncs.

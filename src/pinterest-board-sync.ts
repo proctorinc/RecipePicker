@@ -1,8 +1,10 @@
-import fs from "node:fs";
-import path from "node:path";
 import process from "node:process";
 
-import Database from "better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+
+import { createDatabase } from "./db/client.js";
+import { baselineLegacySchema } from "./db/migrations.js";
+import { boards, pins as pinsTable } from "./db/schema.js";
 import { fetchAllPins, PinterestPin, requireEnv } from "./pinterest-api.js";
 
 function parseArgs(argv: string[]) {
@@ -20,155 +22,73 @@ function parseArgs(argv: string[]) {
   };
 }
 
-function ensureParentDirectory(filePath: string) {
-  const directory = path.dirname(filePath);
-  fs.mkdirSync(directory, { recursive: true });
-}
-
-function createSchema(db: Database.Database) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS boards (
-      board_id TEXT PRIMARY KEY,
-      last_synced_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS pins (
-      pin_id TEXT PRIMARY KEY,
-      board_id TEXT NOT NULL,
-      board_section_id TEXT,
-      title TEXT,
-      description TEXT,
-      link TEXT,
-      alt_text TEXT,
-      dominant_color TEXT,
-      note TEXT,
-      created_at TEXT,
-      parent_pin_id TEXT,
-      media_json TEXT,
-      media_source_json TEXT,
-      creator_json TEXT,
-      board_owner_json TEXT,
-      raw_json TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (board_id) REFERENCES boards(board_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_pins_board_id ON pins (board_id);
-  `);
-}
-
-function upsertPins(db: Database.Database, boardId: string, pins: PinterestPin[]) {
-  const upsertBoard = db.prepare(`
-    INSERT INTO boards (board_id, last_synced_at)
-    VALUES (@board_id, @last_synced_at)
-    ON CONFLICT(board_id) DO UPDATE SET
-      last_synced_at = excluded.last_synced_at
-  `);
-
-  const upsertPin = db.prepare(`
-    INSERT INTO pins (
-      pin_id,
-      board_id,
-      board_section_id,
-      title,
-      description,
-      link,
-      alt_text,
-      dominant_color,
-      note,
-      created_at,
-      parent_pin_id,
-      media_json,
-      media_source_json,
-      creator_json,
-      board_owner_json,
-      raw_json,
-      updated_at
-    ) VALUES (
-      @pin_id,
-      @board_id,
-      @board_section_id,
-      @title,
-      @description,
-      @link,
-      @alt_text,
-      @dominant_color,
-      @note,
-      @created_at,
-      @parent_pin_id,
-      @media_json,
-      @media_source_json,
-      @creator_json,
-      @board_owner_json,
-      @raw_json,
-      @updated_at
-    )
-    ON CONFLICT(pin_id) DO UPDATE SET
-      board_id = excluded.board_id,
-      board_section_id = excluded.board_section_id,
-      title = excluded.title,
-      description = excluded.description,
-      link = excluded.link,
-      alt_text = excluded.alt_text,
-      dominant_color = excluded.dominant_color,
-      note = excluded.note,
-      created_at = excluded.created_at,
-      parent_pin_id = excluded.parent_pin_id,
-      media_json = excluded.media_json,
-      media_source_json = excluded.media_source_json,
-      creator_json = excluded.creator_json,
-      board_owner_json = excluded.board_owner_json,
-      raw_json = excluded.raw_json,
-      updated_at = excluded.updated_at
-  `);
-
+async function upsertPins(boardId: string, records: PinterestPin[], sqlitePath?: string) {
   const syncNow = new Date().toISOString();
+  const { db, sqlite, sqlitePath: resolvedSqlitePath } = createDatabase(sqlitePath);
 
-  const transaction = db.transaction((records: PinterestPin[]) => {
-    upsertBoard.run({
-      board_id: boardId,
-      last_synced_at: syncNow,
+  try {
+    baselineLegacySchema(sqlite);
+
+    migrate(db, {
+      migrationsFolder: "drizzle",
     });
 
-    for (const pin of records) {
-      upsertPin.run({
-        pin_id: pin.id,
-        board_id: pin.board_id ?? boardId,
-        board_section_id: pin.board_section_id ?? null,
-        title: pin.title ?? null,
-        description: pin.description ?? null,
-        link: pin.link ?? null,
-        alt_text: pin.alt_text ?? null,
-        dominant_color: pin.dominant_color ?? null,
-        note: pin.note ?? null,
-        created_at: pin.created_at ?? null,
-        parent_pin_id: pin.parent_pin_id ?? null,
-        media_json: pin.media ? JSON.stringify(pin.media) : null,
-        media_source_json: pin.media_source ? JSON.stringify(pin.media_source) : null,
-        creator_json: pin.creator ? JSON.stringify(pin.creator) : null,
-        board_owner_json: pin.board_owner ? JSON.stringify(pin.board_owner) : null,
-        raw_json: JSON.stringify(pin),
-        updated_at: syncNow,
-      });
-    }
-  });
+    sqlite.transaction(() => {
+      db.insert(boards)
+        .values({
+          boardId,
+          lastSyncedAt: syncNow,
+        })
+        .onConflictDoUpdate({
+          target: boards.boardId,
+          set: {
+            lastSyncedAt: syncNow,
+          },
+        })
+        .run();
 
-  transaction(pins);
+      for (const pin of records) {
+        const values = {
+          pinId: pin.id,
+          boardId: pin.board_id ?? boardId,
+          boardSectionId: pin.board_section_id ?? null,
+          title: pin.title ?? null,
+          description: pin.description ?? null,
+          link: pin.link ?? null,
+          altText: pin.alt_text ?? null,
+          dominantColor: pin.dominant_color ?? null,
+          note: pin.note ?? null,
+          createdAt: pin.created_at ?? null,
+          parentPinId: pin.parent_pin_id ?? null,
+          mediaJson: pin.media ? JSON.stringify(pin.media) : null,
+          mediaSourceJson: pin.media_source ? JSON.stringify(pin.media_source) : null,
+          creatorJson: pin.creator ? JSON.stringify(pin.creator) : null,
+          boardOwnerJson: pin.board_owner ? JSON.stringify(pin.board_owner) : null,
+          rawJson: JSON.stringify(pin),
+          updatedAt: syncNow,
+        };
+
+        db.insert(pinsTable)
+          .values(values)
+          .onConflictDoUpdate({
+            target: pinsTable.pinId,
+            set: values,
+          })
+          .run();
+      }
+    })();
+
+    return resolvedSqlitePath;
+  } finally {
+    sqlite.close();
+  }
 }
 
 async function main() {
   const accessToken = requireEnv("PINTEREST_ACCESS_TOKEN");
   const { boardId, sqlitePath } = parseArgs(process.argv.slice(2));
-  const resolvedSqlitePath = path.resolve(sqlitePath);
-
-  ensureParentDirectory(resolvedSqlitePath);
-
   const pins = await fetchAllPins(boardId, accessToken);
-
-  const db = new Database(resolvedSqlitePath);
-  createSchema(db);
-  upsertPins(db, boardId, pins);
-  db.close();
+  const resolvedSqlitePath = await upsertPins(boardId, pins, sqlitePath);
 
   console.log(`Synced ${pins.length} pins from board ${boardId} into ${resolvedSqlitePath}`);
 }

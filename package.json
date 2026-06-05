@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
     "list:boards": "tsx src/pinterest-list-boards.ts",
     "oauth:pinterest": "tsx src/pinterest-oauth.ts",
     "refresh:pinterest-token": "tsx src/pinterest-refresh-token.ts",
@@ -15,11 +17,13 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
+    "drizzle-orm": "^0.36.4",
     "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.15.29",
+    "drizzle-kit": "^0.28.1",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }
