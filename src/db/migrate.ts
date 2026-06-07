@@ -3,14 +3,11 @@ import process from "node:process";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
 import { createDatabase } from "./client.js";
-import { baselineLegacySchema } from "./migrations.js";
 
 async function main() {
   const { db, sqlite, sqlitePath } = createDatabase();
 
   try {
-    baselineLegacySchema(sqlite);
-
     migrate(db, {
       migrationsFolder: "drizzle",
     });

@@ -1,6 +1,6 @@
 import { defineConfig } from "drizzle-kit";
 
-const sqlitePath = process.env.SQLITE_PATH?.trim() || "./data/pinterest.sqlite";
+const sqlitePath = process.env.SQLITE_PATH?.trim() || "./data/db.sqlite";
 
 export default defineConfig({
   schema: "./src/db/schema.ts",

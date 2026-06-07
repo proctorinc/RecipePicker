@@ -4,29 +4,59 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "next build",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
+    "dev": "next dev",
     "extract:recipes": "tsx src/extract-recipes.ts",
     "list:boards": "tsx src/pinterest-list-boards.ts",
+    "lint": "next lint",
+    "start": "next start",
     "oauth:pinterest": "tsx src/pinterest-oauth.ts",
     "refresh:pinterest-token": "tsx src/pinterest-refresh-token.ts",
-    "sync:board": "tsx src/pinterest-board-sync.ts"
+    "sync:board": "tsx src/pinterest-board-sync.ts",
+    "test": "vitest run"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.81",
+    "@ai-sdk/google": "^3.0.80",
+    "@ai-sdk/openai": "^3.0.68",
+    "@clerk/nextjs": "^7.4.3",
+    "@paralleldrive/cuid2": "^3.3.0",
+    "@radix-ui/react-dialog": "^1.1.14",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@radix-ui/react-switch": "^1.2.6",
+    "@radix-ui/react-tabs": "^1.1.12",
+    "ai": "^6.0.197",
     "better-sqlite3": "^11.10.0",
     "cheerio": "^1.2.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "dotenv": "^16.4.5",
-    "drizzle-orm": "^0.36.4"
+    "drizzle-orm": "^0.36.4",
+    "lucide-react": "^0.511.0",
+    "next": "^15.3.3",
+    "playwright": "^1.60.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "sonner": "^2.0.5",
+    "tailwind-merge": "^3.3.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.15.29",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "autoprefixer": "^10.4.21",
     "drizzle-kit": "^0.28.1",
+    "postcss": "^8.5.4",
+    "tailwindcss": "^3.4.17",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   }
 }

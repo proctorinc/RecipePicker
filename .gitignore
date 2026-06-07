@@ -1,7 +1,12 @@
 node_modules/
 dist/
+.next/
+.next-dev/
 .env
 data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# clerk configuration (can include secrets)
+/.clerk/

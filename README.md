@@ -1,101 +1,78 @@
-# Pinterest board sync MVP
+# Food Picker
 
-This project includes TypeScript scripts to authenticate with Pinterest, list the authenticated user's boards, sync board pins into SQLite using Drizzle ORM, and extract structured recipe data from recipe pages linked by those pins.
+Food Picker is a Next.js app for browsing Pinterest-sourced recipes, syncing selected boards, and extracting structured recipe data from linked pages.
 
-## Setup
+## What changed
 
-1. Copy `.env.example` to `.env`.
-2. Set `PINTEREST_APP_ID` and `PINTEREST_APP_SECRET` from your Pinterest developer app.
-3. Register the same redirect URI from `.env` in your Pinterest app. The default is `http://localhost:8085/`.
-4. Install dependencies:
+The app now uses:
 
-   ```bash
-   npm install
-   ```
+- Clerk for authentication
+- shared household workspaces for recipe data
+- household-scoped Pinterest OAuth connections
+- encrypted Pinterest token storage in SQLite
+- owner/member roles plus shareable invite links
 
-5. Run the OAuth helper to generate and save a token:
+## Environment
 
-   ```bash
-   npm run oauth:pinterest
-   ```
+Copy `.env.example` to `.env` and fill in:
 
-6. If you already have a token, you can set `PINTEREST_ACCESS_TOKEN` manually instead.
+- `CLERK_PUBLISHABLE_KEY`
+- `CLERK_SECRET_KEY`
+- `PINTEREST_APP_ID`
+- `PINTEREST_APP_SECRET`
+- `PINTEREST_REDIRECT_URI`
+- `PINTEREST_TOKEN_ENCRYPTION_KEY`
+
+The default Pinterest callback route is `http://localhost:3000/api/pinterest/callback`.
+
+## Local setup
+
+```bash
+npm install
+npm run dev
+```
+
+Then:
+
+1. Sign in with Clerk.
+2. The app will create a household automatically for the first signed-in user.
+3. Open Settings and connect Pinterest.
+4. Choose which boards should sync into the household.
 
 ## Database
 
-The SQLite schema is defined in [src/db/schema.ts](/Users/mattyp/Documents/food-picker/src/db/schema.ts:1), and SQL migrations live in `drizzle/`. It includes:
+The schema is defined in [src/db/schema.ts](/Users/mattyp/Documents/food-picker/src/db/schema.ts:1).
 
-- `boards` and `pins` for Pinterest sync data
-- `ratings` for per-pin scoring history
-- `recipe_sources` and `recipe_extractions` for fetch/extraction history
-- `recipes`, `recipe_steps`, and `recipe_ingredients` for the current extracted recipe data tied to a pin
-
-Generate a new migration after schema changes:
+Generate migrations with:
 
 ```bash
 npm run db:generate
 ```
 
-Apply migrations manually:
+Apply migrations with:
 
 ```bash
 npm run db:migrate
 ```
 
-The board sync script also runs pending migrations automatically before writing data.
+The app also runs pending Drizzle migrations automatically when it opens the database.
 
-The recipe extraction script also runs pending migrations automatically before writing data.
+## Scripts
 
-## Usage
-
-List the authenticated user's boards with board name and ID:
+Sync one household board:
 
 ```bash
-npm run list:boards
+npm run sync:board -- <household-id> <board-id>
 ```
 
-Refresh an existing Pinterest refresh token:
+Extract recipes for one household:
 
 ```bash
-npm run refresh:pinterest-token
+npm run extract:recipes -- --household-id <household-id>
 ```
 
-Run with the default SQLite path from `.env`:
+Target one recipe:
 
 ```bash
-npm run sync:board -- <board-id>
+npm run extract:recipes -- --household-id <household-id> --recipe-id <recipe-id>
 ```
-
-Override the SQLite output path:
-
-```bash
-npm run sync:board -- <board-id> ./data/custom.sqlite
-```
-
-The sync script paginates through the board, stores one row per pin keyed by `pin_id`, and updates existing rows when the same pin is seen again in later syncs.
-
-Extract recipes for linked pins that have not been extracted yet:
-
-```bash
-npm run extract:recipes
-```
-
-Extract only one pin for debugging:
-
-```bash
-npm run extract:recipes -- --pin-id <pin-id>
-```
-
-Extract all linked pins from one board:
-
-```bash
-npm run extract:recipes -- --board-id <board-id>
-```
-
-Manually rerun extraction for pins that already have recipe data:
-
-```bash
-npm run extract:recipes -- --board-id <board-id> --rerun
-```
-
-The extractor uses structured recipe markup first, currently supporting JSON-LD and microdata/RDFa pages. It stores fetch and extraction history separately from the current `recipes` row so normal Pinterest sync does not rerun recipe parsing automatically.
