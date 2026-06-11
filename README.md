@@ -73,7 +73,12 @@ Apply migrations with:
 npm run db:migrate
 ```
 
-The app also runs pending Drizzle migrations automatically when it opens the database.
+The app also runs pending Drizzle migrations automatically when it opens the
+database in non-production environments.
+
+In production, apply migrations as part of deployment instead of relying on the
+web app runtime. If you intentionally want the app server to run migrations at
+startup, set `DB_AUTO_MIGRATE=true`.
 
 ## Scripts
 

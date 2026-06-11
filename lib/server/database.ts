@@ -6,10 +6,27 @@ import type { DatabaseClient } from "@/src/db/client";
 
 const migratedTargets = new Set<string>();
 
+function shouldRunRuntimeMigrations() {
+  const override = process.env.DB_AUTO_MIGRATE?.trim().toLowerCase();
+
+  if (override === "true") {
+    return true;
+  }
+
+  if (override === "false") {
+    return false;
+  }
+
+  return process.env.NODE_ENV !== "production";
+}
+
 export async function openDatabase(sqlitePath?: string) {
   const handle = createDatabase(sqlitePath);
 
-  if (!migratedTargets.has(`${handle.driver}:${handle.targetLabel}`)) {
+  if (
+    shouldRunRuntimeMigrations() &&
+    !migratedTargets.has(`${handle.driver}:${handle.targetLabel}`)
+  ) {
     if (handle.driver === "sqlite") {
       migrate(handle.db as DatabaseClient & Parameters<typeof migrate>[0], {
         migrationsFolder: "drizzle",
