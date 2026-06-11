@@ -11,7 +11,7 @@ import {
 } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
 import type { RecipeReviewView } from "@/types/view-models";
-import { formatRatingValue } from "@/lib/utils";
+import { formatDay, formatRatingValue, getTodayDayString } from "@/lib/utils";
 import { StarRating } from "@/components/star-rating";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +37,10 @@ type RecipeReviewDialogProps = {
   review?: RecipeReviewView | null;
   initialRating?: number;
   viewRecipeHref?: string;
+  eventId?: string | null;
+  initialEatenOn?: string | null;
+  allowDateEditing?: boolean;
+  onSuccess?: () => void;
 };
 
 export function RecipeReviewDialog({
@@ -47,6 +51,10 @@ export function RecipeReviewDialog({
   review,
   initialRating,
   viewRecipeHref,
+  eventId,
+  initialEatenOn,
+  allowDateEditing = true,
+  onSuccess,
 }: RecipeReviewDialogProps) {
   const action = review ? updateRecipeReviewAction : createRecipeReviewAction;
   const [state, formAction] = useActionState(action, initialActionState);
@@ -54,10 +62,10 @@ export function RecipeReviewDialog({
     () => review?.ratingValue ?? initialRating ?? 5,
     [initialRating, review?.ratingValue],
   );
-  const defaultEatenOn = review?.eatenOn ?? "";
+  const defaultEatenOn = review?.eatenOn ?? initialEatenOn ?? "";
   const [ratingValue, setRatingValue] = useState(defaultRating);
   const [eatenOn, setEatenOn] = useState(defaultEatenOn);
-  const dateIncluded = Boolean(eatenOn);
+  const dateIncluded = Boolean(eatenOn) || Boolean(eventId);
   const [note, setNote] = useState(review?.note ?? "");
   const dateInputRef = useRef<HTMLInputElement>(null);
 
@@ -75,13 +83,14 @@ export function RecipeReviewDialog({
     if (state.status === "success") {
       toast.success(state.message);
       onOpenChange(false);
+      onSuccess?.();
     } else if (state.status === "error") {
       toast.error(state.message);
     }
-  }, [onOpenChange, state]);
+  }, [onOpenChange, onSuccess, state]);
 
   useEffect(() => {
-    if (!open || !dateIncluded) {
+    if (!open || !dateIncluded || !allowDateEditing) {
       return;
     }
 
@@ -94,7 +103,7 @@ export function RecipeReviewDialog({
     if (typeof input.showPicker === "function") {
       input.showPicker();
     }
-  }, [dateIncluded, open]);
+  }, [allowDateEditing, dateIncluded, open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -122,6 +131,7 @@ export function RecipeReviewDialog({
         </div>
         <form action={formAction} className="space-y-5">
           <input type="hidden" name="recipeId" value={recipeId} />
+          {eventId ? <input type="hidden" name="eventId" value={eventId} /> : null}
           {review ? (
             <input type="hidden" name="reviewId" value={review.reviewId} />
           ) : null}
@@ -141,36 +151,46 @@ export function RecipeReviewDialog({
             <span className="text-sm font-medium text-foreground">
               Date eaten
             </span>
-            <div className="flex gap-3">
-              {dateIncluded ? (
-                <Input
-                  ref={dateInputRef}
-                  type="date"
-                  name="eatenOn"
-                  value={eatenOn}
-                  onChange={(event) => setEatenOn(event.target.value)}
-                  aria-label="Date eaten"
-                  className="h-11 w-1/2 border-primary bg-primary py-0 text-primary-foreground [color-scheme:dark]"
-                />
-              ) : (
+            {allowDateEditing ? (
+              <div className="flex gap-3">
+                {dateIncluded ? (
+                  <Input
+                    ref={dateInputRef}
+                    type="date"
+                    name="eatenOn"
+                    value={eatenOn}
+                    onChange={(event) => setEatenOn(event.target.value)}
+                    aria-label="Date eaten"
+                    className="h-11 w-1/2 border-primary bg-primary py-0 text-primary-foreground [color-scheme:dark]"
+                    max={getTodayDayString()}
+                  />
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-1/2"
+                    onClick={() => setEatenOn(todayDate())}
+                  >
+                    Add a date
+                  </Button>
+                )}
                 <Button
                   type="button"
-                  variant="outline"
+                  variant={dateIncluded ? "outline" : "default"}
                   className="w-1/2"
-                  onClick={() => setEatenOn(todayDate())}
+                  onClick={() => setEatenOn("")}
                 >
-                  Add a date
+                  No date
                 </Button>
-              )}
-              <Button
-                type="button"
-                variant={dateIncluded ? "outline" : "default"}
-                className="w-1/2"
-                onClick={() => setEatenOn("")}
-              >
-                No date
-              </Button>
-            </div>
+              </div>
+            ) : (
+              <>
+                <input type="hidden" name="eatenOn" value={eatenOn} />
+                <div className="rounded-[24px] border border-border/70 bg-secondary/20 px-4 py-3 text-sm text-foreground">
+                  {formatDay(eatenOn)}
+                </div>
+              </>
+            )}
           </div>
 
           <label className="block space-y-2">

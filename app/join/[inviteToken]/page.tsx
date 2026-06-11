@@ -10,15 +10,15 @@ export const dynamic = "force-dynamic";
 
 export default async function JoinHouseholdPage({ params }: { params: Promise<{ inviteToken: string }> }) {
   const { inviteToken } = await params;
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const invite = db.query.householdInvites.findFirst({
+    const invite = await db.query.householdInvites.findFirst({
       where: (table, { eq }) => eq(table.inviteToken, inviteToken),
       with: {
         household: true,
       },
-    }).sync();
+    });
 
     if (!invite) {
       notFound();
@@ -48,6 +48,6 @@ export default async function JoinHouseholdPage({ params }: { params: Promise<{ 
       </AppShell>
     );
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }

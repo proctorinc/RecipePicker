@@ -6,7 +6,10 @@ import { requireHouseholdContext } from "@/lib/server/auth";
 import { openDatabase } from "@/lib/server/database";
 import { boardSyncSubscriptions } from "@/lib/server/db";
 import { extractRecipes } from "@/lib/server/extract";
-import { syncAllBoards, syncBoard as syncSingleBoard } from "@/lib/server/sync";
+import {
+  runManualBoardSync,
+  runManualSyncAllBoards,
+} from "@/lib/server/sync";
 import {
   revalidateAll,
   recipeScopedPaths,
@@ -28,8 +31,9 @@ export async function syncBoardAction(
 
   try {
     const context = await requireHouseholdContext();
-    const result = await syncSingleBoard(boardId, {
+    const result = await runManualBoardSync({
       householdId: context.householdId,
+      boardId,
       boardName,
     });
     revalidateAll(recipeScopedPaths());
@@ -48,13 +52,15 @@ export async function syncAllBoardsAction(
 ): Promise<ActionState> {
   try {
     const context = await requireHouseholdContext();
-    const results = await syncAllBoards({ householdId: context.householdId });
+    const results = await runManualSyncAllBoards({
+      householdId: context.householdId,
+    });
     revalidateAll(recipeScopedPaths());
     return {
       status: "success",
       message:
-        results.length > 0
-          ? `Synced ${results.length} selected boards.`
+        results.boards.length > 0
+          ? `Synced ${results.boards.length} selected boards.`
           : "No boards are selected for sync yet.",
     };
   } catch (error) {
@@ -76,12 +82,12 @@ export async function setBoardSyncEnabledAction(
   }
 
   const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
     const now = new Date().toISOString();
 
-    db.insert(boardSyncSubscriptions)
+    await db.insert(boardSyncSubscriptions)
       .values({
         householdId: context.householdId,
         pinterestBoardId: boardId,
@@ -106,8 +112,9 @@ export async function setBoardSyncEnabledAction(
     if (syncEnabled) {
       after(async () => {
         try {
-          await syncSingleBoard(boardId, {
+          await runManualBoardSync({
             householdId: context.householdId,
+            boardId,
             boardName,
             syncEnabled: true,
           });
@@ -140,7 +147,7 @@ export async function setBoardSyncEnabledAction(
   } catch (error) {
     return toErrorState(error, "Unable to update board sync selection.");
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 

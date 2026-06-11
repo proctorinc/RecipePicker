@@ -1,12 +1,26 @@
 import { defineConfig } from "drizzle-kit";
 
-const sqlitePath = process.env.SQLITE_PATH?.trim() || "./data/db.sqlite";
+import { getDatabaseConfig } from "@/src/db/config";
 
-export default defineConfig({
-  schema: "./src/db/schema.ts",
-  out: "./drizzle",
-  dialect: "sqlite",
-  dbCredentials: {
-    url: sqlitePath,
-  },
-});
+const databaseConfig = getDatabaseConfig();
+
+export default defineConfig(
+  databaseConfig.kind === "sqlite"
+    ? {
+        schema: "./src/db/schema.ts",
+        out: "./drizzle",
+        dialect: "sqlite",
+        dbCredentials: {
+          url: databaseConfig.sqlitePath,
+        },
+      }
+    : {
+        schema: "./src/db/schema.ts",
+        out: "./drizzle",
+        dialect: "turso",
+        dbCredentials: {
+          url: databaseConfig.url,
+          authToken: databaseConfig.authToken,
+        },
+      },
+);

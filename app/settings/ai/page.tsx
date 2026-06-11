@@ -13,7 +13,7 @@ import {
   disconnectAiConnectionAction,
   saveAiConnectionAction,
 } from "@/lib/actions/operations";
-import { canConfigureAi, getAppAccessContext } from "@/lib/server/access";
+import { canConfigureAi, getCurrentUserAccess } from "@/lib/server/access";
 import {
   getAiModelCatalog,
   getHouseholdAiConnectionSummary,
@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
 export default async function AiSettingsPage() {
   const [context, appAccess, modelCatalog] = await Promise.all([
     requireHouseholdContext(),
-    getAppAccessContext(),
+    getCurrentUserAccess(),
     Promise.resolve(getAiModelCatalog()),
   ]);
   const connection = await getHouseholdAiConnectionSummary(context.householdId);

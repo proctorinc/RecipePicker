@@ -1,18 +1,23 @@
 import { AppShell } from "@/components/app-shell";
-import { ReviewHistoryList } from "@/components/review-history-list";
+import { RecipeHistoryCalendar } from "@/components/recipe-history-calendar";
 import { getRecipeHistoryPage } from "@/lib/server/queries";
 
 export const dynamic = "force-dynamic";
 
-export default async function HistoryPage() {
-  const history = await getRecipeHistoryPage();
+export default async function HistoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string }>;
+}) {
+  const { month } = await searchParams;
+  const history = await getRecipeHistoryPage(month);
 
   return (
     <AppShell
       title="Meal History"
-      description="See how meals turned out across your household, then add follow-up notes or another review when you cook them again."
+      description="Track and review your recipes when your tried recipes"
     >
-      <ReviewHistoryList items={history.items} recipeOptions={history.recipeOptions} />
+      <RecipeHistoryCalendar history={history} />
     </AppShell>
   );
 }

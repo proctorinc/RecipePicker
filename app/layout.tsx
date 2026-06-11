@@ -17,11 +17,14 @@ const manrope = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: "Food Picker",
-  description: "Browse Pinterest-sourced recipes and manage sync and extraction flows.",
+  title: "Recipe Picker",
+  description:
+    "Browse Pinterest-sourced recipes and manage sync and extraction flows.",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" className={`${fraunces.variable} ${manrope.variable}`}>
       <body className="font-sans antialiased">

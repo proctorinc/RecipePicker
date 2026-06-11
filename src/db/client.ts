@@ -1,33 +1,71 @@
-import fs from "node:fs";
-import path from "node:path";
-
+import { createClient } from "@libsql/client";
 import BetterSqlite3 from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { drizzle as drizzleLibsql } from "drizzle-orm/libsql";
 
+import { ensureSqliteParentDirectory, getDatabaseConfig } from "./config";
 import * as schema from "./schema";
 
-export function resolveSqlitePath(sqlitePath?: string): string {
-  return path.resolve(
-    sqlitePath ?? process.env.SQLITE_PATH ?? "./data/db.sqlite",
-  );
-}
+type BetterSqliteDatabase = ReturnType<typeof drizzle<typeof schema>>;
+type LibsqlDatabase = ReturnType<typeof drizzleLibsql<typeof schema>>;
 
-export function ensureSqliteParentDirectory(sqlitePath: string) {
-  fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
-}
+export type DatabaseClient = BetterSqliteDatabase | LibsqlDatabase;
 
-export function createDatabase(sqlitePath?: string) {
-  const resolvedPath = resolveSqlitePath(sqlitePath);
-  ensureSqliteParentDirectory(resolvedPath);
+type DatabaseTransactionClient = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0];
 
-  const sqlite = new BetterSqlite3(resolvedPath);
-  sqlite.pragma("journal_mode = WAL");
+export type DatabaseHandle = {
+  db: DatabaseClient;
+  driver: "sqlite" | "turso";
+  sqlite: {
+    close: () => Promise<void>;
+    transaction: <T>(work: (tx: DatabaseTransactionClient) => T) => Promise<T>;
+  };
+  targetLabel: string;
+};
 
-  const db = drizzle(sqlite, { schema });
+export function createDatabase(sqlitePath?: string): DatabaseHandle {
+  const config = getDatabaseConfig(sqlitePath);
+
+  if (config.kind === "sqlite") {
+    ensureSqliteParentDirectory(config.sqlitePath);
+
+    const sqlite = new BetterSqlite3(config.sqlitePath);
+    sqlite.pragma("journal_mode = WAL");
+
+    const db = drizzle(sqlite, { schema });
+
+    return {
+      db,
+      driver: "sqlite",
+      sqlite: {
+        async close() {
+          sqlite.close();
+        },
+        async transaction<T>(work: (tx: DatabaseTransactionClient) => T) {
+          return db.transaction((tx) => work(tx as DatabaseTransactionClient));
+        },
+      },
+      targetLabel: config.targetLabel,
+    };
+  }
+
+  const client = createClient({
+    url: config.url,
+    authToken: config.authToken,
+  });
+  const db = drizzleLibsql(client, { schema });
 
   return {
     db,
-    sqlite,
-    sqlitePath: resolvedPath,
+    driver: "turso",
+    sqlite: {
+      async close() {
+        client.close();
+      },
+      async transaction<T>(work: (tx: DatabaseTransactionClient) => T) {
+        return db.transaction(async (tx) => work(tx as DatabaseTransactionClient));
+      },
+    },
+    targetLabel: config.targetLabel,
   };
 }

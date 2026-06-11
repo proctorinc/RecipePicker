@@ -12,16 +12,23 @@ const initialActionState: ActionState = {
   message: "",
 };
 
-export function ReviewDeleteButton({ reviewId }: { reviewId: string }) {
+export function ReviewDeleteButton({
+  reviewId,
+  onSuccess,
+}: {
+  reviewId: string;
+  onSuccess?: () => void;
+}) {
   const [state, formAction] = useActionState(deleteRecipeReviewAction, initialActionState);
 
   useEffect(() => {
     if (state.status === "success") {
       toast.success(state.message);
+      onSuccess?.();
     } else if (state.status === "error") {
       toast.error(state.message);
     }
-  }, [state]);
+  }, [onSuccess, state]);
 
   return (
     <form

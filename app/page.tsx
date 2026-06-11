@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/app-shell";
+import { FeedSyncTrigger } from "@/components/feed-sync-trigger";
 import { FeedSearch } from "@/components/feed-search";
 import { PinCard } from "@/components/pin-card";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,6 +18,7 @@ export default async function HomePage({
 
   return (
     <AppShell>
+      <FeedSyncTrigger />
       {cards.length > 0 ? (
         <section className="columns-2 gap-2 pb-24 sm:columns-2 md:columns-3 md:gap-5 lg:columns-4">
           {cards.map((card) => (
@@ -31,7 +33,7 @@ export default async function HomePage({
           </CardContent>
         </Card>
       )}
-      <div className="fixed left-0 right-0 top-20 z-30 px-3 md:bottom-4 md:inset-y-auto md:px-0">
+      <div className="fixed left-0 right-0 z-30 px-3 bottom-24 md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">
           <FeedSearch initialQuery={query} />
         </div>

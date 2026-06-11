@@ -4,13 +4,13 @@ import { AppShell } from "@/components/app-shell";
 import { RecipePicker } from "@/components/recipe-picker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getAppAccessContext } from "@/lib/server/access";
+import { getCurrentUserAccess } from "@/lib/server/access";
 import { getRecipePickerInitialState } from "@/lib/server/recipe-picker";
 
 export const dynamic = "force-dynamic";
 
 export default async function PickerPage() {
-  const access = await getAppAccessContext();
+  const access = await getCurrentUserAccess();
 
   if (!access.isPremium) {
     return (

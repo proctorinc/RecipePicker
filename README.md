@@ -14,7 +14,19 @@ The app now uses:
 
 ## Environment
 
-Copy `.env.example` to `.env` and fill in:
+Use environment-specific files:
+
+- `.env.development`
+- `.env.test`
+- `.env.production`
+
+Starter templates live in:
+
+- `.env.development.example`
+- `.env.test.example`
+- `.env.production.example`
+
+Shared app settings include:
 
 - `CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
@@ -24,6 +36,12 @@ Copy `.env.example` to `.env` and fill in:
 - `PINTEREST_TOKEN_ENCRYPTION_KEY`
 
 The default Pinterest callback route is `http://localhost:3000/api/pinterest/callback`.
+
+Database settings depend on the environment:
+
+- `development`: `SQLITE_PATH`
+- `test`: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
+- `production`: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
 
 ## Local setup
 

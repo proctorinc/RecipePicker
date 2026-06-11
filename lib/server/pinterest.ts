@@ -42,9 +42,12 @@ export type PinterestConnectionSummary = {
   status: PinterestConnectionStatus;
   accountLabel: string | null;
   scope: string[];
+  lastSyncAttemptAt: string | null;
   lastSyncAt: string | null;
   lastSyncStatus: string | null;
   lastSyncError: string | null;
+  lastSyncTrigger: string | null;
+  syncInProgressAt: string | null;
   accessTokenExpiresAt: string | null;
   refreshTokenExpiresAt: string | null;
   connectedByClerkUserId: string | null;
@@ -73,14 +76,14 @@ export async function createPinterestOauthState(args: {
   clerkUserId: string;
   returnTo?: string;
 }) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
     const state = crypto.randomUUID();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
 
-    db.insert(oauthStates)
+    await db.insert(oauthStates)
       .values({
         state,
         provider: "pinterest",
@@ -94,23 +97,23 @@ export async function createPinterestOauthState(args: {
 
     return state;
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function consumePinterestOauthState(state: string) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const record = db.query.oauthStates.findFirst({
+    const record = await db.query.oauthStates.findFirst({
       where: (table, { eq }) => eq(table.state, state),
-    }).sync();
+    });
 
     if (!record) {
       throw new Error("OAuth state was not found.");
     }
 
-    db.delete(oauthStates).where(eq(oauthStates.state, state)).run();
+    await db.delete(oauthStates).where(eq(oauthStates.state, state)).run();
 
     if (record.provider !== "pinterest") {
       throw new Error("OAuth state provider mismatch.");
@@ -122,7 +125,7 @@ export async function consumePinterestOauthState(state: string) {
 
     return record;
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
@@ -158,7 +161,7 @@ export async function upsertPinterestConnection(args: {
   connectedByClerkUserId: string;
   token: TokenResponse;
 }) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
     const now = new Date();
@@ -179,15 +182,18 @@ export async function upsertPinterestConnection(args: {
       refreshTokenExpiresAt: expiresAtFromSeconds(args.token.refresh_token_expires_in),
       lastRefreshAttemptAt: null,
       lastRefreshSucceededAt: null,
+      lastSyncAttemptAt: null,
+      lastSyncTrigger: null,
       lastSyncAt: null,
       lastSyncStatus: null,
       lastSyncError: null,
+      syncInProgressAt: null,
       connectionStatus: "active",
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     } satisfies ConnectionRow;
 
-    db.insert(pinterestAccounts)
+    await db.insert(pinterestAccounts)
       .values(values)
       .onConflictDoUpdate({
         target: [pinterestAccounts.householdId, pinterestAccounts.provider],
@@ -209,38 +215,41 @@ export async function upsertPinterestConnection(args: {
       await ensureBoardSubscriptions(args.householdId, boards);
     }
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function disconnectPinterestConnection(householdId: string) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    db.delete(pinterestAccounts)
+    await db.delete(pinterestAccounts)
       .where(and(eq(pinterestAccounts.householdId, householdId), eq(pinterestAccounts.provider, "pinterest")))
       .run();
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function getPinterestConnectionSummary(householdId: string): Promise<PinterestConnectionSummary> {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const connection = db.query.pinterestAccounts.findFirst({
+    const connection = await db.query.pinterestAccounts.findFirst({
       where: (table, { and, eq }) => and(eq(table.householdId, householdId), eq(table.provider, "pinterest")),
-    }).sync();
+    });
 
     if (!connection) {
       return {
         status: "not_connected",
         accountLabel: null,
         scope: [],
+        lastSyncAttemptAt: null,
         lastSyncAt: null,
         lastSyncStatus: null,
         lastSyncError: null,
+        lastSyncTrigger: null,
+        syncInProgressAt: null,
         accessTokenExpiresAt: null,
         refreshTokenExpiresAt: null,
         connectedByClerkUserId: null,
@@ -251,15 +260,18 @@ export async function getPinterestConnectionSummary(householdId: string): Promis
       status: deriveConnectionStatus(connection),
       accountLabel: connection.accountLabel,
       scope: connection.scope?.split(",").map((scope) => scope.trim()).filter(Boolean) ?? [],
+      lastSyncAttemptAt: connection.lastSyncAttemptAt,
       lastSyncAt: connection.lastSyncAt,
       lastSyncStatus: connection.lastSyncStatus,
       lastSyncError: connection.lastSyncError,
+      lastSyncTrigger: connection.lastSyncTrigger,
+      syncInProgressAt: connection.syncInProgressAt,
       accessTokenExpiresAt: connection.accessTokenExpiresAt,
       refreshTokenExpiresAt: connection.refreshTokenExpiresAt,
       connectedByClerkUserId: connection.connectedByClerkUserId,
     };
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
@@ -271,34 +283,32 @@ export async function listRemotePinterestBoards(householdId: string) {
 }
 
 export async function ensureBoardSubscriptions(householdId: string, boards: PinterestBoard[]) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
     const now = new Date().toISOString();
 
-    sqlite.transaction(() => {
-      for (const board of boards) {
-        db.insert(boardSyncSubscriptions)
-          .values({
-            householdId,
-            pinterestBoardId: board.id,
+    for (const board of boards) {
+      await db.insert(boardSyncSubscriptions)
+        .values({
+          householdId,
+          pinterestBoardId: board.id,
+          boardName: board.name ?? null,
+          syncEnabled: false,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [boardSyncSubscriptions.householdId, boardSyncSubscriptions.pinterestBoardId],
+          set: {
             boardName: board.name ?? null,
-            syncEnabled: false,
-            createdAt: now,
             updatedAt: now,
-          })
-          .onConflictDoUpdate({
-            target: [boardSyncSubscriptions.householdId, boardSyncSubscriptions.pinterestBoardId],
-            set: {
-              boardName: board.name ?? null,
-              updatedAt: now,
-            },
-          })
-          .run();
-      }
-    })();
+          },
+        })
+        .run();
+    }
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
@@ -307,48 +317,50 @@ export async function updatePinterestConnectionSyncStatus(args: {
   status: "success" | "error";
   errorMessage?: string | null;
 }) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    db.update(pinterestAccounts)
+    await db.update(pinterestAccounts)
       .set({
         lastSyncAt: new Date().toISOString(),
         lastSyncStatus: args.status,
         lastSyncError: args.errorMessage ?? null,
+        syncInProgressAt: null,
         connectionStatus: args.status === "success" ? "active" : "reauthorization_required",
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(pinterestAccounts.householdId, args.householdId), eq(pinterestAccounts.provider, "pinterest")))
       .run();
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function markPinterestConnectionHealthy(householdId: string) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    db.update(pinterestAccounts)
+    await db.update(pinterestAccounts)
       .set({
         connectionStatus: "active",
         lastSyncError: null,
+        syncInProgressAt: null,
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(pinterestAccounts.householdId, householdId), eq(pinterestAccounts.provider, "pinterest")))
       .run();
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function getValidPinterestAccessToken(householdId: string) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const connection = db.query.pinterestAccounts.findFirst({
+    const connection = await db.query.pinterestAccounts.findFirst({
       where: (table, { and, eq }) => and(eq(table.householdId, householdId), eq(table.provider, "pinterest")),
-    }).sync();
+    });
 
     if (!connection) {
       throw new Error("Pinterest is not connected for this household.");
@@ -376,7 +388,7 @@ export async function getValidPinterestAccessToken(householdId: string) {
       : connection.refreshTokenEncrypted;
     const now = new Date().toISOString();
 
-    db.update(pinterestAccounts)
+    await db.update(pinterestAccounts)
       .set({
         accessTokenEncrypted,
         refreshTokenEncrypted,
@@ -396,7 +408,7 @@ export async function getValidPinterestAccessToken(householdId: string) {
 
     return refreshed.access_token;
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
@@ -426,19 +438,20 @@ async function refreshPinterestToken(refreshToken: string) {
 }
 
 async function markConnectionStatus(householdId: string, status: ConnectionRow["connectionStatus"], errorMessage: string) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    db.update(pinterestAccounts)
+    await db.update(pinterestAccounts)
       .set({
         connectionStatus: status,
         lastSyncError: errorMessage,
+        syncInProgressAt: null,
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(pinterestAccounts.householdId, householdId), eq(pinterestAccounts.provider, "pinterest")))
       .run();
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 

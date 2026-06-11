@@ -1,8 +1,10 @@
 import fs from "node:fs";
-import path from "node:path";
+
+import { getEnvFilePath as getActiveEnvFilePath, loadAppEnvironment } from "@/src/env";
 
 export function getEnvFilePath(): string {
-  return path.resolve(".env");
+  loadAppEnvironment();
+  return getActiveEnvFilePath();
 }
 
 export function upsertEnvValue(envPath: string, key: string, value: string) {

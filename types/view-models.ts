@@ -1,4 +1,9 @@
-export type PinStatus = "recipe_ready" | "not_extracted" | "extraction_failed" | "needs_review" | "not_recipe";
+export type PinStatus =
+  | "recipe_ready"
+  | "not_extracted"
+  | "extraction_failed"
+  | "needs_review"
+  | "not_recipe";
 
 export type FeedPinCard = {
   recipeId: string;
@@ -23,6 +28,7 @@ export type RecipeReviewAggregate = {
 export type RecipeReviewView = {
   reviewId: string;
   recipeId: string;
+  eventId: string | null;
   recipeTitle: string;
   recipeImageUrl: string | null;
   ratingValue: number;
@@ -34,17 +40,57 @@ export type RecipeReviewView = {
   canDelete: boolean;
 };
 
-export type RecipeHistoryItemView = RecipeReviewView;
-
 export type RecipeHistoryRecipeOption = {
   recipeId: string;
   recipeTitle: string;
   recipeImageUrl: string | null;
 };
 
+export type RecipeHistoryEventView = {
+  eventId: string;
+  recipeId: string;
+  recipeTitle: string;
+  recipeImageUrl: string | null;
+  date: string;
+  isPlanned: boolean;
+  detailText: string | null;
+  review: RecipeReviewView | null;
+  canAddReview: boolean;
+};
+
+export type RecipeHistoryDayView = {
+  date: string;
+  dayNumber: number;
+  inCurrentMonth: boolean;
+  isToday: boolean;
+  isFuture: boolean;
+  events: RecipeHistoryEventView[];
+};
+
 export type RecipeDetailView = {
   recipeId: string;
-  pinId: string;
+  pin: {
+    link: string | null;
+    householdId: string;
+    createdAt: string | null;
+    updatedAt: string;
+    pinterestBoardId: string;
+    boardId: string;
+    description: string | null;
+    rawJson: string;
+    pinId: string;
+    pinterestPinId: string;
+    boardSectionId: string | null;
+    title: string | null;
+    altText: string | null;
+    dominantColor: string | null;
+    note: string | null;
+    parentPinId: string | null;
+    mediaJson: string | null;
+    mediaSourceJson: string | null;
+    creatorJson: string | null;
+    boardOwnerJson: string | null;
+  };
   title: string;
   imageUrl: string | null;
   description: string | null;
@@ -202,8 +248,8 @@ export type RecipeOpsDetail = {
     feedbackId: string;
     extractionId: string | null;
     category: RecipeExtractionFeedbackCategory;
-      note: string;
-      createdAt: string;
+    note: string;
+    createdAt: string;
   }>;
   ingredients: Array<{
     id: string;
@@ -301,6 +347,10 @@ export type HouseholdMemberView = {
 };
 
 export type RecipeHistoryPageView = {
-  items: RecipeHistoryItemView[];
+  month: string;
+  monthLabel: string;
+  previousMonth: string;
+  nextMonth: string;
+  days: RecipeHistoryDayView[];
   recipeOptions: RecipeHistoryRecipeOption[];
 };

@@ -6,7 +6,7 @@ export default function nextConfig(phase: string): NextConfig {
     // Keep dev output separate so agent-run `next build` jobs do not clobber
     // the live dev server's module graph.
     distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
-    serverExternalPackages: ["drizzle-orm", "better-sqlite3"],
+    serverExternalPackages: ["drizzle-orm", "better-sqlite3", "@libsql/client"],
     images: {
       remotePatterns: [
         {

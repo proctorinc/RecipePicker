@@ -5,50 +5,22 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1780713412499,
-      "tag": "0000_easy_raider",
+      "when": 1780872507511,
+      "tag": "0000_glossy_sharon_carter",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "6",
-      "when": 1780763386992,
-      "tag": "0001_low_mongu",
+      "when": 1780941600000,
+      "tag": "0001_tiered_pinterest_sync",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "6",
-      "when": 1780766426537,
-      "tag": "0002_deep_wendigo",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1780767000000,
-      "tag": "0003_steady_lifeforce",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1780768200000,
-      "tag": "0004_sturdy_preview",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1780786694546,
-      "tag": "0005_green_jazinda",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1788810000000,
-      "tag": "0006_tanjiro_chat_threads",
+      "when": 1781200000000,
+      "tag": "0002_recipe_events",
       "breakpoints": true
     }
   ]

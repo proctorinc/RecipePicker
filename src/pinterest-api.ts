@@ -1,6 +1,6 @@
-import dotenv from "dotenv";
+import { loadAppEnvironment } from "@/src/env";
 
-dotenv.config();
+loadAppEnvironment();
 
 const DEFAULT_PAGE_SIZE = 250;
 

@@ -26,6 +26,7 @@ import type {
   RecipePickerRequest,
   RecipePickerResponse,
 } from "@/types/recipe-picker";
+import Image from "next/image";
 
 type RecipePickerProps = {
   initialState: RecipePickerResponse;
@@ -323,11 +324,8 @@ export function RecipePicker({ initialState }: RecipePickerProps) {
                     : "border-transparent bg-stone-50/80",
                 )}
               >
-                <p className="truncate text-sm font-medium text-stone-900">
+                <p className="line-clamp-2 flex-wrap text-sm font-medium text-stone-900">
                   {thread.title}
-                </p>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                  {thread.preview}
                 </p>
               </button>
             ))}
@@ -603,9 +601,26 @@ export function RecipePicker({ initialState }: RecipePickerProps) {
                         entry.recipeSnapshot.length > 0 ? (
                           <div className="text-xs text-muted-foreground">
                             <p className="mb-2 uppercase tracking-[0.24em] text-stone-400">
-                              Linked recipes
+                              Suggested recipes
                             </p>
-                            <div className="flex flex-wrap gap-x-3 gap-y-2">
+                            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
+                              {entry.recipeSnapshot.map((recipe) =>
+                                recipe.imageUrl ? (
+                                  <div
+                                    key={recipe.recipeId}
+                                    className="relative w-20 h-32 flex-shrink-0 overflow-hidden rounded-md"
+                                  >
+                                    <Image
+                                      src={recipe.imageUrl}
+                                      alt={recipe.title}
+                                      fill
+                                      className="object-cover"
+                                    />
+                                  </div>
+                                ) : null,
+                              )}
+                            </div>
+                            {/*<div className="flex flex-wrap gap-x-3 gap-y-2">
                               {entry.recipeSnapshot.map((recipe) => (
                                 <span
                                   key={recipe.recipeId}
@@ -623,7 +638,7 @@ export function RecipePicker({ initialState }: RecipePickerProps) {
                                   ) : null}
                                 </span>
                               ))}
-                            </div>
+                            </div>*/}
                           </div>
                         ) : null}
 

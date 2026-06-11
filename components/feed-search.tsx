@@ -42,7 +42,7 @@ export function FeedSearch({ initialQuery }: { initialQuery: string }) {
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="Search recipes, ingredients, and more"
-          className="h-14 border-white/80 bg-white/90 pl-11 pr-12 text-base"
+          className="h-14 border-white/80 bg-background/90 pl-11 pr-12 text-base"
         />
         {value ? (
           <button

@@ -26,13 +26,18 @@ import {
   syncBoardAction,
 } from "@/lib/actions/board-actions";
 import { disconnectPinterestAction } from "@/lib/actions/operations";
+import { getCurrentUserAccess } from "@/lib/server/access";
 import { requireHouseholdContext } from "@/lib/server/auth";
 import {
   type PinterestConnectionStatus,
   getPinterestConnectionSummary,
 } from "@/lib/server/pinterest";
 import { getBoardSyncOptions } from "@/lib/server/queries";
-import { formatDate } from "@/lib/utils";
+import {
+  formatPinterestAutoSyncFrequency,
+  isPinterestSyncLeaseActive,
+} from "@/lib/server/sync";
+import { formatDate, formatRelativeTimeShort } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -44,14 +49,22 @@ export default async function PinterestSettingsPage({
   const params = (await searchParams) ?? {};
   const oauthError =
     typeof params.oauthError === "string" ? params.oauthError : null;
-  const [boards, household, connection] = await Promise.all([
+  const [boards, household, connection, appAccess] = await Promise.all([
     getBoardSyncOptions(),
     requireHouseholdContext(),
     requireHouseholdContext().then((context) =>
       getPinterestConnectionSummary(context.householdId),
     ),
+    getCurrentUserAccess(),
   ]);
   const syncedBoards = boards.filter((board) => board.syncEnabled);
+  const syncFrequency = formatPinterestAutoSyncFrequency(
+    appAccess.subscriptionTier,
+  );
+  const syncRecency = connection.lastSyncAt
+    ? formatRelativeTimeShort(connection.lastSyncAt)
+    : "No sync run yet";
+  const syncInProgress = isPinterestSyncLeaseActive(connection.syncInProgressAt);
 
   return (
     <div className="space-y-6">
@@ -78,9 +91,16 @@ export default async function PinterestSettingsPage({
               ) : null}
             </div>
             <p className="text-sm text-muted-foreground">
-              Last sync: {formatDate(connection.lastSyncAt)}. Last result:{" "}
-              {connection.lastSyncStatus ?? "No sync run yet"}.
+              Auto-sync frequency: {syncFrequency}.
             </p>
+            <p className="text-sm text-muted-foreground">
+              {connection.lastSyncAt
+                ? `Synced ${syncRecency} (${formatDate(connection.lastSyncAt)}). Last result: ${connection.lastSyncStatus ?? "success"}.`
+                : "No sync run yet."}
+            </p>
+            {syncInProgress ? (
+              <p className="text-sm text-muted-foreground">Sync in progress.</p>
+            ) : null}
             {connection.accessTokenExpiresAt ? (
               <p className="text-sm text-muted-foreground">
                 Access token expires{" "}

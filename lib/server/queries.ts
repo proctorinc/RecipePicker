@@ -1,23 +1,40 @@
 import { clerkClient } from "@clerk/nextjs/server";
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, lt } from "drizzle-orm";
 
-import { getAppAccessContext, resolveFeedCardHref } from "@/lib/server/access";
-import { listHouseholdMembers, requireHouseholdContext } from "@/lib/server/auth";
+import { getCurrentUserAccess, resolveFeedCardHref } from "@/lib/server/access";
+import {
+  listHouseholdMembers,
+  requireHouseholdContext,
+} from "@/lib/server/auth";
 import { openDatabase } from "@/lib/server/database";
 import {
   boardSyncSubscriptions,
   householdBoards,
   householdInvites,
   householdRecipeIngredients,
+  householdRecipeEvents,
   householdRecipeInstructions,
   householdRecipeReviews,
 } from "@/lib/server/db";
-import { getCanonicalIngredientOptionsForHousehold, resolveIngredientSearchQuery } from "@/lib/server/ingredient-normalization";
+import {
+  getCanonicalIngredientOptionsForHousehold,
+  resolveIngredientSearchQuery,
+} from "@/lib/server/ingredient-normalization";
 import { getPinImageUrl } from "@/lib/server/media";
 import { listRemotePinterestBoards } from "@/lib/server/pinterest";
 import { summarizeRecipeOps } from "@/lib/server/recipe-ops-summary";
 import { derivePinStatus } from "@/lib/server/status";
-import { formatDay, parseJsonArray, parseJsonRecord } from "@/lib/utils";
+import {
+  buildCalendarDays,
+  formatDay,
+  formatMonthLabel,
+  getTodayDayString,
+  getTodayMonthString,
+  isValidMonthString,
+  parseJsonArray,
+  parseJsonRecord,
+  shiftMonth,
+} from "@/lib/utils";
 import type {
   BoardSyncSummary,
   CanonicalIngredientOption,
@@ -28,7 +45,8 @@ import type {
   IngredientReviewQueuePageView,
   IngredientReviewSuggestionView,
   RecipeDetailView,
-  RecipeHistoryItemView,
+  RecipeHistoryDayView,
+  RecipeHistoryEventView,
   RecipeHistoryPageView,
   RecipeHistoryRecipeOption,
   RecipeOpsDetail,
@@ -36,77 +54,102 @@ import type {
   RecipeReviewView,
 } from "@/types/view-models";
 
-type DatabaseHandle = ReturnType<typeof openDatabase>["db"];
-type RecipeGraph = ReturnType<typeof getFeedRecipeRows>[number];
+type DatabaseHandle = Awaited<ReturnType<typeof openDatabase>>["db"];
+type RecipeGraph = Awaited<ReturnType<typeof getFeedRecipeRows>>[number];
 
 export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
   const [context, appAccess] = await Promise.all([
     requireHouseholdContext(),
-    getAppAccessContext(),
+    getCurrentUserAccess(),
   ]);
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const rows = getFeedRecipeRows(db, context.householdId);
+    const rows = await getFeedRecipeRows(db, context.householdId);
     const normalizedQuery = searchText?.trim().toLowerCase() ?? "";
-    const ingredientQuery = normalizedQuery ? resolveIngredientSearchQuery(db, context.householdId, normalizedQuery) : null;
+    const ingredientQuery = normalizedQuery
+      ? resolveIngredientSearchQuery(db, context.householdId, normalizedQuery)
+      : null;
 
     return rows
       .map((row) => {
         const card = toFeedCard(row, appAccess.subscriptionTier);
-        const ingredientMatchScore = ingredientQuery ? getIngredientMatchScore(row, ingredientQuery) : 0;
+        const ingredientMatchScore = ingredientQuery
+          ? getIngredientMatchScore(row, ingredientQuery)
+          : 0;
         return {
           ...card,
           ingredientMatchScore,
         };
       })
-      .filter((row) => !normalizedQuery || row.searchText.includes(normalizedQuery) || row.ingredientMatchScore > 0)
+      .filter(
+        (row) =>
+          !normalizedQuery ||
+          row.searchText.includes(normalizedQuery) ||
+          row.ingredientMatchScore > 0,
+      )
       .sort((left, right) => {
         if (right.ingredientMatchScore !== left.ingredientMatchScore) {
           return right.ingredientMatchScore - left.ingredientMatchScore;
         }
 
-        return (right.pin.updatedAt ?? "").localeCompare(left.pin.updatedAt ?? "");
+        return (right.pin.updatedAt ?? "").localeCompare(
+          left.pin.updatedAt ?? "",
+        );
       })
-      .map(({ pin, ingredientMatchScore: _ingredientMatchScore, ...card }) => card);
+      .map(
+        ({ pin, ingredientMatchScore: _ingredientMatchScore, ...card }) => card,
+      );
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
-export async function getRecipeDetail(recipeId: string): Promise<RecipeDetailView | null> {
+export async function getRecipeDetail(
+  recipeId: string,
+): Promise<RecipeDetailView | null> {
   const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const row = db.query.householdRecipes.findFirst({
-      where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
-      with: {
-        pin: {
-          with: {
-            recipeExtractions: {
-              orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
-            },
-          },
-        },
-        recipeInstructions: {
-          with: {
-            ingredients: {
-              orderBy: (table, { asc }) => [asc(table.position)],
-              with: {
-                canonicalIngredient: true,
+    const row = await db.query.householdRecipes
+      .findFirst({
+        where: (table, { and, eq }) =>
+          and(
+            eq(table.recipeId, recipeId),
+            eq(table.householdId, context.householdId),
+          ),
+        with: {
+          pin: {
+            with: {
+              recipeExtractions: {
+                orderBy: (table, { desc: orderDesc }) => [
+                  orderDesc(table.createdAt),
+                ],
               },
             },
-            steps: {
-              orderBy: (table, { asc }) => [asc(table.position)],
+          },
+          recipeInstructions: {
+            with: {
+              ingredients: {
+                orderBy: (table, { asc }) => [asc(table.position)],
+                with: {
+                  canonicalIngredient: true,
+                },
+              },
+              steps: {
+                orderBy: (table, { asc }) => [asc(table.position)],
+              },
+            },
+          },
+          reviews: {
+            orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
+            with: {
+              event: true,
             },
           },
         },
-        reviews: {
-          orderBy: (table, { desc: orderDesc }) => [orderDesc(table.eatenOn), orderDesc(table.createdAt)],
-        },
-      },
-    }).sync();
+      });
 
     if (!row) {
       return null;
@@ -114,22 +157,37 @@ export async function getRecipeDetail(recipeId: string): Promise<RecipeDetailVie
 
     const latestExtraction = row.pin.recipeExtractions[0];
     const reviewerNames = await getReviewerNameMap(context.householdId);
-    const reviews = row.reviews.map((review) => toRecipeReviewView(review, row, reviewerNames, context));
+    const reviews = row.reviews
+      .map((review) => toRecipeReviewView(review, row, reviewerNames, context))
+      .sort(compareReviewsByDate);
     const aggregate = getRecipeReviewAggregate(row.reviews);
 
     return {
       recipeId: row.recipeId,
-      pinId: row.pin.pinterestPinId,
-      title: row.title ?? row.pin.title ?? row.recipeInstructions?.title ?? "Untitled recipe",
-      imageUrl: row.imageUrl ?? row.recipeInstructions?.imageUrl ?? getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
-      description: row.description ?? row.pin.description ?? row.recipeInstructions?.description ?? null,
+      pin: row.pin,
+      title:
+        row.title ??
+        row.pin.title ??
+        row.recipeInstructions?.title ??
+        "Untitled recipe",
+      imageUrl:
+        row.imageUrl ??
+        row.recipeInstructions?.imageUrl ??
+        getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
+      description:
+        row.description ??
+        row.pin.description ??
+        row.recipeInstructions?.description ??
+        null,
       siteName: row.recipeInstructions?.siteName ?? null,
       sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link,
       status: derivePinStatus({
         hasRecipe: Boolean(row.recipeInstructions),
         latestExtractionStatus: latestExtraction?.status,
         latestExtractionLowConfidence: latestExtraction?.lowConfidence,
-        ingredientReviewCount: getIngredientReviewCount(row.recipeInstructions?.ingredients),
+        ingredientReviewCount: getIngredientReviewCount(
+          row.recipeInstructions?.ingredients,
+        ),
       }),
       dominantColor: row.pin.dominantColor,
       yieldText: row.recipeInstructions?.yieldText ?? null,
@@ -151,7 +209,9 @@ export async function getRecipeDetail(recipeId: string): Promise<RecipeDetailVie
           canonicalIngredientId: ingredient.canonicalIngredientId,
           canonicalName: ingredient.canonicalIngredient?.displayName ?? null,
           attributes: parseJsonArray(ingredient.attributesJson),
-          normalizationStatus: toIngredientStatus(ingredient.normalizationStatus),
+          normalizationStatus: toIngredientStatus(
+            ingredient.normalizationStatus,
+          ),
         })) ?? [],
       steps:
         row.recipeInstructions?.steps.map((step) => ({
@@ -164,80 +224,134 @@ export async function getRecipeDetail(recipeId: string): Promise<RecipeDetailVie
         : null,
     };
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
-export async function getRecipeHistoryPage(): Promise<RecipeHistoryPageView> {
+export async function getRecipeHistoryPage(
+  monthParam?: string,
+): Promise<RecipeHistoryPageView> {
   const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
+  const month = isValidMonthString(monthParam ?? "")
+    ? (monthParam as string)
+    : getTodayMonthString();
+  const nextMonth = shiftMonth(month, 1);
 
   try {
-    const rows = db.query.householdRecipeReviews.findMany({
-      where: (table, { eq }) => eq(table.householdId, context.householdId),
-      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.eatenOn), orderDesc(table.createdAt)],
-      with: {
-        recipe: {
-          with: {
-            pin: true,
-            recipeInstructions: true,
-          },
-        },
-      },
-    }).sync();
-
-    const reviewerNames = await getReviewerNameMap(context.householdId);
-    const items = rows.map((review) => toRecipeHistoryItemView(review, reviewerNames, context));
-    const recipeOptions = db.query.householdRecipes.findMany({
-      where: (table, { eq }) => eq(table.householdId, context.householdId),
-      with: {
-        pin: true,
-        recipeInstructions: true,
-      },
-      orderBy: (table, { asc }) => [asc(table.updatedAt)],
-    }).sync()
-      .map((recipe) => ({
-        recipeId: recipe.recipeId,
-        recipeTitle: recipe.title ?? recipe.pin.title ?? recipe.recipeInstructions?.title ?? "Untitled recipe",
-        recipeImageUrl:
-          recipe.imageUrl ??
-          recipe.recipeInstructions?.imageUrl ??
-          getPinImageUrl(recipe.pin.mediaJson, recipe.pin.rawJson),
-      } satisfies RecipeHistoryRecipeOption))
-      .sort((left, right) => left.recipeTitle.localeCompare(right.recipeTitle));
-
-    return { items, recipeOptions };
-  } finally {
-    sqlite.close();
-  }
-}
-
-export async function getRecipeOpsList(searchText?: string): Promise<RecipeOpsListItem[]> {
-  const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
-
-  try {
-    const rows = db.query.householdRecipes.findMany({
-      where: (table, { eq }) => eq(table.householdId, context.householdId),
-      with: {
-        pin: {
-          with: {
-            recipeExtractions: {
-              orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
+    const [eventRows, recipeRows, reviewerNames] = await Promise.all([
+      db.query.householdRecipeEvents.findMany({
+        where: (table, { and, eq, gte, lt }) =>
+          and(
+            eq(table.householdId, context.householdId),
+            gte(table.date, buildMonthStart(month)),
+            lt(table.date, buildMonthStart(nextMonth)),
+          ),
+        orderBy: (table, { asc: orderAsc }) => [
+          orderAsc(table.date),
+          orderAsc(table.createdAt),
+        ],
+        with: {
+          recipe: {
+            with: {
+              pin: true,
+              recipeInstructions: true,
             },
           },
+          review: true,
         },
-        recipeInstructions: {
-          with: {
-            ingredients: {
-              columns: {
-                normalizationStatus: true,
+      }),
+      db.query.householdRecipes.findMany({
+        where: (table, { eq }) => eq(table.householdId, context.householdId),
+        with: {
+          pin: true,
+          recipeInstructions: true,
+        },
+        orderBy: (table, { asc: orderAsc }) => [orderAsc(table.updatedAt)],
+      }),
+      getReviewerNameMap(context.householdId),
+    ]);
+
+    const recipeOptions = recipeRows
+      .map(
+        (recipe) =>
+          ({
+            recipeId: recipe.recipeId,
+            recipeTitle:
+              recipe.title ??
+              recipe.pin.title ??
+              recipe.recipeInstructions?.title ??
+              "Untitled recipe",
+            recipeImageUrl:
+              recipe.imageUrl ??
+              recipe.recipeInstructions?.imageUrl ??
+              getPinImageUrl(recipe.pin.mediaJson, recipe.pin.rawJson),
+          }) satisfies RecipeHistoryRecipeOption,
+      )
+      .sort((left, right) => left.recipeTitle.localeCompare(right.recipeTitle));
+    const eventsByDate = new Map<string, RecipeHistoryEventView[]>();
+
+    for (const event of eventRows) {
+      const eventView = toRecipeHistoryEventView(event, reviewerNames, context);
+      const existing = eventsByDate.get(event.date) ?? [];
+      existing.push(eventView);
+      eventsByDate.set(event.date, existing);
+    }
+
+    const today = getTodayDayString();
+    const days: RecipeHistoryDayView[] = buildCalendarDays(month).map((day) => ({
+      date: day.date,
+      dayNumber: day.dayNumber,
+      inCurrentMonth: day.inCurrentMonth,
+      isToday: day.date === today,
+      isFuture: day.date > today,
+      events: eventsByDate.get(day.date) ?? [],
+    }));
+
+    return {
+      month,
+      monthLabel: formatMonthLabel(month),
+      previousMonth: shiftMonth(month, -1),
+      nextMonth,
+      days,
+      recipeOptions,
+    };
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function getRecipeOpsList(
+  searchText?: string,
+): Promise<RecipeOpsListItem[]> {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const rows = await db.query.householdRecipes
+      .findMany({
+        where: (table, { eq }) => eq(table.householdId, context.householdId),
+        with: {
+          pin: {
+            with: {
+              recipeExtractions: {
+                orderBy: (table, { desc: orderDesc }) => [
+                  orderDesc(table.createdAt),
+                ],
+              },
+            },
+          },
+          recipeInstructions: {
+            with: {
+              ingredients: {
+                columns: {
+                  normalizationStatus: true,
+                },
               },
             },
           },
         },
-      },
-    }).sync();
+      });
     const normalizedQuery = searchText?.trim().toLowerCase() ?? "";
 
     return rows
@@ -246,75 +360,110 @@ export async function getRecipeOpsList(searchText?: string): Promise<RecipeOpsLi
         return {
           recipeId: row.recipeId,
           pinId: row.pin.pinterestPinId,
-          title: row.title ?? row.pin.title ?? row.recipeInstructions?.title ?? "Untitled recipe",
+          title:
+            row.title ??
+            row.pin.title ??
+            row.recipeInstructions?.title ??
+            "Untitled recipe",
           boardId: row.pin.pinterestBoardId,
           status: derivePinStatus({
             hasRecipe: Boolean(row.recipeInstructions),
             latestExtractionStatus: latestExtraction?.status,
             latestExtractionLowConfidence: latestExtraction?.lowConfidence,
-            ingredientReviewCount: getIngredientReviewCount(row.recipeInstructions?.ingredients),
+            ingredientReviewCount: getIngredientReviewCount(
+              row.recipeInstructions?.ingredients,
+            ),
           }),
           updatedAt: row.updatedAt,
-          imageUrl: row.imageUrl ?? row.recipeInstructions?.imageUrl ?? getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
+          imageUrl:
+            row.imageUrl ??
+            row.recipeInstructions?.imageUrl ??
+            getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
           sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link,
         } satisfies RecipeOpsListItem;
       })
-      .filter((row) => !normalizedQuery || `${row.title} ${row.boardId} ${row.sourceUrl ?? ""}`.toLowerCase().includes(normalizedQuery))
-      .sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
+      .filter(
+        (row) =>
+          !normalizedQuery ||
+          `${row.title} ${row.boardId} ${row.sourceUrl ?? ""}`
+            .toLowerCase()
+            .includes(normalizedQuery),
+      )
+      .sort((left, right) =>
+        (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""),
+      );
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
-export async function getRecipeOpsDetail(recipeId: string): Promise<RecipeOpsDetail | null> {
+export async function getRecipeOpsDetail(
+  recipeId: string,
+): Promise<RecipeOpsDetail | null> {
   const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const row = db.query.householdRecipes.findFirst({
-      where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
-      with: {
-        pin: {
-          with: {
-            recipeExtractions: {
-              orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
-              with: {
-                attempts: {
-                  orderBy: (table, { desc: orderDesc }) => [orderDesc(table.qualityScore), orderDesc(table.createdAt)],
-                },
-                feedback: {
-                  orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
-                },
-              },
-            },
-            recipeSources: {
-              orderBy: (table, { desc: orderDesc }) => [orderDesc(table.fetchedAt)],
-            },
-          },
-        },
-        recipeInstructions: {
-          with: {
-            ingredients: {
-              orderBy: (table, { asc }) => [asc(table.position)],
-              with: {
-                canonicalIngredient: {
-                  with: {
-                    parentCanonicalIngredient: true,
+    const row = await db.query.householdRecipes
+      .findFirst({
+        where: (table, { and, eq }) =>
+          and(
+            eq(table.recipeId, recipeId),
+            eq(table.householdId, context.householdId),
+          ),
+        with: {
+          pin: {
+            with: {
+              recipeExtractions: {
+                orderBy: (table, { desc: orderDesc }) => [
+                  orderDesc(table.createdAt),
+                ],
+                with: {
+                  attempts: {
+                    orderBy: (table, { desc: orderDesc }) => [
+                      orderDesc(table.qualityScore),
+                      orderDesc(table.createdAt),
+                    ],
+                  },
+                  feedback: {
+                    orderBy: (table, { desc: orderDesc }) => [
+                      orderDesc(table.createdAt),
+                    ],
                   },
                 },
               },
-            },
-            steps: {
-              orderBy: (table, { asc }) => [asc(table.position)],
+              recipeSources: {
+                orderBy: (table, { desc: orderDesc }) => [
+                  orderDesc(table.fetchedAt),
+                ],
+              },
             },
           },
+          recipeInstructions: {
+            with: {
+              ingredients: {
+                orderBy: (table, { asc }) => [asc(table.position)],
+                with: {
+                  canonicalIngredient: {
+                    with: {
+                      parentCanonicalIngredient: true,
+                    },
+                  },
+                },
+              },
+              steps: {
+                orderBy: (table, { asc }) => [asc(table.position)],
+              },
+            },
+          },
+          feedback: true,
+          extractionFeedback: {
+            orderBy: (table, { desc: orderDesc }) => [
+              orderDesc(table.createdAt),
+            ],
+          },
         },
-        feedback: true,
-        extractionFeedback: {
-          orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
-        },
-      },
-    }).sync();
+      });
 
     if (!row) {
       return null;
@@ -322,10 +471,13 @@ export async function getRecipeOpsDetail(recipeId: string): Promise<RecipeOpsDet
 
     const latestExtraction = row.pin.recipeExtractions[0];
     const latestSource = row.pin.recipeSources[0];
-    const ingredientReviewCount = getIngredientReviewCount(row.recipeInstructions?.ingredients);
-    const hasRecipeContent = Boolean(row.recipeInstructions) && (
-      (row.recipeInstructions?.ingredients.length ?? 0) > 0 || (row.recipeInstructions?.steps.length ?? 0) > 0
+    const ingredientReviewCount = getIngredientReviewCount(
+      row.recipeInstructions?.ingredients,
     );
+    const hasRecipeContent =
+      Boolean(row.recipeInstructions) &&
+      ((row.recipeInstructions?.ingredients.length ?? 0) > 0 ||
+        (row.recipeInstructions?.steps.length ?? 0) > 0);
     const status = derivePinStatus({
       hasRecipe: Boolean(row.recipeInstructions),
       latestExtractionStatus: latestExtraction?.status,
@@ -345,10 +497,17 @@ export async function getRecipeOpsDetail(recipeId: string): Promise<RecipeOpsDet
     return {
       recipeId: row.recipeId,
       pinId: row.pin.pinterestPinId,
-      title: row.title ?? row.pin.title ?? row.recipeInstructions?.title ?? "Untitled recipe",
+      title:
+        row.title ??
+        row.pin.title ??
+        row.recipeInstructions?.title ??
+        "Untitled recipe",
       boardId: row.pin.pinterestBoardId,
       status,
-      imageUrl: row.imageUrl ?? row.recipeInstructions?.imageUrl ?? getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
+      imageUrl:
+        row.imageUrl ??
+        row.recipeInstructions?.imageUrl ??
+        getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
       sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link,
       latestPagePreviewDataUrl: latestSource?.pagePreviewDataUrl ?? null,
       recipeSummary:
@@ -374,7 +533,9 @@ export async function getRecipeOpsDetail(recipeId: string): Promise<RecipeOpsDet
       latestConfidence: latestExtraction?.confidence ?? null,
       latestLowConfidence: latestExtraction?.lowConfidence ?? false,
       latestFailureReason: latestExtraction?.failureReason ?? null,
-      latestQualitySignals: parseJsonRecord(latestExtraction?.qualitySignalsJson),
+      latestQualitySignals: parseJsonRecord(
+        latestExtraction?.qualitySignalsJson,
+      ),
       latestExtractionWarnings: parseJsonArray(latestExtraction?.warningsJson),
       latestExtractionPayload: parseJsonRecord(latestExtraction?.payloadJson),
       recipeFeedback: row.feedback
@@ -388,7 +549,8 @@ export async function getRecipeOpsDetail(recipeId: string): Promise<RecipeOpsDet
       latestRunFeedback: row.extractionFeedback.map((feedback) => ({
         feedbackId: feedback.feedbackId,
         extractionId: feedback.extractionId,
-        category: feedback.category as RecipeOpsDetail["latestRunFeedback"][number]["category"],
+        category:
+          feedback.category as RecipeOpsDetail["latestRunFeedback"][number]["category"],
         note: feedback.note,
         createdAt: feedback.createdAt,
       })),
@@ -402,8 +564,11 @@ export async function getRecipeOpsDetail(recipeId: string): Promise<RecipeOpsDet
           notes: ingredient.notes,
           canonicalIngredientId: ingredient.canonicalIngredientId,
           canonicalName: ingredient.canonicalIngredient?.displayName ?? null,
-          parentCanonicalIngredientId: ingredient.canonicalIngredient?.parentCanonicalIngredientId ?? null,
-          parentCanonicalName: ingredient.canonicalIngredient?.parentCanonicalIngredient?.displayName ?? null,
+          parentCanonicalIngredientId:
+            ingredient.canonicalIngredient?.parentCanonicalIngredientId ?? null,
+          parentCanonicalName:
+            ingredient.canonicalIngredient?.parentCanonicalIngredient
+              ?.displayName ?? null,
           ingredientKind:
             ingredient.canonicalIngredient?.ingredientKind === "family" ||
             ingredient.canonicalIngredient?.ingredientKind === "base" ||
@@ -413,7 +578,9 @@ export async function getRecipeOpsDetail(recipeId: string): Promise<RecipeOpsDet
           attributes: parseJsonArray(ingredient.attributesJson),
           matchConfidence: ingredient.matchConfidence,
           matchedBy: ingredient.matchedBy,
-          normalizationStatus: toIngredientStatus(ingredient.normalizationStatus),
+          normalizationStatus: toIngredientStatus(
+            ingredient.normalizationStatus,
+          ),
         })) ?? [],
       steps:
         row.recipeInstructions?.steps.map((step) => ({
@@ -453,10 +620,16 @@ export async function getRecipeOpsDetail(recipeId: string): Promise<RecipeOpsDet
         warnings: parseJsonArray(extraction.warningsJson),
         qualitySignals: parseJsonRecord(extraction.qualitySignalsJson),
         payload: parseJsonRecord(extraction.payloadJson),
-        summary: describeExtractionSummary(extraction.status, extraction.failureReason, extraction.lowConfidence, extraction.method),
+        summary: describeExtractionSummary(
+          extraction.status,
+          extraction.failureReason,
+          extraction.lowConfidence,
+          extraction.method,
+        ),
         feedback: extraction.feedback.map((feedback) => ({
           feedbackId: feedback.feedbackId,
-          category: feedback.category as RecipeOpsDetail["history"][number]["feedback"][number]["category"],
+          category:
+            feedback.category as RecipeOpsDetail["history"][number]["feedback"][number]["category"],
           note: feedback.note,
           createdAt: feedback.createdAt,
         })),
@@ -479,56 +652,71 @@ export async function getRecipeOpsDetail(recipeId: string): Promise<RecipeOpsDet
       })),
     };
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function getBoardSummaries(): Promise<BoardSyncSummary[]> {
   const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const syncedBoardRows = db.query.householdBoards.findMany({
-      where: (table, { eq }) => eq(table.householdId, context.householdId),
-      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.lastSyncedAt)],
-    }).sync();
-    const subscriptionRows = db.query.boardSyncSubscriptions.findMany({
-      where: (table, { eq }) => eq(table.householdId, context.householdId),
-      orderBy: (table, { asc }) => [asc(table.boardName)],
-    }).sync();
-    const recipeRows = db.query.householdRecipes.findMany({
-      where: (table, { eq }) => eq(table.householdId, context.householdId),
-      with: {
-        pin: {
-          with: {
-            recipeExtractions: {
-              orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
+    const syncedBoardRows = await db.query.householdBoards
+      .findMany({
+        where: (table, { eq }) => eq(table.householdId, context.householdId),
+        orderBy: (table, { desc: orderDesc }) => [
+          orderDesc(table.lastSyncedAt),
+        ],
+      });
+    const subscriptionRows = await db.query.boardSyncSubscriptions
+      .findMany({
+        where: (table, { eq }) => eq(table.householdId, context.householdId),
+        orderBy: (table, { asc }) => [asc(table.boardName)],
+      });
+    const recipeRows = await db.query.householdRecipes
+      .findMany({
+        where: (table, { eq }) => eq(table.householdId, context.householdId),
+        with: {
+          pin: {
+            with: {
+              recipeExtractions: {
+                orderBy: (table, { desc: orderDesc }) => [
+                  orderDesc(table.createdAt),
+                ],
+              },
             },
           },
-        },
-        recipeInstructions: {
-          with: {
-            ingredients: {
-              columns: {
-                normalizationStatus: true,
+          recipeInstructions: {
+            with: {
+              ingredients: {
+                columns: {
+                  normalizationStatus: true,
+                },
               },
             },
           },
         },
-      },
-    }).sync();
+      });
 
-    const syncedBoardById = new Map(syncedBoardRows.map((board) => [board.pinterestBoardId, board]));
+    const syncedBoardById = new Map(
+      syncedBoardRows.map((board) => [board.pinterestBoardId, board]),
+    );
 
     return subscriptionRows.map((subscription) => {
       const syncedBoard = syncedBoardById.get(subscription.pinterestBoardId);
-      const boardRecipes = recipeRows.filter((recipe) => recipe.pin.pinterestBoardId === subscription.pinterestBoardId);
+      const boardRecipes = recipeRows.filter(
+        (recipe) =>
+          recipe.pin.pinterestBoardId === subscription.pinterestBoardId,
+      );
       const statuses = boardRecipes.map((recipe) =>
         derivePinStatus({
           hasRecipe: Boolean(recipe.recipeInstructions),
           latestExtractionStatus: recipe.pin.recipeExtractions[0]?.status,
-          latestExtractionLowConfidence: recipe.pin.recipeExtractions[0]?.lowConfidence,
-          ingredientReviewCount: getIngredientReviewCount(recipe.recipeInstructions?.ingredients),
+          latestExtractionLowConfidence:
+            recipe.pin.recipeExtractions[0]?.lowConfidence,
+          ingredientReviewCount: getIngredientReviewCount(
+            recipe.recipeInstructions?.ingredients,
+          ),
         }),
       );
 
@@ -537,22 +725,28 @@ export async function getBoardSummaries(): Promise<BoardSyncSummary[]> {
         name: syncedBoard?.name ?? subscription.boardName,
         syncEnabled: subscription.syncEnabled,
         pinCount: boardRecipes.length,
-        recipeCount: statuses.filter((status) => status === "recipe_ready").length,
-        pendingCount: statuses.filter((status) => status === "not_extracted").length,
-        failedCount: statuses.filter((status) => status === "extraction_failed").length,
-        reviewCount: statuses.filter((status) => status === "needs_review").length,
+        recipeCount: statuses.filter((status) => status === "recipe_ready")
+          .length,
+        pendingCount: statuses.filter((status) => status === "not_extracted")
+          .length,
+        failedCount: statuses.filter((status) => status === "extraction_failed")
+          .length,
+        reviewCount: statuses.filter((status) => status === "needs_review")
+          .length,
         lastSyncedAt: syncedBoard?.lastSyncedAt ?? null,
       } satisfies BoardSyncSummary;
     });
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function getBoardSyncOptions(): Promise<BoardSyncSummary[]> {
   const context = await requireHouseholdContext();
   const storedBoards = await getBoardSummaries();
-  const storedById = new Map(storedBoards.map((board) => [board.boardId, board]));
+  const storedById = new Map(
+    storedBoards.map((board) => [board.boardId, board]),
+  );
 
   let remoteBoards: Array<{ id: string; name?: string | null }> = [];
 
@@ -601,36 +795,49 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   return {
     totalPins: cards.length,
     totalRecipes: cards.filter((card) => card.status === "recipe_ready").length,
-    pendingRecipes: cards.filter((card) => card.status === "not_extracted").length,
-    failedRecipes: cards.filter((card) => card.status === "extraction_failed").length,
+    pendingRecipes: cards.filter((card) => card.status === "not_extracted")
+      .length,
+    failedRecipes: cards.filter((card) => card.status === "extraction_failed")
+      .length,
     reviewNeeded: cards.filter((card) => card.status === "needs_review").length,
     boardsTracked: boardSummaries.length,
   };
 }
 
 export async function getLatestIssues(limit = 8) {
-  return (await getRecipeOpsList()).filter((item) => item.status !== "recipe_ready").slice(0, limit);
+  return (await getRecipeOpsList())
+    .filter((item) => item.status !== "recipe_ready")
+    .slice(0, limit);
 }
 
-export async function getRecipeHouseholdPinId(recipeId: string): Promise<string | null> {
+export async function getRecipeHouseholdPinId(
+  recipeId: string,
+): Promise<string | null> {
   const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const row = db.query.householdRecipes.findFirst({
-      where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
-      columns: {
-        pinId: true,
-      },
-    }).sync();
+    const row = await db.query.householdRecipes
+      .findFirst({
+        where: (table, { and, eq }) =>
+          and(
+            eq(table.recipeId, recipeId),
+            eq(table.householdId, context.householdId),
+          ),
+        columns: {
+          pinId: true,
+        },
+      });
 
     return row?.pinId ?? null;
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
-export async function getHouseholdMembersView(): Promise<HouseholdMemberView[]> {
+export async function getHouseholdMembersView(): Promise<
+  HouseholdMemberView[]
+> {
   const context = await requireHouseholdContext();
   const members = await listHouseholdMembers(context.householdId);
 
@@ -644,92 +851,113 @@ export async function getHouseholdMembersView(): Promise<HouseholdMemberView[]> 
 
 export async function getLatestInvite() {
   const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    return db.query.householdInvites.findFirst({
-      where: (table, { and, eq, isNull, gt }) =>
-        and(
-          eq(table.householdId, context.householdId),
-          isNull(table.consumedAt),
-          gt(table.expiresAt, new Date().toISOString()),
-        ),
-      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
-    }).sync();
+    return await db.query.householdInvites
+      .findFirst({
+        where: (table, { and, eq, isNull, gt }) =>
+          and(
+            eq(table.householdId, context.householdId),
+            isNull(table.consumedAt),
+            gt(table.expiresAt, new Date().toISOString()),
+          ),
+        orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
+      });
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
-export async function getCanonicalIngredientOptions(): Promise<CanonicalIngredientOption[]> {
+export async function getCanonicalIngredientOptions(): Promise<
+  CanonicalIngredientOption[]
+> {
   const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
     return getCanonicalIngredientOptionsForHousehold(db, context.householdId);
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
-export async function getIngredientReviewQueue(page = 1, pageSize = 20, recipeId?: string): Promise<IngredientReviewQueuePageView> {
+export async function getIngredientReviewQueue(
+  page = 1,
+  pageSize = 20,
+  recipeId?: string,
+): Promise<IngredientReviewQueuePageView> {
   const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const normalizedPageSize = Number.isInteger(pageSize) ? Math.min(Math.max(pageSize, 1), 100) : 20;
-    const totalCount =
-      db
-        .select({ value: count() })
-        .from(householdRecipeIngredients)
-        .where(
+    const normalizedPageSize = Number.isInteger(pageSize)
+      ? Math.min(Math.max(pageSize, 1), 100)
+      : 20;
+    const totalCount = (
+      await db.query.householdRecipeIngredients.findMany({
+        where: (table, { and, eq }) =>
           and(
-            eq(householdRecipeIngredients.householdId, context.householdId),
-            eq(householdRecipeIngredients.normalizationStatus, "needs_review"),
-            recipeId ? eq(householdRecipeIngredients.recipeId, recipeId) : undefined,
+            eq(table.householdId, context.householdId),
+            eq(table.normalizationStatus, "needs_review"),
+            recipeId ? eq(table.recipeId, recipeId) : undefined,
           ),
-        )
-        .get()?.value ?? 0;
-    const totalPages = totalCount === 0 ? 0 : Math.ceil(totalCount / normalizedPageSize);
-    const currentPage = totalPages === 0 ? 1 : Math.min(Math.max(Math.trunc(page) || 1, 1), totalPages);
-    const offset = (currentPage - 1) * normalizedPageSize;
-    const rows = db.query.householdRecipeIngredients.findMany({
-      where: (table, { and, eq }) =>
-        and(
-          eq(table.householdId, context.householdId),
-          eq(table.normalizationStatus, "needs_review"),
-          recipeId ? eq(table.recipeId, recipeId) : undefined,
-        ),
-      orderBy: (table, { asc }) => [asc(table.recipeId), asc(table.position)],
-      limit: normalizedPageSize,
-      offset,
-      with: {
-        canonicalIngredient: {
-          with: {
-            parentCanonicalIngredient: true,
-          },
+        columns: {
+          ingredientId: true,
         },
-        recipeInstructions: {
-          with: {
-            recipe: {
-              with: {
-                pin: true,
+      })
+    ).length;
+    const totalPages =
+      totalCount === 0 ? 0 : Math.ceil(totalCount / normalizedPageSize);
+    const currentPage =
+      totalPages === 0
+        ? 1
+        : Math.min(Math.max(Math.trunc(page) || 1, 1), totalPages);
+    const offset = (currentPage - 1) * normalizedPageSize;
+    const rows = await db.query.householdRecipeIngredients
+      .findMany({
+        where: (table, { and, eq }) =>
+          and(
+            eq(table.householdId, context.householdId),
+            eq(table.normalizationStatus, "needs_review"),
+            recipeId ? eq(table.recipeId, recipeId) : undefined,
+          ),
+        orderBy: (table, { asc }) => [asc(table.recipeId), asc(table.position)],
+        limit: normalizedPageSize,
+        offset,
+        with: {
+          canonicalIngredient: {
+            with: {
+              parentCanonicalIngredient: true,
+            },
+          },
+          recipeInstructions: {
+            with: {
+              recipe: {
+                with: {
+                  pin: true,
+                },
               },
             },
           },
         },
-      },
-    }).sync();
+      });
 
     const occurrenceCountByPhrase = new Map<string, number>();
 
     for (const ingredient of rows) {
-      const key = ingredient.normalizedIngredientPhrase ?? ingredient.originalText;
-      occurrenceCountByPhrase.set(key, (occurrenceCountByPhrase.get(key) ?? 0) + 1);
+      const key =
+        ingredient.normalizedIngredientPhrase ?? ingredient.originalText;
+      occurrenceCountByPhrase.set(
+        key,
+        (occurrenceCountByPhrase.get(key) ?? 0) + 1,
+      );
     }
 
     const items = rows.map((ingredient) => {
-      const aiSuggestions = parseIngredientReviewSuggestions(ingredient.aiSuggestionsJson);
+      const aiSuggestions = parseIngredientReviewSuggestions(
+        ingredient.aiSuggestionsJson,
+      );
       const preferredSuggestion = aiSuggestions[0];
 
       return {
@@ -743,13 +971,27 @@ export async function getIngredientReviewQueue(page = 1, pageSize = 20, recipeId
         originalText: ingredient.originalText,
         parsedIngredientText: ingredient.ingredientText,
         normalizedIngredientPhrase: ingredient.normalizedIngredientPhrase,
-        suggestedCanonicalIngredientId: preferredSuggestion?.canonicalIngredientId ?? ingredient.canonicalIngredientId,
-        suggestedCanonicalName: preferredSuggestion?.canonicalName ?? ingredient.canonicalIngredient?.displayName ?? null,
+        suggestedCanonicalIngredientId:
+          preferredSuggestion?.canonicalIngredientId ??
+          ingredient.canonicalIngredientId,
+        suggestedCanonicalName:
+          preferredSuggestion?.canonicalName ??
+          ingredient.canonicalIngredient?.displayName ??
+          null,
         suggestedParentCanonicalIngredientId:
-          preferredSuggestion?.parentCanonicalIngredientId ?? ingredient.canonicalIngredient?.parentCanonicalIngredientId ?? null,
+          preferredSuggestion?.parentCanonicalIngredientId ??
+          ingredient.canonicalIngredient?.parentCanonicalIngredientId ??
+          null,
         suggestedParentCanonicalName:
-          preferredSuggestion?.parentCanonicalName ?? ingredient.canonicalIngredient?.parentCanonicalIngredient?.displayName ?? null,
-        suggestedAction: preferredSuggestion?.action ?? (ingredient.canonicalIngredientId ? "match_existing" : "keep_unresolved"),
+          preferredSuggestion?.parentCanonicalName ??
+          ingredient.canonicalIngredient?.parentCanonicalIngredient
+            ?.displayName ??
+          null,
+        suggestedAction:
+          preferredSuggestion?.action ??
+          (ingredient.canonicalIngredientId
+            ? "match_existing"
+            : "keep_unresolved"),
         suggestedIngredientKind:
           preferredSuggestion?.ingredientKind ??
           (ingredient.canonicalIngredient?.ingredientKind === "family" ||
@@ -757,12 +999,19 @@ export async function getIngredientReviewQueue(page = 1, pageSize = 20, recipeId
           ingredient.canonicalIngredient?.ingredientKind === "leaf"
             ? ingredient.canonicalIngredient.ingredientKind
             : null),
-        suggestedAttributes: preferredSuggestion?.attributes ?? parseJsonArray(ingredient.attributesJson),
+        suggestedAttributes:
+          preferredSuggestion?.attributes ??
+          parseJsonArray(ingredient.attributesJson),
         matchConfidence: ingredient.matchConfidence,
         matchedBy: ingredient.matchedBy,
         aiSuggestions,
-        occurrenceCount: occurrenceCountByPhrase.get(ingredient.normalizedIngredientPhrase ?? ingredient.originalText) ?? 1,
-        sourceUrl: ingredient.recipeInstructions.canonicalUrl ?? ingredient.recipeInstructions.recipe.pin.link,
+        occurrenceCount:
+          occurrenceCountByPhrase.get(
+            ingredient.normalizedIngredientPhrase ?? ingredient.originalText,
+          ) ?? 1,
+        sourceUrl:
+          ingredient.recipeInstructions.canonicalUrl ??
+          ingredient.recipeInstructions.recipe.pin.link,
       };
     });
 
@@ -774,14 +1023,11 @@ export async function getIngredientReviewQueue(page = 1, pageSize = 20, recipeId
       totalPages,
     };
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
-function toFeedCard(
-  row: RecipeGraph,
-  subscriptionTier: "free" | "premium",
-) {
+function toFeedCard(row: RecipeGraph, subscriptionTier: "free" | "premium") {
   const latestExtraction = row.pin.recipeExtractions[0];
   const ingredientText = row.recipeInstructions?.ingredients
     .map((ingredient) =>
@@ -799,8 +1045,15 @@ function toFeedCard(
   return {
     recipeId: row.recipeId,
     pinId: row.pin.pinterestPinId,
-    title: row.title ?? row.pin.title ?? row.recipeInstructions?.title ?? "Untitled recipe",
-    imageUrl: row.imageUrl ?? row.recipeInstructions?.imageUrl ?? getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
+    title:
+      row.title ??
+      row.pin.title ??
+      row.recipeInstructions?.title ??
+      "Untitled recipe",
+    imageUrl:
+      row.imageUrl ??
+      row.recipeInstructions?.imageUrl ??
+      getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
     dominantColor: row.pin.dominantColor,
     destinationHref: resolveFeedCardHref({
       recipeId: row.recipeId,
@@ -813,7 +1066,9 @@ function toFeedCard(
       hasRecipe: Boolean(row.recipeInstructions),
       latestExtractionStatus: latestExtraction?.status,
       latestExtractionLowConfidence: latestExtraction?.lowConfidence,
-      ingredientReviewCount: getIngredientReviewCount(row.recipeInstructions?.ingredients),
+      ingredientReviewCount: getIngredientReviewCount(
+        row.recipeInstructions?.ingredients,
+      ),
     }),
     hasRecipe: Boolean(row.recipeInstructions),
     averageRating: aggregate.averageRating,
@@ -832,45 +1087,52 @@ function toFeedCard(
       .filter(Boolean)
       .join(" ")
       .toLowerCase(),
-      pin: row.pin,
+    pin: row.pin,
   };
 }
 
-function getFeedRecipeRows(db: DatabaseHandle, householdId: string) {
-  return db.query.householdRecipes.findMany({
-    where: (table, { eq }) => eq(table.householdId, householdId),
-    with: {
-      pin: {
-        with: {
-          recipeExtractions: {
-            orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
-          },
-        },
-      },
-      recipeInstructions: {
-        with: {
-          ingredients: {
-            orderBy: (table, { asc }) => [asc(table.position)],
-            with: {
-              canonicalIngredient: true,
+async function getFeedRecipeRows(db: DatabaseHandle, householdId: string) {
+  return await db.query.householdRecipes
+    .findMany({
+      where: (table, { eq }) => eq(table.householdId, householdId),
+      with: {
+        pin: {
+          with: {
+            recipeExtractions: {
+              orderBy: (table, { desc: orderDesc }) => [
+                orderDesc(table.createdAt),
+              ],
             },
           },
         },
-      },
-      reviews: {
-        columns: {
-          reviewId: true,
-          ratingValue: true,
+        recipeInstructions: {
+          with: {
+            ingredients: {
+              orderBy: (table, { asc }) => [asc(table.position)],
+              with: {
+                canonicalIngredient: true,
+              },
+            },
+          },
+        },
+        reviews: {
+          columns: {
+            reviewId: true,
+            ratingValue: true,
+          },
         },
       },
-    },
-  }).sync();
+    });
 }
 
 function getIngredientReviewCount(
   ingredients: Array<{ normalizationStatus: string }> | null | undefined,
 ) {
-  return ingredients?.filter((ingredient) => ingredient.normalizationStatus === "needs_review").length ?? 0;
+  return (
+    ingredients?.filter(
+      (ingredient) => ingredient.normalizationStatus === "needs_review",
+    ).length ?? 0
+  );
 }
 
 function describeExtractionSummary(
@@ -905,13 +1167,21 @@ function getIngredientMatchScore(
   let bestScore = 0;
 
   for (const ingredient of row.recipeInstructions?.ingredients ?? []) {
-    if (!ingredient.canonicalIngredientId || !query.searchCanonicalIngredientIds.includes(ingredient.canonicalIngredientId)) {
+    if (
+      !ingredient.canonicalIngredientId ||
+      !query.searchCanonicalIngredientIds.includes(
+        ingredient.canonicalIngredientId,
+      )
+    ) {
       continue;
     }
 
     const ingredientAttributes = parseJsonArray(ingredient.attributesJson);
-    const attributeMatch = query.attributes.every((attribute) => ingredientAttributes.includes(attribute));
-    const exactCanonicalMatch = ingredient.canonicalIngredientId === query.canonicalIngredientId;
+    const attributeMatch = query.attributes.every((attribute) =>
+      ingredientAttributes.includes(attribute),
+    );
+    const exactCanonicalMatch =
+      ingredient.canonicalIngredientId === query.canonicalIngredientId;
     const score = exactCanonicalMatch
       ? query.attributes.length === 0 || attributeMatch
         ? 4
@@ -955,7 +1225,10 @@ async function getReviewerNameMap(householdId: string) {
     members.map(async (member) => {
       try {
         const user = await client.users.getUser(member.clerkUserId);
-        return [member.clerkUserId, formatReviewerName(user.firstName, user.lastName, user.username)] as const;
+        return [
+          member.clerkUserId,
+          formatReviewerName(user.firstName, user.lastName, user.username),
+        ] as const;
       } catch {
         return [member.clerkUserId, "Household member"] as const;
       }
@@ -969,10 +1242,15 @@ function toRecipeReviewView(
   review: {
     reviewId: string;
     recipeId: string;
+    eventId: string | null;
     reviewedByClerkUserId: string | null;
     ratingValue: number;
     eatenOn: string | null;
     note: string | null;
+    event?: {
+      eventId: string;
+      date: string;
+    } | null;
   },
   recipe: {
     recipeId: string;
@@ -991,17 +1269,25 @@ function toRecipeReviewView(
   reviewerNames: Map<string, string>,
   context: Awaited<ReturnType<typeof requireHouseholdContext>>,
 ): RecipeReviewView {
-  const recipeTitle = recipe.title ?? recipe.pin.title ?? recipe.recipeInstructions?.title ?? "Untitled recipe";
-  const recipeImageUrl = recipe.imageUrl ?? recipe.recipeInstructions?.imageUrl ?? getPinImageUrl(recipe.pin.mediaJson, recipe.pin.rawJson);
+  const recipeTitle =
+    recipe.title ??
+    recipe.pin.title ??
+    recipe.recipeInstructions?.title ??
+    "Untitled recipe";
+  const recipeImageUrl =
+    recipe.imageUrl ??
+    recipe.recipeInstructions?.imageUrl ??
+    getPinImageUrl(recipe.pin.mediaJson, recipe.pin.rawJson);
   const canManage = canManageReview(review.reviewedByClerkUserId, context);
 
   return {
     reviewId: review.reviewId,
     recipeId: recipe.recipeId,
+    eventId: review.eventId,
     recipeTitle,
     recipeImageUrl,
     ratingValue: review.ratingValue,
-    eatenOn: review.eatenOn,
+    eatenOn: review.event?.date ?? review.eatenOn,
     note: review.note,
     reviewerName: getReviewerName(review.reviewedByClerkUserId, reviewerNames),
     reviewerClerkUserId: review.reviewedByClerkUserId,
@@ -1010,33 +1296,99 @@ function toRecipeReviewView(
   };
 }
 
-function toRecipeHistoryItemView(
-  review: {
-    reviewId: string;
+function toRecipeHistoryEventView(
+  event: {
+    eventId: string;
     recipeId: string;
-    reviewedByClerkUserId: string | null;
-    ratingValue: number;
-    eatenOn: string | null;
-    note: string | null;
+    date: string;
     recipe: {
       recipeId: string;
       title: string | null;
       imageUrl: string | null;
+      description: string | null;
       pin: {
         title: string | null;
+        description: string | null;
         mediaJson: string | null;
         rawJson: string;
       };
       recipeInstructions: {
         title: string | null;
+        description: string | null;
+        siteName: string | null;
         imageUrl: string | null;
       } | null;
     };
+    review: {
+      reviewId: string;
+      recipeId: string;
+      eventId: string | null;
+      reviewedByClerkUserId: string | null;
+      ratingValue: number;
+      eatenOn: string | null;
+      note: string | null;
+    } | null;
   },
   reviewerNames: Map<string, string>,
   context: Awaited<ReturnType<typeof requireHouseholdContext>>,
-): RecipeHistoryItemView {
-  return toRecipeReviewView(review, review.recipe, reviewerNames, context);
+): RecipeHistoryEventView {
+  const recipeTitle =
+    event.recipe.title ??
+    event.recipe.pin.title ??
+    event.recipe.recipeInstructions?.title ??
+    "Untitled recipe";
+  const recipeImageUrl =
+    event.recipe.imageUrl ??
+    event.recipe.recipeInstructions?.imageUrl ??
+    getPinImageUrl(event.recipe.pin.mediaJson, event.recipe.pin.rawJson);
+  const detailText =
+    event.recipe.recipeInstructions?.siteName ??
+    event.recipe.description ??
+    event.recipe.pin.description ??
+    event.recipe.recipeInstructions?.description ??
+    null;
+  const review = event.review
+    ? toRecipeReviewView(
+        {
+          ...event.review,
+          event: {
+            eventId: event.eventId,
+            date: event.date,
+          },
+        },
+        event.recipe,
+        reviewerNames,
+        context,
+      )
+    : null;
+  const today = getTodayDayString();
+
+  return {
+    eventId: event.eventId,
+    recipeId: event.recipeId,
+    recipeTitle,
+    recipeImageUrl,
+    date: event.date,
+    isPlanned: event.date > today,
+    detailText,
+    review,
+    canAddReview: event.date <= today && !review,
+  };
+}
+
+function compareReviewsByDate(left: RecipeReviewView, right: RecipeReviewView) {
+  const leftDate = left.eatenOn ?? "";
+  const rightDate = right.eatenOn ?? "";
+
+  if (leftDate !== rightDate) {
+    return rightDate.localeCompare(leftDate);
+  }
+
+  return right.reviewId.localeCompare(left.reviewId);
+}
+
+function buildMonthStart(month: string) {
+  return `${month}-01`;
 }
 
 function canManageReview(
@@ -1047,10 +1399,15 @@ function canManageReview(
     return true;
   }
 
-  return Boolean(reviewedByClerkUserId && reviewedByClerkUserId === context.clerkUserId);
+  return Boolean(
+    reviewedByClerkUserId && reviewedByClerkUserId === context.clerkUserId,
+  );
 }
 
-function getReviewerName(reviewerClerkUserId: string | null, reviewerNames: Map<string, string>) {
+function getReviewerName(
+  reviewerClerkUserId: string | null,
+  reviewerNames: Map<string, string>,
+) {
   if (!reviewerClerkUserId) {
     return "Household member";
   }
@@ -1058,7 +1415,11 @@ function getReviewerName(reviewerClerkUserId: string | null, reviewerNames: Map<
   return reviewerNames.get(reviewerClerkUserId) ?? "Household member";
 }
 
-function formatReviewerName(firstName: string | null, lastName: string | null, username: string | null) {
+function formatReviewerName(
+  firstName: string | null,
+  lastName: string | null,
+  username: string | null,
+) {
   const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
 
   if (fullName) {
@@ -1072,7 +1433,9 @@ function formatReviewerName(firstName: string | null, lastName: string | null, u
   return `Household member`;
 }
 
-function toIngredientStatus(value: string): "auto_matched" | "needs_review" | "confirmed" {
+function toIngredientStatus(
+  value: string,
+): "auto_matched" | "needs_review" | "confirmed" {
   if (value === "confirmed") {
     return "confirmed";
   }
@@ -1084,7 +1447,9 @@ function toIngredientStatus(value: string): "auto_matched" | "needs_review" | "c
   return "auto_matched";
 }
 
-function parseIngredientReviewSuggestions(value: string | null | undefined): IngredientReviewSuggestionView[] {
+function parseIngredientReviewSuggestions(
+  value: string | null | undefined,
+): IngredientReviewSuggestionView[] {
   if (!value) {
     return [];
   }
@@ -1102,7 +1467,9 @@ function parseIngredientReviewSuggestions(value: string | null | undefined): Ing
   }
 }
 
-function isIngredientReviewSuggestion(value: unknown): value is IngredientReviewSuggestionView {
+function isIngredientReviewSuggestion(
+  value: unknown,
+): value is IngredientReviewSuggestionView {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -1113,7 +1480,9 @@ function isIngredientReviewSuggestion(value: unknown): value is IngredientReview
   const reason = suggestion.reason;
 
   return (
-    (action === "match_existing" || action === "create_new" || action === "keep_unresolved") &&
+    (action === "match_existing" ||
+      action === "create_new" ||
+      action === "keep_unresolved") &&
     typeof confidence === "number" &&
     typeof reason === "string"
   );

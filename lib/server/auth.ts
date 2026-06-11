@@ -24,15 +24,15 @@ export async function requireHouseholdContext(): Promise<HouseholdContext> {
     throw new Error("Authentication required.");
   }
 
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const membership = db.query.householdMembers.findFirst({
+    const membership = await db.query.householdMembers.findFirst({
       where: (table, { eq }) => eq(table.clerkUserId, userId),
       with: {
         household: true,
       },
-    }).sync();
+    });
 
     if (membership) {
       return {
@@ -48,25 +48,23 @@ export async function requireHouseholdContext(): Promise<HouseholdContext> {
     const householdId = crypto.randomUUID();
     const householdName = buildHouseholdName(user?.firstName ?? user?.username ?? null);
 
-    sqlite.transaction(() => {
-      db.insert(households)
-        .values({
-          householdId,
-          name: householdName,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+    await db.insert(households)
+      .values({
+        householdId,
+        name: householdName,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
 
-      db.insert(householdMembers)
-        .values({
-          householdId,
-          clerkUserId: userId,
-          role: "owner",
-          joinedAt: now,
-        })
-        .run();
-    })();
+    await db.insert(householdMembers)
+      .values({
+        householdId,
+        clerkUserId: userId,
+        role: "owner",
+        joinedAt: now,
+      })
+      .run();
 
     return {
       householdId,
@@ -75,7 +73,7 @@ export async function requireHouseholdContext(): Promise<HouseholdContext> {
       clerkUserId: userId,
     };
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
@@ -90,25 +88,25 @@ export async function requireHouseholdRole(role: HouseholdRole) {
 }
 
 export async function listHouseholdMembers(householdId: string) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    return db.query.householdMembers.findMany({
+    return await db.query.householdMembers.findMany({
       where: (table, { eq }) => eq(table.householdId, householdId),
       orderBy: (table, { asc }) => [asc(table.joinedAt)],
-    }).sync();
+    });
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function addMemberToHousehold(householdId: string, clerkUserId: string, role: HouseholdRole = "member") {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const existing = db.query.householdMembers.findFirst({
+    const existing = await db.query.householdMembers.findFirst({
       where: (table, { and, eq }) => and(eq(table.householdId, householdId), eq(table.clerkUserId, clerkUserId)),
-    }).sync();
+    });
 
     if (existing) {
       return existing;
@@ -121,10 +119,10 @@ export async function addMemberToHousehold(householdId: string, clerkUserId: str
       joinedAt: new Date().toISOString(),
     } satisfies Omit<MembershipRow, "membershipId">;
 
-    db.insert(householdMembers).values(membership).run();
+    await db.insert(householdMembers).values(membership).run();
     return membership;
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 

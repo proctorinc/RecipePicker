@@ -16,27 +16,32 @@ type ExtractArgs = {
   householdId: string;
   sqlitePath?: string;
   recipeId?: string;
+  recipeIds?: string[];
   boardId?: string;
   rerun?: boolean;
 };
 
 export async function extractRecipes(args: ExtractArgs) {
-  const { db, sqlite, sqlitePath } = openDatabase(args.sqlitePath);
+  const { db, sqlite, targetLabel } = await openDatabase(args.sqlitePath);
+  const scopedRecipeIds = args.recipeIds ? new Set(args.recipeIds) : null;
 
   try {
-    const rows = db.query.householdRecipes.findMany({
+    const rows = await db.query.householdRecipes.findMany({
       where: (table, { eq }) => eq(table.householdId, args.householdId),
       with: {
         pin: true,
         recipeInstructions: true,
       },
-    }).sync();
+    });
 
     const filteredRows = rows.filter((row) => {
       if (!row.pin.link) {
         return true;
       }
       if (args.recipeId && row.recipeId !== args.recipeId) {
+        return false;
+      }
+      if (scopedRecipeIds && !scopedRecipeIds.has(row.recipeId)) {
         return false;
       }
       if (args.boardId && row.pin.pinterestBoardId !== args.boardId) {
@@ -51,7 +56,7 @@ export async function extractRecipes(args: ExtractArgs) {
       skipped: 0,
       failed: 0,
       reviewNeeded: 0,
-      sqlitePath,
+      sqlitePath: targetLabel,
     };
 
     for (const row of filteredRows) {
@@ -69,43 +74,59 @@ export async function extractRecipes(args: ExtractArgs) {
       const extractionResult = await extractRecipeWithFallbacks(row.pin.link, {
         householdId: args.householdId,
       });
-      const sourceIdsByKey = persistSourcesForAttempts(db, args.householdId, row.pinId, row.pin.link, extractionResult.attempts);
+      const sourceIdsByKey = await persistSourcesForAttempts(
+        db,
+        args.householdId,
+        row.pinId,
+        row.pin.link,
+        extractionResult.attempts,
+      );
       const selectedSourceId =
         getAttemptSourceId(sourceIdsByKey, extractionResult.fetchStrategy, extractionResult.sourceUrl ?? row.pin.link) ?? null;
 
-      const extractionId = db
-        .insert(householdRecipeExtractions)
-        .values({
-          householdId: args.householdId,
-          pinId: row.pinId,
-          sourceId: selectedSourceId,
-          status: extractionResult.status,
-          method: extractionResult.method,
-          fetchStrategy: extractionResult.fetchStrategy,
-          contentVariant: extractionResult.contentVariant,
-          extractionStrategy: extractionResult.extractionStrategy,
-          qualityScore: extractionResult.qualityScore,
-          confidence: extractionResult.confidence,
-          selected: extractionResult.selected,
-          lowConfidence: extractionResult.lowConfidence,
-          failureReason: extractionResult.failureReason,
-          warningsJson: JSON.stringify(extractionResult.warnings),
-          qualitySignalsJson: extractionResult.qualitySignals ? JSON.stringify(extractionResult.qualitySignals) : null,
-          candidateCount: extractionResult.candidateCount,
-          payloadJson: JSON.stringify(extractionResult.payload),
-          createdAt: new Date().toISOString(),
-        })
-        .returning({ extractionId: householdRecipeExtractions.extractionId })
-        .get()?.extractionId;
+      const extractionId = (
+        await db
+          .insert(householdRecipeExtractions)
+          .values({
+            householdId: args.householdId,
+            pinId: row.pinId,
+            sourceId: selectedSourceId,
+            status: extractionResult.status,
+            method: extractionResult.method,
+            fetchStrategy: extractionResult.fetchStrategy,
+            contentVariant: extractionResult.contentVariant,
+            extractionStrategy: extractionResult.extractionStrategy,
+            qualityScore: extractionResult.qualityScore,
+            confidence: extractionResult.confidence,
+            selected: extractionResult.selected,
+            lowConfidence: extractionResult.lowConfidence,
+            failureReason: extractionResult.failureReason,
+            warningsJson: JSON.stringify(extractionResult.warnings),
+            qualitySignalsJson: extractionResult.qualitySignals
+              ? JSON.stringify(extractionResult.qualitySignals)
+              : null,
+            candidateCount: extractionResult.candidateCount,
+            payloadJson: JSON.stringify(extractionResult.payload),
+            createdAt: new Date().toISOString(),
+          })
+          .returning()
+          .get()
+      )?.extractionId;
 
       if (extractionId) {
-        persistAttemptRows(db, args.householdId, row.pinId, extractionId, extractionResult, sourceIdsByKey);
+        await persistAttemptRows(
+          db,
+          args.householdId,
+          row.pinId,
+          extractionId,
+          extractionResult,
+          sourceIdsByKey,
+        );
       }
 
       if (extractionResult.status === "recipe_extracted" && extractionResult.recipe && selectedSourceId) {
         const reviewCount = await persistRecipeInstructions(
           db,
-          sqlite,
           args.householdId,
           row.recipeId,
           selectedSourceId,
@@ -127,13 +148,12 @@ export async function extractRecipes(args: ExtractArgs) {
 
     return outcomes;
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 async function persistRecipeInstructions(
-  db: ReturnType<typeof openDatabase>["db"],
-  sqlite: ReturnType<typeof openDatabase>["sqlite"],
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
   householdId: string,
   recipeId: string,
   sourceId: string,
@@ -165,116 +185,114 @@ async function persistRecipeInstructions(
     }),
   );
 
-  sqlite.transaction(() => {
-    const existingInstructions = db.query.householdRecipeInstructions.findFirst({
+  const existingInstructions = await db.query.householdRecipeInstructions.findFirst({
       where: (table, { eq }) => eq(table.recipeId, recipeId),
       columns: {
         recipeId: true,
         createdAt: true,
       },
-    }).sync();
+    });
 
-    db.delete(householdRecipeSteps).where(eq(householdRecipeSteps.recipeId, recipeId)).run();
-    db.delete(householdRecipeIngredients).where(eq(householdRecipeIngredients.recipeId, recipeId)).run();
+  await db.delete(householdRecipeSteps).where(eq(householdRecipeSteps.recipeId, recipeId)).run();
+  await db.delete(householdRecipeIngredients).where(eq(householdRecipeIngredients.recipeId, recipeId)).run();
 
-    if (existingInstructions) {
-      db.update(householdRecipeInstructions)
-        .set({
+  if (existingInstructions) {
+    await db.update(householdRecipeInstructions)
+      .set({
+        householdId,
+        sourceId,
+        title: recipe.title,
+        description: recipe.description,
+        author: recipe.author,
+        canonicalUrl: recipe.canonicalUrl,
+        siteName: recipe.siteName,
+        imageUrl: recipe.imageUrl,
+        yieldText: recipe.yieldText,
+        prepTime: recipe.prepTime,
+        cookTime: recipe.cookTime,
+        totalTime: recipe.totalTime,
+        categoriesJson: JSON.stringify(recipe.categories),
+        cuisine: recipe.cuisine,
+        keywordsJson: JSON.stringify(recipe.keywords),
+        nutritionJson: recipe.nutrition ? JSON.stringify(recipe.nutrition) : null,
+        rawRecipeJson: JSON.stringify(recipe.rawRecipe),
+        updatedAt: now,
+      })
+      .where(eq(householdRecipeInstructions.recipeId, recipeId))
+      .run();
+  } else {
+    await db.insert(householdRecipeInstructions)
+      .values({
+        recipeId,
+        householdId,
+        sourceId,
+        title: recipe.title,
+        description: recipe.description,
+        author: recipe.author,
+        canonicalUrl: recipe.canonicalUrl,
+        siteName: recipe.siteName,
+        imageUrl: recipe.imageUrl,
+        yieldText: recipe.yieldText,
+        prepTime: recipe.prepTime,
+        cookTime: recipe.cookTime,
+        totalTime: recipe.totalTime,
+        categoriesJson: JSON.stringify(recipe.categories),
+        cuisine: recipe.cuisine,
+        keywordsJson: JSON.stringify(recipe.keywords),
+        nutritionJson: recipe.nutrition ? JSON.stringify(recipe.nutrition) : null,
+        rawRecipeJson: JSON.stringify(recipe.rawRecipe),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  }
+
+  if (recipe.steps.length > 0) {
+    await db.insert(householdRecipeSteps)
+      .values(
+        recipe.steps.map((step) => ({
           householdId,
-          sourceId,
-          title: recipe.title,
-          description: recipe.description,
-          author: recipe.author,
-          canonicalUrl: recipe.canonicalUrl,
-          siteName: recipe.siteName,
-          imageUrl: recipe.imageUrl,
-          yieldText: recipe.yieldText,
-          prepTime: recipe.prepTime,
-          cookTime: recipe.cookTime,
-          totalTime: recipe.totalTime,
-          categoriesJson: JSON.stringify(recipe.categories),
-          cuisine: recipe.cuisine,
-          keywordsJson: JSON.stringify(recipe.keywords),
-          nutritionJson: recipe.nutrition ? JSON.stringify(recipe.nutrition) : null,
-          rawRecipeJson: JSON.stringify(recipe.rawRecipe),
-          updatedAt: now,
-        })
-        .where(eq(householdRecipeInstructions.recipeId, recipeId))
-        .run();
-    } else {
-      db.insert(householdRecipeInstructions)
-        .values({
           recipeId,
+          position: step.position,
+          section: step.section,
+          rawText: step.rawText,
+          text: step.text,
+        })),
+      )
+      .run();
+  }
+
+  if (normalizedIngredients.length > 0) {
+    await db.insert(householdRecipeIngredients)
+      .values(
+        normalizedIngredients.map((ingredient, index) => ({
           householdId,
-          sourceId,
-          title: recipe.title,
-          description: recipe.description,
-          author: recipe.author,
-          canonicalUrl: recipe.canonicalUrl,
-          siteName: recipe.siteName,
-          imageUrl: recipe.imageUrl,
-          yieldText: recipe.yieldText,
-          prepTime: recipe.prepTime,
-          cookTime: recipe.cookTime,
-          totalTime: recipe.totalTime,
-          categoriesJson: JSON.stringify(recipe.categories),
-          cuisine: recipe.cuisine,
-          keywordsJson: JSON.stringify(recipe.keywords),
-          nutritionJson: recipe.nutrition ? JSON.stringify(recipe.nutrition) : null,
-          rawRecipeJson: JSON.stringify(recipe.rawRecipe),
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
-    }
-
-    if (recipe.steps.length > 0) {
-      db.insert(householdRecipeSteps)
-        .values(
-          recipe.steps.map((step) => ({
-            householdId,
-            recipeId,
-            position: step.position,
-            section: step.section,
-            rawText: step.rawText,
-            text: step.text,
-          })),
-        )
-        .run();
-    }
-
-    if (normalizedIngredients.length > 0) {
-      db.insert(householdRecipeIngredients)
-        .values(
-          normalizedIngredients.map((ingredient, index) => ({
-            householdId,
-            recipeId,
-            position: index + 1,
-            originalText: ingredient.originalText,
-            amountText: ingredient.amountText,
-            amountValue: ingredient.amountValue,
-            amountMaxValue: ingredient.amountMaxValue,
-            unit: ingredient.unit,
-            ingredientText: ingredient.ingredientText,
-            notes: ingredient.notes,
-            normalizedIngredientPhrase: ingredient.normalizedIngredientPhrase,
-            canonicalIngredientId: ingredient.canonicalIngredientId,
-            attributesJson: JSON.stringify(ingredient.attributes),
-            matchConfidence: ingredient.matchConfidence,
-            matchedBy: ingredient.matchedBy,
-            aiSuggestionsJson: ingredient.aiSuggestions.length > 0 ? JSON.stringify(ingredient.aiSuggestions) : null,
-            normalizationStatus: ingredient.normalizationStatus,
-          })),
-        )
-        .run();
-    }
-  })();
+          recipeId,
+          position: index + 1,
+          originalText: ingredient.originalText,
+          amountText: ingredient.amountText,
+          amountValue: ingredient.amountValue,
+          amountMaxValue: ingredient.amountMaxValue,
+          unit: ingredient.unit,
+          ingredientText: ingredient.ingredientText,
+          notes: ingredient.notes,
+          normalizedIngredientPhrase: ingredient.normalizedIngredientPhrase,
+          canonicalIngredientId: ingredient.canonicalIngredientId,
+          attributesJson: JSON.stringify(ingredient.attributes),
+          matchConfidence: ingredient.matchConfidence,
+          matchedBy: ingredient.matchedBy,
+          aiSuggestionsJson: ingredient.aiSuggestions.length > 0 ? JSON.stringify(ingredient.aiSuggestions) : null,
+          normalizationStatus: ingredient.normalizationStatus,
+        })),
+      )
+      .run();
+  }
 
   return reviewCount;
 }
 
-function persistSourcesForAttempts(
-  db: ReturnType<typeof openDatabase>["db"],
+async function persistSourcesForAttempts(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
   householdId: string,
   pinId: string,
   originalUrl: string,
@@ -296,20 +314,22 @@ function persistSourcesForAttempts(
           ? "fetch_failed"
           : "fetched";
 
-    const sourceId = db
-      .insert(householdRecipeSources)
-      .values({
-        householdId,
-        pinId,
-        originalUrl,
-        finalUrl: sourceUrl,
-        fetchStatus,
-        contentType: sourceUrl ? "text/html" : null,
-        pagePreviewDataUrl: attempt.pagePreviewDataUrl ?? null,
-        fetchedAt: attempt.fetchedAt,
-      })
-      .returning({ sourceId: householdRecipeSources.sourceId })
-      .get()?.sourceId;
+    const sourceId = (
+      await db
+        .insert(householdRecipeSources)
+        .values({
+          householdId,
+          pinId,
+          originalUrl,
+          finalUrl: sourceUrl,
+          fetchStatus,
+          contentType: sourceUrl ? "text/html" : null,
+          pagePreviewDataUrl: attempt.pagePreviewDataUrl ?? null,
+          fetchedAt: attempt.fetchedAt,
+        })
+        .returning()
+        .get()
+    )?.sourceId;
 
     if (sourceId) {
       sourceIdsByKey.set(key, sourceId);
@@ -326,8 +346,8 @@ function getAttemptSourceId(sourceIdsByKey: Map<string, string>, fetchStrategy: 
   return sourceIdsByKey.get(`${fetchStrategy}|${sourceUrl}`) ?? null;
 }
 
-function persistAttemptRows(
-  db: ReturnType<typeof openDatabase>["db"],
+async function persistAttemptRows(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
   householdId: string,
   pinId: string,
   extractionId: string,
@@ -340,7 +360,7 @@ function persistAttemptRows(
     return;
   }
 
-  db.insert(householdRecipeExtractionAttempts)
+  await db.insert(householdRecipeExtractionAttempts)
     .values(
       extractionResult.attempts.map((attempt) => ({
         extractionId,

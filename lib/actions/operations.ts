@@ -3,11 +3,14 @@
 import crypto from "node:crypto";
 
 import { auth } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
 import { and, eq, inArray } from "drizzle-orm";
 
 import {
+  ADMIN_ROLE_OVERRIDE_COOKIE,
   canConfigureAi,
-  getAppAccessContext,
+  getCurrentUserAccess,
+  normalizeRoleOverride,
   normalizeSubscriptionTier,
   requireAdminAccess,
   upsertUserSubscriptionTier,
@@ -18,6 +21,7 @@ import {
   householdInvites,
   householdMembers,
   householdRecipeExtractionFeedback,
+  householdRecipeEvents,
   householdRecipeFeedback,
   householdRecipeIngredients,
   householdRecipeReviews,
@@ -42,8 +46,11 @@ import { disconnectPinterestConnection } from "@/lib/server/pinterest";
 import { getRecipeHouseholdPinId } from "@/lib/server/queries";
 import { extractRecipes } from "@/lib/server/extract";
 import { revalidateAll, recipeScopedPaths, toErrorState, toOptionalString } from "@/lib/actions/helpers";
+import { getTodayDayString, isValidDayString } from "@/lib/utils";
 import type { ActionState } from "@/lib/actions/types";
 import type { IngredientReviewSuggestionView, RecipeExtractionFeedbackCategory } from "@/types/view-models";
+
+type DatabaseHandle = Awaited<ReturnType<typeof openDatabase>>["db"];
 
 export async function extractRecipeAction(_: ActionState, formData: FormData): Promise<ActionState> {
   return runRecipeExtraction(formData, false);
@@ -72,15 +79,15 @@ export async function rerunRecipesAction(_: ActionState, formData: FormData): Pr
   }
 
   const context = await requireHouseholdContext();
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const existingRecipes = db.query.householdRecipes.findMany({
+    const existingRecipes = await db.query.householdRecipes.findMany({
       where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), inArray(table.recipeId, recipeIds)),
       columns: {
         recipeId: true,
       },
-    }).sync();
+    });
     const allowedRecipeIds = existingRecipes.map((recipe) => recipe.recipeId);
 
     if (allowedRecipeIds.length === 0) {
@@ -106,19 +113,19 @@ export async function rerunRecipesAction(_: ActionState, formData: FormData): Pr
   } catch (error) {
     return toErrorState(error, "Unable to re-parse the selected recipes.");
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function createInviteAction(_: ActionState, _formData: FormData): Promise<ActionState> {
   try {
     const context = await requireHouseholdRole("owner");
-    const { db, sqlite } = openDatabase();
+    const { db, sqlite } = await openDatabase();
     const token = crypto.randomUUID();
     const now = new Date();
 
     try {
-      db.insert(householdInvites)
+      await db.insert(householdInvites)
         .values({
           inviteToken: token,
           householdId: context.householdId,
@@ -130,7 +137,7 @@ export async function createInviteAction(_: ActionState, _formData: FormData): P
         })
         .run();
     } finally {
-      sqlite.close();
+      await sqlite.close();
     }
 
     revalidateAll(recipeScopedPaths());
@@ -163,7 +170,7 @@ export async function saveAiConnectionAction(_: ActionState, formData: FormData)
   const newApiKey = String(formData.get("apiKey") ?? "").trim();
 
   try {
-    const appAccess = await getAppAccessContext();
+    const appAccess = await getCurrentUserAccess();
     const context = await requireHouseholdRole("owner");
 
     if (!canConfigureAi({
@@ -227,7 +234,7 @@ export async function saveAiConnectionAction(_: ActionState, formData: FormData)
 
 export async function disconnectAiConnectionAction(_: ActionState, _formData: FormData): Promise<ActionState> {
   try {
-    const appAccess = await getAppAccessContext();
+    const appAccess = await getCurrentUserAccess();
     const context = await requireHouseholdRole("owner");
 
     if (!canConfigureAi({
@@ -275,6 +282,33 @@ export async function updateSubscriptionTierAction(_: ActionState, formData: For
   }
 }
 
+export async function updateRoleOverrideAction(_: ActionState, formData: FormData): Promise<ActionState> {
+  const requestedRole = normalizeRoleOverride(formData.get("appRole"));
+  const rawRole = String(formData.get("appRole") ?? "").trim();
+
+  if (rawRole !== "admin" && rawRole !== "owner" && rawRole !== "user") {
+    return { status: "error", message: "Choose user, owner, or admin for the UI preview role." };
+  }
+
+  try {
+    await requireAdminAccess();
+
+    const cookieStore = await cookies();
+    cookieStore.set(ADMIN_ROLE_OVERRIDE_COOKIE, requestedRole ?? "admin", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+    });
+
+    return {
+      status: "success",
+      message: `Frontend role preview is now ${requestedRole}.`,
+    };
+  } catch (error) {
+    return toErrorState(error, "Unable to update the frontend role preview.");
+  }
+}
+
 export async function joinHouseholdInviteAction(_: ActionState, formData: FormData): Promise<ActionState> {
   const inviteToken = String(formData.get("inviteToken") ?? "").trim();
 
@@ -289,12 +323,12 @@ export async function joinHouseholdInviteAction(_: ActionState, formData: FormDa
       return { status: "error", message: "You need to sign in before joining a household." };
     }
 
-    const { db, sqlite } = openDatabase();
+    const { db, sqlite } = await openDatabase();
 
     try {
-      const invite = db.query.householdInvites.findFirst({
+      const invite = await db.query.householdInvites.findFirst({
         where: (table, { eq }) => eq(table.inviteToken, inviteToken),
-      }).sync();
+      });
 
       if (!invite) {
         return { status: "error", message: "Invite not found." };
@@ -308,10 +342,10 @@ export async function joinHouseholdInviteAction(_: ActionState, formData: FormDa
         return { status: "error", message: "Invite has expired." };
       }
 
-      db.delete(householdMembers).where(eq(householdMembers.clerkUserId, userId)).run();
+      await db.delete(householdMembers).where(eq(householdMembers.clerkUserId, userId)).run();
       await addMemberToHousehold(invite.householdId, userId, "member");
 
-      db.update(householdInvites)
+      await db.update(householdInvites)
         .set({
           consumedAt: new Date().toISOString(),
           consumedByClerkUserId: userId,
@@ -319,7 +353,7 @@ export async function joinHouseholdInviteAction(_: ActionState, formData: FormDa
         .where(eq(householdInvites.inviteToken, inviteToken))
         .run();
     } finally {
-      sqlite.close();
+      await sqlite.close();
     }
 
     revalidateAll(recipeScopedPaths());
@@ -360,13 +394,13 @@ export async function reviewIngredientAction(_: ActionState, formData: FormData)
 
   try {
     const context = await requireHouseholdContext();
-    const { db, sqlite } = openDatabase();
+    const { db, sqlite } = await openDatabase();
 
     try {
-      const ingredient = db.query.householdRecipeIngredients.findFirst({
+      const ingredient = await db.query.householdRecipeIngredients.findFirst({
         where: (table, { and, eq }) =>
           and(eq(table.householdId, context.householdId), eq(table.ingredientId, ingredientId), eq(table.recipeId, recipeId)),
-      }).sync();
+      });
 
       if (!ingredient) {
         return { status: "error", message: "Ingredient review item was not found." };
@@ -419,7 +453,7 @@ export async function reviewIngredientAction(_: ActionState, formData: FormData)
         saveAlias,
       });
 
-      db.update(householdRecipeIngredients)
+      await db.update(householdRecipeIngredients)
         .set({
           canonicalIngredientId: canonicalIngredient.canonicalIngredientId,
           attributesJson: JSON.stringify(resolvedReview.attributes),
@@ -439,7 +473,7 @@ export async function reviewIngredientAction(_: ActionState, formData: FormData)
         )
         .run();
     } finally {
-      sqlite.close();
+      await sqlite.close();
     }
 
     revalidateAll(recipeScopedPaths(undefined, recipeId).concat("/settings/ingredients"));
@@ -463,11 +497,11 @@ export async function saveRecipeContentAction(_: ActionState, formData: FormData
 
   try {
     const context = await requireHouseholdContext();
-    const { db, sqlite } = openDatabase();
+    const { db, sqlite } = await openDatabase();
     const now = new Date().toISOString();
 
     try {
-      const recipe = db.query.householdRecipes.findFirst({
+      const recipe = await db.query.householdRecipes.findFirst({
         where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
         with: {
           recipeInstructions: {
@@ -485,7 +519,7 @@ export async function saveRecipeContentAction(_: ActionState, formData: FormData
             },
           },
         },
-      }).sync();
+      });
 
       if (!recipe?.recipeInstructions) {
         return { status: "error", message: "This recipe does not have editable structured content yet." };
@@ -507,7 +541,7 @@ export async function saveRecipeContentAction(_: ActionState, formData: FormData
       }
 
       for (const ingredient of ingredients) {
-        db.update(householdRecipeIngredients)
+        await db.update(householdRecipeIngredients)
           .set({
             originalText: ingredient.originalText.trim(),
             notes: ingredient.notes?.trim() || null,
@@ -517,7 +551,7 @@ export async function saveRecipeContentAction(_: ActionState, formData: FormData
       }
 
       for (const step of steps) {
-        db.update(householdRecipeSteps)
+        await db.update(householdRecipeSteps)
           .set({
             section: step.section?.trim() || null,
             text: step.text.trim(),
@@ -526,14 +560,14 @@ export async function saveRecipeContentAction(_: ActionState, formData: FormData
           .run();
       }
 
-      db.update(householdRecipes)
+      await db.update(householdRecipes)
         .set({
           updatedAt: now,
         })
         .where(and(eq(householdRecipes.recipeId, recipeId), eq(householdRecipes.householdId, context.householdId)))
         .run();
     } finally {
-      sqlite.close();
+      await sqlite.close();
     }
 
     revalidateAll(recipeScopedPaths(undefined, recipeId));
@@ -561,11 +595,11 @@ export async function saveRecipeFeedbackAction(_: ActionState, formData: FormDat
 
   try {
     const context = await requireHouseholdContext();
-    const { db, sqlite } = openDatabase();
+    const { db, sqlite } = await openDatabase();
     const now = new Date().toISOString();
 
     try {
-      const recipe = db.query.householdRecipes.findFirst({
+      const recipe = await db.query.householdRecipes.findFirst({
         where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
         columns: {
           recipeId: true,
@@ -573,14 +607,14 @@ export async function saveRecipeFeedbackAction(_: ActionState, formData: FormDat
         with: {
           feedback: true,
         },
-      }).sync();
+      });
 
       if (!recipe) {
         return { status: "error", message: "Recipe was not found." };
       }
 
       if (recipe.feedback) {
-        db.update(householdRecipeFeedback)
+        await db.update(householdRecipeFeedback)
           .set({
             summary,
             note,
@@ -590,7 +624,7 @@ export async function saveRecipeFeedbackAction(_: ActionState, formData: FormDat
           .where(eq(householdRecipeFeedback.feedbackId, recipe.feedback.feedbackId))
           .run();
       } else {
-        db.insert(householdRecipeFeedback)
+        await db.insert(householdRecipeFeedback)
           .values({
             householdId: context.householdId,
             recipeId,
@@ -604,7 +638,7 @@ export async function saveRecipeFeedbackAction(_: ActionState, formData: FormDat
           .run();
       }
     } finally {
-      sqlite.close();
+      await sqlite.close();
     }
 
     revalidateAll(recipeScopedPaths(undefined, recipeId));
@@ -637,11 +671,11 @@ export async function saveExtractionFeedbackAction(_: ActionState, formData: For
 
   try {
     const context = await requireHouseholdContext();
-    const { db, sqlite } = openDatabase();
+    const { db, sqlite } = await openDatabase();
     const now = new Date().toISOString();
 
     try {
-      const recipe = db.query.householdRecipes.findFirst({
+      const recipe = await db.query.householdRecipes.findFirst({
         where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
         with: {
           pin: {
@@ -654,7 +688,7 @@ export async function saveExtractionFeedbackAction(_: ActionState, formData: For
             },
           },
         },
-      }).sync();
+      });
 
       if (!recipe) {
         return { status: "error", message: "Recipe was not found." };
@@ -667,7 +701,7 @@ export async function saveExtractionFeedbackAction(_: ActionState, formData: For
         }
       }
 
-      db.insert(householdRecipeExtractionFeedback)
+      await db.insert(householdRecipeExtractionFeedback)
         .values({
           householdId: context.householdId,
           recipeId,
@@ -679,7 +713,7 @@ export async function saveExtractionFeedbackAction(_: ActionState, formData: For
         })
         .run();
     } finally {
-      sqlite.close();
+      await sqlite.close();
     }
 
     revalidateAll(recipeScopedPaths(undefined, recipeId));
@@ -692,8 +726,63 @@ export async function saveExtractionFeedbackAction(_: ActionState, formData: For
   }
 }
 
+export async function createRecipeEventAction(_: ActionState, formData: FormData): Promise<ActionState> {
+  const recipeId = String(formData.get("recipeId") ?? "").trim();
+  const date = String(formData.get("date") ?? "").trim();
+
+  if (!recipeId) {
+    return { status: "error", message: "Recipe ID is required." };
+  }
+
+  if (!isValidDayString(date)) {
+    return { status: "error", message: "Choose a valid date for this meal." };
+  }
+
+  try {
+    const context = await requireHouseholdContext();
+    const { db, sqlite } = await openDatabase();
+    const now = new Date().toISOString();
+
+    try {
+      const recipe = await db.query.householdRecipes.findFirst({
+        where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+        columns: {
+          recipeId: true,
+          pinId: true,
+        },
+      });
+
+      if (!recipe) {
+        return { status: "error", message: "Recipe was not found." };
+      }
+
+      await db.insert(householdRecipeEvents)
+        .values({
+          householdId: context.householdId,
+          recipeId: recipe.recipeId,
+          date,
+          createdByClerkUserId: context.clerkUserId,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+    } finally {
+      await sqlite.close();
+    }
+
+    revalidateAll(recipeScopedPaths(undefined, recipeId));
+    return {
+      status: "success",
+      message: date > getTodayDayString() ? "Planned recipe added to the calendar." : "Meal added to history.",
+    };
+  } catch (error) {
+    return toErrorState(error, "Unable to save this recipe event.");
+  }
+}
+
 export async function createRecipeReviewAction(_: ActionState, formData: FormData): Promise<ActionState> {
   const recipeId = String(formData.get("recipeId") ?? "").trim();
+  const eventId = String(formData.get("eventId") ?? "").trim() || null;
   const ratingValue = parseRatingValue(formData.get("ratingValue"));
   const eatenOn = toOptionalString(formData.get("eatenOn"));
   const note = toOptionalString(formData.get("note"));
@@ -706,42 +795,88 @@ export async function createRecipeReviewAction(_: ActionState, formData: FormDat
     return { status: "error", message: "Choose a rating between 0.5 and 5 stars." };
   }
 
-  if (eatenOn && !isValidReviewDate(eatenOn)) {
+  if (eatenOn && !isValidDayString(eatenOn)) {
     return { status: "error", message: "Choose the date you ate this meal." };
   }
 
   try {
     const context = await requireHouseholdContext();
-    const { db, sqlite } = openDatabase();
+    const { db, sqlite } = await openDatabase();
     const now = new Date().toISOString();
 
     try {
-      const recipe = db.query.householdRecipes.findFirst({
+      const recipe = await db.query.householdRecipes.findFirst({
         where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
         columns: {
           recipeId: true,
           pinId: true,
         },
-      }).sync();
+      });
 
       if (!recipe) {
         return { status: "error", message: "Recipe was not found." };
       }
 
-      db.insert(householdRecipeReviews)
+      const linkedEvent = eventId
+        ? await db.query.householdRecipeEvents.findFirst({
+          where: (table, { and, eq }) => and(eq(table.eventId, eventId), eq(table.householdId, context.householdId)),
+        })
+        : null;
+
+      if (eventId && !linkedEvent) {
+        return { status: "error", message: "Recipe event was not found." };
+      }
+
+      if (linkedEvent && linkedEvent.recipeId !== recipe.recipeId) {
+        return { status: "error", message: "Recipe event does not match this recipe." };
+      }
+
+      if (linkedEvent) {
+        const existingEventReview = await db.query.householdRecipeReviews.findFirst({
+          where: (table, { and, eq }) => and(eq(table.eventId, linkedEvent.eventId), eq(table.householdId, context.householdId)),
+          columns: {
+            reviewId: true,
+          },
+        });
+
+        if (existingEventReview) {
+          return { status: "error", message: "This meal already has a review." };
+        }
+      }
+
+      const eventDate = linkedEvent?.date ?? eatenOn;
+
+      if (eventDate && eventDate > getTodayDayString()) {
+        return { status: "error", message: "Planned recipes cannot be reviewed yet." };
+      }
+
+      let resolvedEventId = linkedEvent?.eventId ?? null;
+
+      if (!resolvedEventId && eatenOn) {
+        resolvedEventId = await insertRecipeEvent(db, {
+          householdId: context.householdId,
+          recipeId: recipe.recipeId,
+          date: eatenOn,
+          clerkUserId: context.clerkUserId,
+          now,
+        });
+      }
+
+      await db.insert(householdRecipeReviews)
         .values({
           householdId: context.householdId,
           recipeId: recipe.recipeId,
+          eventId: resolvedEventId,
           reviewedByClerkUserId: context.clerkUserId,
           ratingValue,
-          eatenOn,
+          eatenOn: resolvedEventId ? null : eatenOn,
           note,
           createdAt: now,
           updatedAt: now,
         })
         .run();
     } finally {
-      sqlite.close();
+      await sqlite.close();
     }
 
     revalidateAll(recipeScopedPaths(undefined, recipeId));
@@ -756,6 +891,7 @@ export async function createRecipeReviewAction(_: ActionState, formData: FormDat
 
 export async function updateRecipeReviewAction(_: ActionState, formData: FormData): Promise<ActionState> {
   const reviewId = String(formData.get("reviewId") ?? "").trim();
+  const eventId = String(formData.get("eventId") ?? "").trim() || null;
   const ratingValue = parseRatingValue(formData.get("ratingValue"));
   const eatenOn = toOptionalString(formData.get("eatenOn"));
   const note = toOptionalString(formData.get("note"));
@@ -768,18 +904,21 @@ export async function updateRecipeReviewAction(_: ActionState, formData: FormDat
     return { status: "error", message: "Choose a rating between 0.5 and 5 stars." };
   }
 
-  if (eatenOn && !isValidReviewDate(eatenOn)) {
+  if (eatenOn && !isValidDayString(eatenOn)) {
     return { status: "error", message: "Choose the date you ate this meal." };
   }
 
   try {
     const context = await requireHouseholdContext();
-    const { db, sqlite } = openDatabase();
+    const { db, sqlite } = await openDatabase();
 
     try {
-      const review = db.query.householdRecipeReviews.findFirst({
+      const review = await db.query.householdRecipeReviews.findFirst({
         where: (table, { and, eq }) => and(eq(table.reviewId, reviewId), eq(table.householdId, context.householdId)),
-      }).sync();
+        with: {
+          event: true,
+        },
+      });
 
       if (!review) {
         return { status: "error", message: "Review was not found." };
@@ -789,10 +928,40 @@ export async function updateRecipeReviewAction(_: ActionState, formData: FormDat
         return { status: "error", message: "You do not have permission to edit this review." };
       }
 
-      db.update(householdRecipeReviews)
+      const effectiveEventId = eventId ?? review.eventId ?? null;
+      const linkedEvent = effectiveEventId
+        ? await db.query.householdRecipeEvents.findFirst({
+          where: (table, { and, eq }) => and(eq(table.eventId, effectiveEventId), eq(table.householdId, context.householdId)),
+        })
+        : null;
+
+      if (effectiveEventId && !linkedEvent) {
+        return { status: "error", message: "Recipe event was not found." };
+      }
+
+      const eventDate = linkedEvent?.date ?? eatenOn ?? review.eatenOn;
+
+      if (eventDate && eventDate > getTodayDayString()) {
+        return { status: "error", message: "Planned recipes cannot be reviewed yet." };
+      }
+
+      let nextEventId = linkedEvent?.eventId ?? review.eventId ?? null;
+
+      if (!nextEventId && eatenOn) {
+        nextEventId = await insertRecipeEvent(db, {
+          householdId: context.householdId,
+          recipeId: review.recipeId,
+          date: eatenOn,
+          clerkUserId: context.clerkUserId,
+          now: new Date().toISOString(),
+        });
+      }
+
+      await db.update(householdRecipeReviews)
         .set({
+          eventId: nextEventId,
           ratingValue,
-          eatenOn,
+          eatenOn: nextEventId ? null : eatenOn,
           note,
           updatedAt: new Date().toISOString(),
         })
@@ -805,7 +974,7 @@ export async function updateRecipeReviewAction(_: ActionState, formData: FormDat
         message: "Review updated.",
       };
     } finally {
-      sqlite.close();
+      await sqlite.close();
     }
   } catch (error) {
     return toErrorState(error, "Unable to update this review.");
@@ -821,12 +990,12 @@ export async function deleteRecipeReviewAction(_: ActionState, formData: FormDat
 
   try {
     const context = await requireHouseholdContext();
-    const { db, sqlite } = openDatabase();
+    const { db, sqlite } = await openDatabase();
 
     try {
-      const review = db.query.householdRecipeReviews.findFirst({
+      const review = await db.query.householdRecipeReviews.findFirst({
         where: (table, { and, eq }) => and(eq(table.reviewId, reviewId), eq(table.householdId, context.householdId)),
-      }).sync();
+      });
 
       if (!review) {
         return { status: "error", message: "Review was not found." };
@@ -836,7 +1005,7 @@ export async function deleteRecipeReviewAction(_: ActionState, formData: FormDat
         return { status: "error", message: "You do not have permission to delete this review." };
       }
 
-      db.delete(householdRecipeReviews).where(eq(householdRecipeReviews.reviewId, reviewId)).run();
+      await db.delete(householdRecipeReviews).where(eq(householdRecipeReviews.reviewId, reviewId)).run();
 
       revalidateAll(recipeScopedPaths(undefined, review.recipeId));
       return {
@@ -844,7 +1013,7 @@ export async function deleteRecipeReviewAction(_: ActionState, formData: FormDat
         message: "Review deleted.",
       };
     } finally {
-      sqlite.close();
+      await sqlite.close();
     }
   } catch (error) {
     return toErrorState(error, "Unable to delete this review.");
@@ -1070,8 +1239,28 @@ function parseRatingValue(value: FormDataEntryValue | null) {
   return Math.round(parsed * 2) === parsed * 2 ? parsed : null;
 }
 
-function isValidReviewDate(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime());
+async function insertRecipeEvent(
+  db: DatabaseHandle,
+  input: {
+    householdId: string;
+    recipeId: string;
+    date: string;
+    clerkUserId: string;
+    now: string;
+  },
+) {
+  const result = await db.insert(householdRecipeEvents)
+    .values({
+      householdId: input.householdId,
+      recipeId: input.recipeId,
+      date: input.date,
+      createdByClerkUserId: input.clerkUserId,
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
+    .returning();
+
+  return result[0]?.eventId ?? null;
 }
 
 function canManageRecipeReview(

@@ -91,9 +91,12 @@ export const pinterestAccounts = sqliteTable(
     refreshTokenExpiresAt: text("refresh_token_expires_at"),
     lastRefreshAttemptAt: text("last_refresh_attempt_at"),
     lastRefreshSucceededAt: text("last_refresh_succeeded_at"),
+    lastSyncAttemptAt: text("last_sync_attempt_at"),
+    lastSyncTrigger: text("last_sync_trigger"),
     lastSyncAt: text("last_sync_at"),
     lastSyncStatus: text("last_sync_status"),
     lastSyncError: text("last_sync_error"),
+    syncInProgressAt: text("sync_in_progress_at"),
     connectionStatus: text("connection_status").notNull().default("active"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
@@ -211,6 +214,7 @@ export const householdRecipeReviews = sqliteTable(
     recipeId: text("recipe_id")
       .notNull()
       .references(() => householdRecipes.recipeId),
+    eventId: text("event_id").references(() => householdRecipeEvents.eventId),
     reviewedByClerkUserId: text("reviewed_by_clerk_user_id"),
     ratingValue: real("rating_value").notNull(),
     eatenOn: text("eaten_on"),
@@ -220,8 +224,31 @@ export const householdRecipeReviews = sqliteTable(
   },
   (table) => ({
     recipeIdIdx: index("idx_household_recipe_reviews_recipe_id").on(table.recipeId),
+    eventIdUniqueIdx: uniqueIndex("idx_household_recipe_reviews_event_unique").on(table.eventId),
     eatenOnIdx: index("idx_household_recipe_reviews_eaten_on").on(table.eatenOn),
     reviewerIdx: index("idx_household_recipe_reviews_reviewer").on(table.reviewedByClerkUserId),
+  }),
+);
+
+export const householdRecipeEvents = sqliteTable(
+  "household_recipe_events",
+  {
+    eventId: generatedId("event_id"),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.householdId),
+    recipeId: text("recipe_id")
+      .notNull()
+      .references(() => householdRecipes.recipeId),
+    date: text("date").notNull(),
+    createdByClerkUserId: text("created_by_clerk_user_id"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    householdDateIdx: index("idx_household_recipe_events_household_date").on(table.householdId, table.date),
+    recipeIdIdx: index("idx_household_recipe_events_recipe_id").on(table.recipeId),
+    createdByIdx: index("idx_household_recipe_events_created_by").on(table.createdByClerkUserId),
   }),
 );
 
@@ -692,12 +719,28 @@ export const householdRecipesRelations = relations(householdRecipes, ({ one, man
     fields: [householdRecipes.recipeId],
     references: [householdRecipeInstructions.recipeId],
   }),
+  events: many(householdRecipeEvents),
   reviews: many(householdRecipeReviews),
   feedback: one(householdRecipeFeedback, {
     fields: [householdRecipes.recipeId],
     references: [householdRecipeFeedback.recipeId],
   }),
   extractionFeedback: many(householdRecipeExtractionFeedback),
+}));
+
+export const householdRecipeEventsRelations = relations(householdRecipeEvents, ({ one }) => ({
+  household: one(households, {
+    fields: [householdRecipeEvents.householdId],
+    references: [households.householdId],
+  }),
+  recipe: one(householdRecipes, {
+    fields: [householdRecipeEvents.recipeId],
+    references: [householdRecipes.recipeId],
+  }),
+  review: one(householdRecipeReviews, {
+    fields: [householdRecipeEvents.eventId],
+    references: [householdRecipeReviews.eventId],
+  }),
 }));
 
 export const householdRecipeReviewsRelations = relations(householdRecipeReviews, ({ one }) => ({
@@ -708,6 +751,10 @@ export const householdRecipeReviewsRelations = relations(householdRecipeReviews,
   recipe: one(householdRecipes, {
     fields: [householdRecipeReviews.recipeId],
     references: [householdRecipes.recipeId],
+  }),
+  event: one(householdRecipeEvents, {
+    fields: [householdRecipeReviews.eventId],
+    references: [householdRecipeEvents.eventId],
   }),
 }));
 

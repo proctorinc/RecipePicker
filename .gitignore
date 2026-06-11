@@ -3,6 +3,9 @@ dist/
 .next/
 .next-dev/
 .env
+.env.development
+.env.test
+.env.production
 data/
 *.sqlite
 *.sqlite-shm
@@ -10,3 +13,4 @@ data/
 
 # clerk configuration (can include secrets)
 /.clerk/
+todo.txt

@@ -123,12 +123,12 @@ export function getAiModelCatalog() {
 export async function getHouseholdAiConnectionSummary(
   householdId: string,
 ): Promise<AiConnectionSummary> {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const connection = db.query.householdAiConnections.findFirst({
+    const connection = await db.query.householdAiConnections.findFirst({
       where: (table, { eq }) => eq(table.householdId, householdId),
-    }).sync();
+    });
 
     if (!connection) {
       return {
@@ -159,7 +159,7 @@ export async function getHouseholdAiConnectionSummary(
       connectedByClerkUserId: connection.connectedByClerkUserId,
     };
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
@@ -175,7 +175,7 @@ export async function upsertHouseholdAiConnection(args: {
 }) {
   validateProviderModel(args.provider, args.model);
 
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
     const now = new Date().toISOString();
@@ -194,7 +194,7 @@ export async function upsertHouseholdAiConnection(args: {
       updatedAt: now,
     } satisfies ConnectionRow;
 
-    db.insert(householdAiConnections)
+    await db.insert(householdAiConnections)
       .values(values)
       .onConflictDoUpdate({
         target: [householdAiConnections.householdId],
@@ -212,19 +212,19 @@ export async function upsertHouseholdAiConnection(args: {
       })
       .run();
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function disconnectHouseholdAiConnection(householdId: string) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    db.delete(householdAiConnections)
+    await db.delete(householdAiConnections)
       .where(eq(householdAiConnections.householdId, householdId))
       .run();
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
@@ -298,12 +298,12 @@ export async function generateIngredientSuggestionsWithHouseholdAi<
 export async function getStoredHouseholdAiConfig(
   householdId: string,
 ): Promise<StoredAiConfig | null> {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const connection = db.query.householdAiConnections.findFirst({
+    const connection = await db.query.householdAiConnections.findFirst({
       where: (table, { eq }) => eq(table.householdId, householdId),
-    }).sync();
+    });
 
     if (!connection || connection.connectionStatus !== "active") {
       return null;
@@ -319,24 +319,24 @@ export async function getStoredHouseholdAiConfig(
       apiKey: decryptSecret(connection.apiKeyEncrypted),
     };
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 
 export async function getStoredHouseholdAiKey(householdId: string) {
-  const { db, sqlite } = openDatabase();
+  const { db, sqlite } = await openDatabase();
 
   try {
-    const connection = db.query.householdAiConnections.findFirst({
+    const connection = await db.query.householdAiConnections.findFirst({
       where: (table, { eq }) => eq(table.householdId, householdId),
       columns: {
         apiKeyEncrypted: true,
       },
-    }).sync();
+    });
 
     return connection ? decryptSecret(connection.apiKeyEncrypted) : null;
   } finally {
-    sqlite.close();
+    await sqlite.close();
   }
 }
 

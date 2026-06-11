@@ -1,22 +1,27 @@
 import Link from "next/link";
 
-import { getAppAccessContext } from "@/lib/server/access";
+import { getCurrentUserAccess } from "@/lib/server/access";
 import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/settings", label: "Overview" },
+  { href: "/settings/members", label: "Household" },
+];
+
+const elevatedItems = [
   { href: "/settings/recipes", label: "Recipes" },
   { href: "/settings/ingredients", label: "Ingredients" },
-  { href: "/settings/members", label: "Household" },
   { href: "/settings/ai", label: "AI" },
   { href: "/settings/pinterest", label: "Pinterest" },
 ];
 
 export async function SettingsNav({ currentPath }: { currentPath: string }) {
-  const access = await getAppAccessContext();
-  const navItems = access.isAdmin
-    ? [...items, { href: "/settings/admin", label: "Admin" }]
-    : items;
+  const access = await getCurrentUserAccess();
+  const navItems = [
+    ...items,
+    ...(access.isOwner || access.isAdmin ? elevatedItems : []),
+    ...(access.isActualAdmin ? [{ href: "/settings/admin", label: "Admin" }] : []),
+  ];
 
   return (
     <div className="flex flex-wrap gap-2">

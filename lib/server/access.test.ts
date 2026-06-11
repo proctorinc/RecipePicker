@@ -4,17 +4,30 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  getAccessFlags,
+  getRoleFlags,
+  getTierFlags,
+  isAdminRole,
+  isFreeTier,
+  isPremiumTier,
+  isUserRole,
+} from "@/lib/access";
 import { openDatabase } from "@/lib/server/database";
 import { userAccessTiers } from "@/lib/server/db";
 import {
+  ADMIN_ROLE_OVERRIDE_COOKIE,
   canConfigureAi,
-  getAppAccessContext,
+  getCurrentUserAccess,
+  normalizeAppRole,
+  normalizeRoleOverride,
   resolveFeedCardHref,
   upsertUserSubscriptionTier,
 } from "@/lib/server/access";
 
-const { mockAuth, mockCurrentUser } = vi.hoisted(() => ({
+const { mockAuth, mockCookies, mockCurrentUser } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
+  mockCookies: vi.fn(),
   mockCurrentUser: vi.fn(),
 }));
 
@@ -23,18 +36,38 @@ vi.mock("@clerk/nextjs/server", () => ({
   currentUser: mockCurrentUser,
 }));
 
+vi.mock("next/headers", () => ({
+  cookies: mockCookies,
+}));
+
 let tempDir: string;
 let sqlitePath: string;
+let originalNodeEnv: string | undefined;
+
+function setNodeEnv(value: string | undefined) {
+  Object.defineProperty(process.env, "NODE_ENV", {
+    value,
+    configurable: true,
+    writable: true,
+    enumerable: true,
+  });
+}
 
 beforeEach(() => {
+  originalNodeEnv = process.env.NODE_ENV;
+  setNodeEnv("development");
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "food-picker-access-"));
   sqlitePath = path.join(tempDir, "test.sqlite");
   process.env.SQLITE_PATH = sqlitePath;
   mockAuth.mockResolvedValue({ userId: "user_123" });
   mockCurrentUser.mockResolvedValue({ publicMetadata: {} });
+  mockCookies.mockResolvedValue({
+    get: vi.fn().mockReturnValue(undefined),
+  });
 });
 
 afterEach(() => {
+  setNodeEnv(originalNodeEnv);
   delete process.env.SQLITE_PATH;
   vi.restoreAllMocks();
   mockAuth.mockReset();
@@ -44,21 +77,23 @@ afterEach(() => {
 
 describe("app access", () => {
   it("defaults to user/free when no metadata or tier row exists", async () => {
-    const access = await getAppAccessContext();
+    const access = await getCurrentUserAccess();
 
     expect(access.appRole).toBe("user");
     expect(access.subscriptionTier).toBe("free");
     expect(access.isAdmin).toBe(false);
+    expect(access.isFree).toBe(true);
     expect(access.isPremium).toBe(false);
+    expect(access.isUser).toBe(true);
   });
 
   it("reads admin role from Clerk metadata and premium tier from the database", async () => {
     mockCurrentUser.mockResolvedValue({ publicMetadata: { appRole: "admin" } });
 
-    const { db, sqlite } = openDatabase(sqlitePath);
+    const { db, sqlite } = await openDatabase(sqlitePath);
 
     try {
-      db.insert(userAccessTiers)
+      await db.insert(userAccessTiers)
         .values({
           clerkUserId: "user_123",
           subscriptionTier: "premium",
@@ -67,15 +102,48 @@ describe("app access", () => {
         })
         .run();
     } finally {
-      sqlite.close();
+      await sqlite.close();
     }
 
-    const access = await getAppAccessContext();
+    const access = await getCurrentUserAccess();
 
     expect(access.appRole).toBe("admin");
     expect(access.subscriptionTier).toBe("premium");
     expect(access.isAdmin).toBe(true);
+    expect(access.isFree).toBe(false);
     expect(access.isPremium).toBe(true);
+    expect(access.isUser).toBe(false);
+  });
+
+  it("supports the owner app role", async () => {
+    mockCurrentUser.mockResolvedValue({ publicMetadata: { appRole: "owner" } });
+
+    const access = await getCurrentUserAccess();
+
+    expect(access.appRole).toBe("owner");
+    expect(access.actualAppRole).toBe("owner");
+    expect(access.isOwner).toBe(true);
+    expect(access.isAdmin).toBe(false);
+    expect(access.isActualAdmin).toBe(false);
+    expect(access.isUser).toBe(false);
+  });
+
+  it("lets admins preview the UI as another role without losing actual admin access", async () => {
+    mockCurrentUser.mockResolvedValue({ publicMetadata: { appRole: "admin" } });
+    mockCookies.mockResolvedValue({
+      get: vi.fn((name: string) =>
+        name === ADMIN_ROLE_OVERRIDE_COOKIE ? { value: "user" } : undefined
+      ),
+    });
+
+    const access = await getCurrentUserAccess();
+
+    expect(access.appRole).toBe("user");
+    expect(access.actualAppRole).toBe("admin");
+    expect(access.roleOverride).toBe("user");
+    expect(access.isUser).toBe(true);
+    expect(access.isAdmin).toBe(false);
+    expect(access.isActualAdmin).toBe(true);
   });
 
   it("upserts subscription tier changes so later reads see the new entitlement", async () => {
@@ -84,7 +152,7 @@ describe("app access", () => {
       subscriptionTier: "premium",
     });
 
-    let access = await getAppAccessContext();
+    let access = await getCurrentUserAccess();
     expect(access.subscriptionTier).toBe("premium");
 
     await upsertUserSubscriptionTier({
@@ -92,11 +160,11 @@ describe("app access", () => {
       subscriptionTier: "free",
     });
 
-    access = await getAppAccessContext();
+    access = await getCurrentUserAccess();
     expect(access.subscriptionTier).toBe("free");
   });
 
-  it("sends premium users to recipe pages from feed cards", () => {
+  it("sends feed cards to recipe pages for premium users", () => {
     expect(
       resolveFeedCardHref({
         recipeId: "recipe_1",
@@ -107,7 +175,7 @@ describe("app access", () => {
     ).toBe("/recipe/recipe_1");
   });
 
-  it("sends free users to Pinterest pins from feed cards", () => {
+  it("sends feed cards to recipe pages for free users too", () => {
     expect(
       resolveFeedCardHref({
         recipeId: "recipe_1",
@@ -115,10 +183,10 @@ describe("app access", () => {
         subscriptionTier: "free",
         fallbackUrl: "https://example.com/recipe",
       }),
-    ).toBe("https://www.pinterest.com/pin/98765/");
+    ).toBe("/recipe/recipe_1");
   });
 
-  it("falls back to the recipe page when a free-tier card cannot build an external link", () => {
+  it("still sends feed cards to recipe pages when no external fallback exists", () => {
     expect(
       resolveFeedCardHref({
         recipeId: "recipe_1",
@@ -133,5 +201,41 @@ describe("app access", () => {
     expect(canConfigureAi({ subscriptionTier: "premium", householdRole: "owner" })).toBe(true);
     expect(canConfigureAi({ subscriptionTier: "free", householdRole: "owner" })).toBe(false);
     expect(canConfigureAi({ subscriptionTier: "premium", householdRole: "member" })).toBe(false);
+  });
+
+  it("provides reusable UI access helpers", () => {
+    expect(isPremiumTier("premium")).toBe(true);
+    expect(isPremiumTier("free")).toBe(false);
+    expect(isFreeTier("free")).toBe(true);
+    expect(isFreeTier("premium")).toBe(false);
+    expect(isAdminRole("admin")).toBe(true);
+    expect(isAdminRole("user")).toBe(false);
+    expect(isAdminRole("owner")).toBe(false);
+    expect(normalizeAppRole("owner")).toBe("owner");
+    expect(normalizeRoleOverride("owner")).toBe("owner");
+    expect(isUserRole("user")).toBe(true);
+    expect(isUserRole("admin")).toBe(false);
+    expect(isUserRole("owner")).toBe(false);
+    expect(getTierFlags({ subscriptionTier: "premium" })).toEqual({
+      isPremiumTier: true,
+      isFreeTier: false,
+    });
+    expect(getRoleFlags({ appRole: "admin" })).toEqual({
+      isAdminRole: true,
+      isOwnerRole: false,
+      isUserRole: false,
+    });
+    expect(getRoleFlags({ appRole: "owner" })).toEqual({
+      isAdminRole: false,
+      isOwnerRole: true,
+      isUserRole: false,
+    });
+    expect(getAccessFlags({ appRole: "user", subscriptionTier: "free" })).toEqual({
+      isAdminRole: false,
+      isFreeTier: true,
+      isOwnerRole: false,
+      isPremiumTier: false,
+      isUserRole: true,
+    });
   });
 });

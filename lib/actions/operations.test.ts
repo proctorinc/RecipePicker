@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 const {
-  mockGetAppAccessContext,
+  mockGetCurrentUserAccess,
   mockRequireHouseholdRole,
   mockGetAiModelCatalog,
   mockGetStoredHouseholdAiKey,
   mockTestHouseholdAiConnection,
   mockUpsertHouseholdAiConnection,
 } = vi.hoisted(() => ({
-  mockGetAppAccessContext: vi.fn(),
+  mockGetCurrentUserAccess: vi.fn(),
   mockRequireHouseholdRole: vi.fn(),
   mockGetAiModelCatalog: vi.fn(),
   mockGetStoredHouseholdAiKey: vi.fn(),
@@ -17,7 +17,10 @@ const {
 }));
 
 vi.mock("@/lib/server/access", () => ({
-  getAppAccessContext: mockGetAppAccessContext,
+  ADMIN_ROLE_OVERRIDE_COOKIE: "food-picker-admin-role-override",
+  getCurrentUserAccess: mockGetCurrentUserAccess,
+  normalizeRoleOverride: (value: unknown) =>
+    value === "admin" || value === "owner" || value === "user" ? value : null,
   requireAdminAccess: vi.fn(),
   normalizeSubscriptionTier: (value: unknown) =>
     value === "premium" ? "premium" : "free",
@@ -64,12 +67,14 @@ import { saveAiConnectionAction } from "@/lib/actions/operations";
 
 describe("saveAiConnectionAction", () => {
   it("rejects free-tier users before attempting AI configuration", async () => {
-    mockGetAppAccessContext.mockResolvedValue({
+    mockGetCurrentUserAccess.mockResolvedValue({
       clerkUserId: "user_123",
       appRole: "user",
       subscriptionTier: "free",
       isAdmin: false,
+      isFree: true,
       isPremium: false,
+      isUser: true,
     });
     mockRequireHouseholdRole.mockResolvedValue({
       householdId: "household_123",

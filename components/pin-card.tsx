@@ -1,9 +1,9 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { StatusBadge } from "@/components/status-badge";
 import { Card } from "@/components/ui/card";
 import type { FeedPinCard } from "@/types/view-models";
+import { Star } from "lucide-react";
 
 export function PinCard({ card }: { card: FeedPinCard }) {
   const aspectClass = getAspectClass(card.pinId);
@@ -31,8 +31,11 @@ export function PinCard({ card }: { card: FeedPinCard }) {
           ) : null}
           <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
           {card.reviewCount > 0 ? (
-            <div className="absolute bottom-3 right-3 flex justify-end">
-              <FeedCardStars value={card.averageRating ?? 0} />
+            // <div className="absolute bottom-3 right-3 flex justify-end">
+            //   <FeedCardStars value={card.averageRating ?? 0} />
+            // </div>
+            <div className="absolute top-3 right-3 justify-end gap-1 px-2 py-1 text-sm flex items-center rounded-full bg-primary/90 text-primary-foreground">
+              {card.averageRating} <Star className="size-3" />
             </div>
           ) : null}
         </div>

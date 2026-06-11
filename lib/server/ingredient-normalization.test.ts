@@ -29,16 +29,27 @@ vi.mock("@/lib/server/ai-provider", async () => {
   };
 });
 
+function setNodeEnv(value: string | undefined) {
+  Object.defineProperty(process.env, "NODE_ENV", {
+    value,
+    configurable: true,
+    writable: true,
+    enumerable: true,
+  });
+}
+
 async function withTestDatabase(
-  run: (args: { db: ReturnType<typeof openDatabase>["db"]; householdId: string }) => Promise<void> | void,
+  run: (args: { db: Awaited<ReturnType<typeof openDatabase>>["db"]; householdId: string }) => Promise<void> | void,
 ) {
+  const originalNodeEnv = process.env.NODE_ENV;
+  setNodeEnv("development");
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "food-picker-"));
   const sqlitePath = path.join(tempDir, "test.sqlite");
-  const { db, sqlite } = openDatabase(sqlitePath);
+  const { db, sqlite } = await openDatabase(sqlitePath);
   const householdId = "household-test";
 
   try {
-    db.insert(households)
+    await db.insert(households)
       .values({
         householdId,
         name: "Test kitchen",
@@ -49,7 +60,8 @@ async function withTestDatabase(
 
     await run({ db, householdId });
   } finally {
-    sqlite.close();
+    setNodeEnv(originalNodeEnv);
+    await sqlite.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }

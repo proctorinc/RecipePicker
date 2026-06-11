@@ -10,7 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getHouseholdAiConnectionSummary } from "@/lib/server/ai-provider";
-import { getAppAccessContext } from "@/lib/server/access";
+import { getCurrentUserAccess } from "@/lib/server/access";
 import { requireHouseholdContext } from "@/lib/server/auth";
 import { getPinterestConnectionSummary } from "@/lib/server/pinterest";
 import {
@@ -24,19 +24,91 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage() {
   const [context, access] = await Promise.all([
     requireHouseholdContext(),
-    getAppAccessContext(),
+    getCurrentUserAccess(),
   ]);
-  const [summary, ingredientQueue, pinterestConnection, aiConnection, boards] = await Promise.all([
-    getDashboardSummary(),
-    getIngredientReviewQueue(1, 1),
-    getPinterestConnectionSummary(context.householdId),
-    getHouseholdAiConnectionSummary(context.householdId),
-    getBoardSyncOptions(),
-  ]);
+  const [summary, ingredientQueue, pinterestConnection, aiConnection, boards] =
+    await Promise.all([
+      getDashboardSummary(),
+      getIngredientReviewQueue(1, 1),
+      getPinterestConnectionSummary(context.householdId),
+      getHouseholdAiConnectionSummary(context.householdId),
+      getBoardSyncOptions(),
+    ]);
   const recipeAttentionCount =
     summary.pendingRecipes + summary.failedRecipes + summary.reviewNeeded;
   const ingredientAttentionCount = ingredientQueue.totalCount;
   const syncedBoardCount = boards.filter((board) => board.syncEnabled).length;
+  const canManageSettings = access.isOwner || access.isAdmin;
+  const overviewItems = [
+    ...(canManageSettings
+      ? [
+          {
+            title: "Pinterest",
+            description: getPinterestDescription(
+              pinterestConnection.status,
+              syncedBoardCount,
+            ),
+            href: "/settings/pinterest",
+            ctaLabel: getPinterestCta(
+              pinterestConnection.status,
+              syncedBoardCount,
+            ),
+            emphasized:
+              pinterestConnection.status !== "active" || syncedBoardCount === 0,
+          },
+          {
+            title: "AI",
+            description: getAiDescription(
+              aiConnection.status,
+              aiConnection.providerLabel,
+              aiConnection.modelLabel,
+            ),
+            href: "/settings/ai",
+            ctaLabel: getAiCta(aiConnection.status),
+            emphasized: aiConnection.status !== "active",
+          },
+          {
+            title: "Recipes",
+            description:
+              recipeAttentionCount > 0
+                ? `${recipeAttentionCount} ${pluralize("recipe", recipeAttentionCount)} need review or have issues.`
+                : "No recipes need attention right now.",
+            href: "/settings/recipes",
+            ctaLabel:
+              recipeAttentionCount > 0 ? "Review recipes" : "Open recipes",
+            emphasized: recipeAttentionCount > 0,
+          },
+          {
+            title: "Ingredients",
+            description:
+              ingredientAttentionCount > 0
+                ? `${ingredientAttentionCount} ${pluralize("ingredient", ingredientAttentionCount)} need review.`
+                : "No ingredients need review right now.",
+            href: "/settings/ingredients",
+            ctaLabel:
+              ingredientAttentionCount > 0
+                ? "Review ingredients"
+                : "Open ingredients",
+            emphasized: ingredientAttentionCount > 0,
+          },
+        ]
+      : []),
+    ...(access.isAdmin
+      ? [
+          {
+            title: "AI Recipe Picker",
+            description: access.isPremium
+              ? "Open the premium prompt-based carousel to steer recipes with AI."
+              : "Upgrade to premium to unlock the separate AI recipe picker page.",
+            href: "/picker",
+            ctaLabel: access.isPremium
+              ? "Open AI picker"
+              : "View premium feature",
+            emphasized: access.isPremium,
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="space-y-6">
@@ -46,71 +118,30 @@ export default async function SettingsPage() {
         <CardHeader>
           <CardTitle>Overview</CardTitle>
           <CardDescription>
-            Quick links for anything that still needs setup or review.
+            {overviewItems.length > 0
+              ? "Quick links for anything that still needs setup or review"
+              : "Manage your household"}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
           <OverviewItem
-            title="Pinterest"
-            description={getPinterestDescription(
-              pinterestConnection.status,
-              syncedBoardCount,
-            )}
-            href="/settings/pinterest"
-            ctaLabel={getPinterestCta(
-              pinterestConnection.status,
-              syncedBoardCount,
-            )}
-            emphasized={pinterestConnection.status !== "active" || syncedBoardCount === 0}
+            title="My Household"
+            description="View and invite household members"
+            href="/settings/members"
+            ctaLabel="View"
+            emphasized={true}
           />
-          <OverviewItem
-            title="AI"
-            description={getAiDescription(
-              aiConnection.status,
-              aiConnection.providerLabel,
-              aiConnection.modelLabel,
-            )}
-            href="/settings/ai"
-            ctaLabel={getAiCta(aiConnection.status)}
-            emphasized={aiConnection.status !== "active"}
-          />
-          <OverviewItem
-            title="AI Recipe Picker"
-            description={
-              access.isPremium
-                ? "Open the premium prompt-based carousel to steer recipes with AI."
-                : "Upgrade to premium to unlock the separate AI recipe picker page."
-            }
-            href="/picker"
-            ctaLabel={access.isPremium ? "Open AI picker" : "View premium feature"}
-            emphasized={access.isPremium}
-          />
-          <OverviewItem
-            title="Recipes"
-            description={
-              recipeAttentionCount > 0
-                ? `${recipeAttentionCount} ${pluralize("recipe", recipeAttentionCount)} need review or have issues.`
-                : "No recipes need attention right now."
-            }
-            href="/settings/recipes"
-            ctaLabel={recipeAttentionCount > 0 ? "Review recipes" : "Open recipes"}
-            emphasized={recipeAttentionCount > 0}
-          />
-          <OverviewItem
-            title="Ingredients"
-            description={
-              ingredientAttentionCount > 0
-                ? `${ingredientAttentionCount} ${pluralize("ingredient", ingredientAttentionCount)} need review.`
-                : "No ingredients need review right now."
-            }
-            href="/settings/ingredients"
-            ctaLabel={
-              ingredientAttentionCount > 0
-                ? "Review ingredients"
-                : "Open ingredients"
-            }
-            emphasized={ingredientAttentionCount > 0}
-          />
+          {overviewItems.length > 0 &&
+            overviewItems.map((item) => (
+              <OverviewItem
+                key={item.title}
+                title={item.title}
+                description={item.description}
+                href={item.href}
+                ctaLabel={item.ctaLabel}
+                emphasized={item.emphasized}
+              />
+            ))}
         </CardContent>
       </Card>
     </div>
@@ -144,7 +175,9 @@ function OverviewItem({
       </div>
       <Link
         href={href}
-        className={buttonVariants({ variant: emphasized ? "default" : "outline" })}
+        className={buttonVariants({
+          variant: emphasized ? "default" : "outline",
+        })}
       >
         {ctaLabel}
       </Link>
@@ -153,7 +186,13 @@ function OverviewItem({
 }
 
 function getPinterestDescription(
-  status: "not_connected" | "active" | "expiring_soon" | "expired" | "reauthorization_required" | "revoked",
+  status:
+    | "not_connected"
+    | "active"
+    | "expiring_soon"
+    | "expired"
+    | "reauthorization_required"
+    | "revoked",
   syncedBoardCount: number,
 ) {
   if (status === "not_connected") {
@@ -172,7 +211,13 @@ function getPinterestDescription(
 }
 
 function getPinterestCta(
-  status: "not_connected" | "active" | "expiring_soon" | "expired" | "reauthorization_required" | "revoked",
+  status:
+    | "not_connected"
+    | "active"
+    | "expiring_soon"
+    | "expired"
+    | "reauthorization_required"
+    | "revoked",
   syncedBoardCount: number,
 ) {
   if (status === "not_connected") {
@@ -214,7 +259,9 @@ function getAiDescription(
   return "AI is connected.";
 }
 
-function getAiCta(status: "not_connected" | "active" | "test_failed" | "invalid") {
+function getAiCta(
+  status: "not_connected" | "active" | "test_failed" | "invalid",
+) {
   if (status === "not_connected") {
     return "Set up AI";
   }
