@@ -143,6 +143,21 @@ CREATE TABLE `household_pins` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `idx_household_pins_household_pin_unique` ON `household_pins` (`household_id`,`pinterest_pin_id`);--> statement-breakpoint
 CREATE INDEX `idx_household_pins_board_id` ON `household_pins` (`board_id`);--> statement-breakpoint
+CREATE TABLE `household_recipe_events` (
+	`event_id` text PRIMARY KEY NOT NULL,
+	`household_id` text NOT NULL,
+	`recipe_id` text NOT NULL,
+	`date` text NOT NULL,
+	`created_by_clerk_user_id` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`household_id`) REFERENCES `households`(`household_id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`recipe_id`) REFERENCES `household_recipes`(`recipe_id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE INDEX `idx_household_recipe_events_household_date` ON `household_recipe_events` (`household_id`,`date`);--> statement-breakpoint
+CREATE INDEX `idx_household_recipe_events_recipe_id` ON `household_recipe_events` (`recipe_id`);--> statement-breakpoint
+CREATE INDEX `idx_household_recipe_events_created_by` ON `household_recipe_events` (`created_by_clerk_user_id`);--> statement-breakpoint
 CREATE TABLE `household_recipe_extraction_attempts` (
 	`attempt_id` text PRIMARY KEY NOT NULL,
 	`extraction_id` text NOT NULL,
@@ -327,6 +342,7 @@ CREATE TABLE `household_recipe_reviews` (
 	`review_id` text PRIMARY KEY NOT NULL,
 	`household_id` text NOT NULL,
 	`recipe_id` text NOT NULL,
+	`event_id` text,
 	`reviewed_by_clerk_user_id` text,
 	`rating_value` real NOT NULL,
 	`eaten_on` text,
@@ -334,10 +350,12 @@ CREATE TABLE `household_recipe_reviews` (
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`household_id`) REFERENCES `households`(`household_id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`recipe_id`) REFERENCES `household_recipes`(`recipe_id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`recipe_id`) REFERENCES `household_recipes`(`recipe_id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`event_id`) REFERENCES `household_recipe_events`(`event_id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE INDEX `idx_household_recipe_reviews_recipe_id` ON `household_recipe_reviews` (`recipe_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_household_recipe_reviews_event_unique` ON `household_recipe_reviews` (`event_id`);--> statement-breakpoint
 CREATE INDEX `idx_household_recipe_reviews_eaten_on` ON `household_recipe_reviews` (`eaten_on`);--> statement-breakpoint
 CREATE INDEX `idx_household_recipe_reviews_reviewer` ON `household_recipe_reviews` (`reviewed_by_clerk_user_id`);--> statement-breakpoint
 CREATE TABLE `household_recipe_sources` (
@@ -421,9 +439,12 @@ CREATE TABLE `pinterest_accounts` (
 	`refresh_token_expires_at` text,
 	`last_refresh_attempt_at` text,
 	`last_refresh_succeeded_at` text,
+	`last_sync_attempt_at` text,
+	`last_sync_trigger` text,
 	`last_sync_at` text,
 	`last_sync_status` text,
 	`last_sync_error` text,
+	`sync_in_progress_at` text,
 	`connection_status` text DEFAULT 'active' NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,

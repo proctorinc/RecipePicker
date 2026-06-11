@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f4dbb441-4eaa-49c0-8005-a202c3769890",
+  "id": "a9c2e462-d6dd-497a-bc71-dc215a87ee9a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "board_sync_subscriptions": {
@@ -1018,6 +1018,115 @@
           ],
           "columnsTo": [
             "board_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "household_recipe_events": {
+      "name": "household_recipe_events",
+      "columns": {
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "household_id": {
+          "name": "household_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "recipe_id": {
+          "name": "recipe_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "date": {
+          "name": "date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_by_clerk_user_id": {
+          "name": "created_by_clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_household_recipe_events_household_date": {
+          "name": "idx_household_recipe_events_household_date",
+          "columns": [
+            "household_id",
+            "date"
+          ],
+          "isUnique": false
+        },
+        "idx_household_recipe_events_recipe_id": {
+          "name": "idx_household_recipe_events_recipe_id",
+          "columns": [
+            "recipe_id"
+          ],
+          "isUnique": false
+        },
+        "idx_household_recipe_events_created_by": {
+          "name": "idx_household_recipe_events_created_by",
+          "columns": [
+            "created_by_clerk_user_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "household_recipe_events_household_id_households_household_id_fk": {
+          "name": "household_recipe_events_household_id_households_household_id_fk",
+          "tableFrom": "household_recipe_events",
+          "tableTo": "households",
+          "columnsFrom": [
+            "household_id"
+          ],
+          "columnsTo": [
+            "household_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "household_recipe_events_recipe_id_household_recipes_recipe_id_fk": {
+          "name": "household_recipe_events_recipe_id_household_recipes_recipe_id_fk",
+          "tableFrom": "household_recipe_events",
+          "tableTo": "household_recipes",
+          "columnsFrom": [
+            "recipe_id"
+          ],
+          "columnsTo": [
+            "recipe_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -2377,6 +2486,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "reviewed_by_clerk_user_id": {
           "name": "reviewed_by_clerk_user_id",
           "type": "text",
@@ -2428,6 +2544,13 @@
           ],
           "isUnique": false
         },
+        "idx_household_recipe_reviews_event_unique": {
+          "name": "idx_household_recipe_reviews_event_unique",
+          "columns": [
+            "event_id"
+          ],
+          "isUnique": true
+        },
         "idx_household_recipe_reviews_eaten_on": {
           "name": "idx_household_recipe_reviews_eaten_on",
           "columns": [
@@ -2466,6 +2589,19 @@
           ],
           "columnsTo": [
             "recipe_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "household_recipe_reviews_event_id_household_recipe_events_event_id_fk": {
+          "name": "household_recipe_reviews_event_id_household_recipe_events_event_id_fk",
+          "tableFrom": "household_recipe_reviews",
+          "tableTo": "household_recipe_events",
+          "columnsFrom": [
+            "event_id"
+          ],
+          "columnsTo": [
+            "event_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -3039,6 +3175,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "last_sync_attempt_at": {
+          "name": "last_sync_attempt_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_sync_trigger": {
+          "name": "last_sync_trigger",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "last_sync_at": {
           "name": "last_sync_at",
           "type": "text",
@@ -3055,6 +3205,13 @@
         },
         "last_sync_error": {
           "name": "last_sync_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sync_in_progress_at": {
+          "name": "sync_in_progress_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
