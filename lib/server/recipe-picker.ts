@@ -94,7 +94,7 @@ type RecipeCandidate = {
 
 export type TestRecipeCandidate = RecipeCandidate;
 
-type IngredientResolution = ReturnType<typeof resolveIngredientSearchQuery>;
+type IngredientResolution = Awaited<ReturnType<typeof resolveIngredientSearchQuery>>;
 
 type PickerInterpretation = {
   intent: RecipePickerIntent;
@@ -507,16 +507,24 @@ async function generateRecipePickerTurn(args: {
             recipeMap,
           });
 
-    const includeIngredientResolutions = interpretation.mustIncludeIngredients
-      .map((term) => resolveIngredientSearchQuery(db, args.householdId, term))
-      .filter((value): value is NonNullable<IngredientResolution> =>
-        Boolean(value),
-      );
-    const excludeIngredientResolutions = interpretation.mustExcludeIngredients
-      .map((term) => resolveIngredientSearchQuery(db, args.householdId, term))
-      .filter((value): value is NonNullable<IngredientResolution> =>
-        Boolean(value),
-      );
+    const includeIngredientResolutions = (
+      await Promise.all(
+        interpretation.mustIncludeIngredients.map((term) =>
+          resolveIngredientSearchQuery(db, args.householdId, term),
+        ),
+      )
+    ).filter((value): value is NonNullable<IngredientResolution> =>
+      Boolean(value),
+    );
+    const excludeIngredientResolutions = (
+      await Promise.all(
+        interpretation.mustExcludeIngredients.map((term) =>
+          resolveIngredientSearchQuery(db, args.householdId, term),
+        ),
+      )
+    ).filter((value): value is NonNullable<IngredientResolution> =>
+      Boolean(value),
+    );
 
     const scoreContext: ScoreContext = {
       includeIngredientResolutions,

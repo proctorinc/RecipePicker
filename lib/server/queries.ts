@@ -75,13 +75,15 @@ export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
 
   try {
     const rows = await getFeedRecipeRows(db, context.householdId);
-    return prepareFeedCards({
+    const cards = await prepareFeedCards({
       rows,
       householdId: context.householdId,
       db,
       searchText,
       subscriptionTier: appAccess.subscriptionTier,
-    }).map(({ updatedAt: _updatedAt, ingredientMatchScore: _score, ...card }) => card);
+    });
+
+    return cards.map(({ updatedAt: _updatedAt, ingredientMatchScore: _score, ...card }) => card);
   } finally {
     await sqlite.close();
   }
@@ -104,7 +106,7 @@ export async function getFeedPinsPage({
 
   try {
     const rows = await getFeedRecipeRows(db, context.householdId);
-    const cards = prepareFeedCards({
+    const cards = await prepareFeedCards({
       rows,
       householdId: context.householdId,
       db,
@@ -913,7 +915,7 @@ export async function getCanonicalIngredientOptions(): Promise<
   const { db, sqlite } = await openDatabase();
 
   try {
-    return getCanonicalIngredientOptionsForHousehold(db, context.householdId);
+    return await getCanonicalIngredientOptionsForHousehold(db, context.householdId);
   } finally {
     await sqlite.close();
   }
@@ -1133,7 +1135,7 @@ function toFeedCard(row: RecipeGraph, subscriptionTier: "free" | "premium") {
   };
 }
 
-function prepareFeedCards({
+async function prepareFeedCards({
   rows,
   householdId,
   db,
@@ -1148,7 +1150,7 @@ function prepareFeedCards({
 }) {
   const normalizedQuery = searchText?.trim().toLowerCase() ?? "";
   const ingredientQuery = normalizedQuery
-    ? resolveIngredientSearchQuery(db, householdId, normalizedQuery)
+    ? await resolveIngredientSearchQuery(db, householdId, normalizedQuery)
     : null;
 
   return rows
@@ -1306,7 +1308,7 @@ function describeExtractionSummary(
 
 function getIngredientMatchScore(
   row: RecipeGraph,
-  query: ReturnType<typeof resolveIngredientSearchQuery>,
+  query: Awaited<ReturnType<typeof resolveIngredientSearchQuery>>,
 ) {
   if (!query?.searchCanonicalIngredientIds.length) {
     return 0;

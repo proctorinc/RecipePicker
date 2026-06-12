@@ -144,7 +144,7 @@ export async function normalizeIngredientForHousehold(
   householdId: string,
   ingredient: ParsedIngredientInput,
 ): Promise<IngredientNormalizationResult> {
-  ensureDefaultIngredientCatalog(db, householdId);
+  await ensureDefaultIngredientCatalog(db, householdId);
 
   const normalizedIngredientPhrase = normalizeIngredientKey(ingredient.ingredientText ?? ingredient.originalText);
 
@@ -164,7 +164,7 @@ export async function normalizeIngredientForHousehold(
     };
   }
 
-  const mapped = findPhraseMapping(db, householdId, normalizedIngredientPhrase);
+  const mapped = await findPhraseMapping(db, householdId, normalizedIngredientPhrase);
 
   if (mapped?.canonicalIngredientId) {
     return {
@@ -182,7 +182,7 @@ export async function normalizeIngredientForHousehold(
     };
   }
 
-  const exactCanonical = findCanonicalByKey(db, householdId, normalizedIngredientPhrase);
+  const exactCanonical = await findCanonicalByKey(db, householdId, normalizedIngredientPhrase);
 
   if (exactCanonical) {
     const result = resolvedIngredientFromCanonical(
@@ -192,14 +192,14 @@ export async function normalizeIngredientForHousehold(
       "canonical_exact",
       mapped?.normalizationStatus === "confirmed" ? "confirmed" : "auto_matched",
     );
-    upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, result);
+    await upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, result);
     return {
       ...result,
       normalizedIngredientPhrase,
     };
   }
 
-  const exactAlias = findAliasByKey(db, householdId, normalizedIngredientPhrase);
+  const exactAlias = await findAliasByKey(db, householdId, normalizedIngredientPhrase);
 
   if (exactAlias) {
     const result = resolvedIngredientFromCanonical(
@@ -209,27 +209,27 @@ export async function normalizeIngredientForHousehold(
       "alias",
       "auto_matched",
     );
-    upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, result);
+    await upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, result);
     return {
       ...result,
       normalizedIngredientPhrase,
     };
   }
 
-  const variantMatch = tryMatchVariantAttributes(db, householdId, normalizedIngredientPhrase);
+  const variantMatch = await tryMatchVariantAttributes(db, householdId, normalizedIngredientPhrase);
 
   if (variantMatch) {
-    upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, variantMatch);
+    await upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, variantMatch);
     return {
       ...variantMatch,
       normalizedIngredientPhrase,
     };
   }
 
-  const hierarchyMatch = tryMatchHierarchyRule(db, householdId, normalizedIngredientPhrase);
+  const hierarchyMatch = await tryMatchHierarchyRule(db, householdId, normalizedIngredientPhrase);
 
   if (hierarchyMatch) {
-    upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, hierarchyMatch);
+    await upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, hierarchyMatch);
     return {
       ...hierarchyMatch,
       normalizedIngredientPhrase,
@@ -241,13 +241,13 @@ export async function normalizeIngredientForHousehold(
     originalText: ingredient.originalText,
     parsedIngredientText: ingredient.ingredientText,
     normalizedIngredientPhrase,
-    canonicalIngredients: getCanonicalIngredientOptionsForHousehold(db, householdId),
+    canonicalIngredients: await getCanonicalIngredientOptionsForHousehold(db, householdId),
   });
-  const aiResult = applyAiSuggestion(db, householdId, normalizedIngredientPhrase, aiSuggestions);
+  const aiResult = await applyAiSuggestion(db, householdId, normalizedIngredientPhrase, aiSuggestions);
 
   if (aiResult) {
     if (aiResult.normalizationStatus !== "needs_review") {
-      upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, aiResult);
+      await upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, aiResult);
     }
 
     return {
@@ -273,7 +273,7 @@ export async function normalizeIngredientForHousehold(
     };
   }
 
-  const canonicalIngredient = createCanonicalIngredient(
+  const canonicalIngredient = await createCanonicalIngredient(
     db,
     householdId,
     ingredient.ingredientText ?? ingredient.originalText,
@@ -288,7 +288,7 @@ export async function normalizeIngredientForHousehold(
     "heuristic_exact",
     "auto_matched",
   );
-  upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, autoResult);
+  await upsertPhraseMapping(db, householdId, normalizedIngredientPhrase, autoResult);
 
   return {
     ...autoResult,
@@ -296,12 +296,12 @@ export async function normalizeIngredientForHousehold(
   };
 }
 
-export function resolveIngredientSearchQuery(
+export async function resolveIngredientSearchQuery(
   db: any,
   householdId: string,
   query: string,
-): IngredientSearchResolution | null {
-  ensureDefaultIngredientCatalog(db, householdId);
+): Promise<IngredientSearchResolution | null> {
+  await ensureDefaultIngredientCatalog(db, householdId);
 
   const normalizedIngredientPhrase = normalizeIngredientKey(query);
 
@@ -309,7 +309,7 @@ export function resolveIngredientSearchQuery(
     return null;
   }
 
-  const mapped = findPhraseMapping(db, householdId, normalizedIngredientPhrase);
+  const mapped = await findPhraseMapping(db, householdId, normalizedIngredientPhrase);
 
   if (mapped?.canonicalIngredientId && mapped.canonicalIngredient) {
     return buildSearchResolution(
@@ -324,7 +324,7 @@ export function resolveIngredientSearchQuery(
     );
   }
 
-  const exactCanonical = findCanonicalByKey(db, householdId, normalizedIngredientPhrase);
+  const exactCanonical = await findCanonicalByKey(db, householdId, normalizedIngredientPhrase);
 
   if (exactCanonical) {
     return buildSearchResolution(
@@ -339,7 +339,7 @@ export function resolveIngredientSearchQuery(
     );
   }
 
-  const exactAlias = findAliasByKey(db, householdId, normalizedIngredientPhrase);
+  const exactAlias = await findAliasByKey(db, householdId, normalizedIngredientPhrase);
 
   if (exactAlias) {
     return buildSearchResolution(
@@ -354,10 +354,10 @@ export function resolveIngredientSearchQuery(
     );
   }
 
-  const variantMatch = tryMatchVariantAttributes(db, householdId, normalizedIngredientPhrase);
+  const variantMatch = await tryMatchVariantAttributes(db, householdId, normalizedIngredientPhrase);
 
   if (variantMatch?.canonicalIngredientId) {
-    const canonicalIngredient = findCanonicalById(db, householdId, variantMatch.canonicalIngredientId);
+    const canonicalIngredient = await findCanonicalById(db, householdId, variantMatch.canonicalIngredientId);
     if (canonicalIngredient) {
       return buildSearchResolution(
         db,
@@ -372,10 +372,10 @@ export function resolveIngredientSearchQuery(
     }
   }
 
-  const hierarchyMatch = tryMatchHierarchyRule(db, householdId, normalizedIngredientPhrase, { persist: false });
+  const hierarchyMatch = await tryMatchHierarchyRule(db, householdId, normalizedIngredientPhrase, { persist: false });
 
   if (hierarchyMatch?.canonicalIngredientId) {
-    const canonicalIngredient = findCanonicalById(db, householdId, hierarchyMatch.canonicalIngredientId);
+    const canonicalIngredient = await findCanonicalById(db, householdId, hierarchyMatch.canonicalIngredientId);
     if (canonicalIngredient) {
       return buildSearchResolution(
         db,
@@ -393,13 +393,16 @@ export function resolveIngredientSearchQuery(
   return null;
 }
 
-export function resolveIngredientSearchQueries(
+export async function resolveIngredientSearchQueries(
   db: any,
   householdId: string,
   queries: string[],
 ) {
-  return queries
-    .map((query) => resolveIngredientSearchQuery(db, householdId, query))
+  const resolutions = await Promise.all(
+    queries.map((query) => resolveIngredientSearchQuery(db, householdId, query)),
+  );
+
+  return resolutions
     .filter((value): value is IngredientSearchResolution => Boolean(value));
 }
 
@@ -457,7 +460,7 @@ export function mergeIngredientsForShopping<T extends {
   return [...groups.values()];
 }
 
-export function upsertReviewedIngredientMapping(args: {
+export async function upsertReviewedIngredientMapping(args: {
   db: any;
   householdId: string;
   normalizedPhrase: string;
@@ -468,7 +471,7 @@ export function upsertReviewedIngredientMapping(args: {
   saveAlias?: boolean;
 }) {
   const attributes = normalizeAttributes(args.attributes);
-  const canonical = findCanonicalById(args.db, args.householdId, args.canonicalIngredientId);
+  const canonical = await findCanonicalById(args.db, args.householdId, args.canonicalIngredientId);
 
   if (!canonical) {
     throw new Error("Canonical ingredient was not found.");
@@ -483,17 +486,17 @@ export function upsertReviewedIngredientMapping(args: {
   );
 
   if (args.savePhraseMapping !== false) {
-    upsertPhraseMapping(args.db, args.householdId, normalizeIngredientKey(args.normalizedPhrase), result);
+    await upsertPhraseMapping(args.db, args.householdId, normalizeIngredientKey(args.normalizedPhrase), result);
   }
 
   const aliasText = normalizeWhitespace(args.aliasText ?? "");
 
   if (aliasText && args.saveAlias !== false) {
-    upsertAlias(args.db, args.householdId, aliasText, args.canonicalIngredientId, "reviewed_mapping");
+    await upsertAlias(args.db, args.householdId, aliasText, args.canonicalIngredientId, "reviewed_mapping");
   }
 }
 
-export function createCanonicalIngredient(
+export async function createCanonicalIngredient(
   db: any,
   householdId: string,
   displayName: string,
@@ -503,7 +506,7 @@ export function createCanonicalIngredient(
   },
 ) {
   const normalizedKey = normalizeIngredientKey(displayName);
-  const existing = findCanonicalByKey(db, householdId, normalizedKey);
+  const existing = await findCanonicalByKey(db, householdId, normalizedKey);
 
   if (existing) {
     if (
@@ -511,7 +514,7 @@ export function createCanonicalIngredient(
       (existing.parentCanonicalIngredientId !== (options.parentCanonicalIngredientId ?? null) ||
         existing.ingredientKind !== (options.ingredientKind ?? existing.ingredientKind))
     ) {
-      db.update(householdCanonicalIngredients)
+      await db.update(householdCanonicalIngredients)
         .set({
           parentCanonicalIngredientId: options.parentCanonicalIngredientId ?? null,
           ingredientKind: options.ingredientKind ?? existing.ingredientKind,
@@ -520,7 +523,7 @@ export function createCanonicalIngredient(
         .where(eq(householdCanonicalIngredients.canonicalIngredientId, existing.canonicalIngredientId))
         .run();
 
-      return findCanonicalById(db, householdId, existing.canonicalIngredientId) ?? existing;
+      return await findCanonicalById(db, householdId, existing.canonicalIngredientId) ?? existing;
     }
 
     return existing;
@@ -538,17 +541,17 @@ export function createCanonicalIngredient(
     updatedAt: now,
   };
 
-  db.insert(householdCanonicalIngredients).values(row).run();
-  return findCanonicalById(db, householdId, row.canonicalIngredientId) ?? row;
+  await db.insert(householdCanonicalIngredients).values(row).run();
+  return await findCanonicalById(db, householdId, row.canonicalIngredientId) ?? row;
 }
 
-export function getCanonicalIngredientOptionsForHousehold(
+export async function getCanonicalIngredientOptionsForHousehold(
   db: any,
   householdId: string,
-): CanonicalIngredientOption[] {
-  ensureDefaultIngredientCatalog(db, householdId);
+): Promise<CanonicalIngredientOption[]> {
+  await ensureDefaultIngredientCatalog(db, householdId);
 
-  return db.query.householdCanonicalIngredients.findMany({
+  return (await db.query.householdCanonicalIngredients.findMany({
     where: (table: typeof householdCanonicalIngredients) => and(eq(table.householdId, householdId)),
     orderBy: (table: typeof householdCanonicalIngredients, operators: { asc: (column: unknown) => unknown }) => [
       operators.asc(table.displayName),
@@ -556,7 +559,7 @@ export function getCanonicalIngredientOptionsForHousehold(
     with: {
       parentCanonicalIngredient: true,
     },
-  }).sync().map((ingredient: CanonicalWithParent) => ({
+  })).map((ingredient: CanonicalWithParent) => ({
     canonicalIngredientId: ingredient.canonicalIngredientId,
     displayName: ingredient.displayName,
     ingredientKind: ingredient.ingredientKind,
@@ -565,20 +568,20 @@ export function getCanonicalIngredientOptionsForHousehold(
   }));
 }
 
-function ensureDefaultIngredientCatalog(db: any, householdId: string) {
+async function ensureDefaultIngredientCatalog(db: any, householdId: string) {
   const now = new Date().toISOString();
   const canonicalByName = new Map<string, CanonicalWithParent>();
 
   for (const seed of DEFAULT_INGREDIENT_SEEDS) {
     const parent = seed.parentDisplayName ? canonicalByName.get(seed.parentDisplayName) ?? null : null;
-    const canonical = createCanonicalIngredient(db, householdId, seed.displayName, {
+    const canonical = await createCanonicalIngredient(db, householdId, seed.displayName, {
       parentCanonicalIngredientId: parent?.canonicalIngredientId ?? null,
       ingredientKind: seed.ingredientKind,
     });
     canonicalByName.set(seed.displayName, canonical);
 
     for (const alias of seed.aliases ?? []) {
-      db.insert(householdIngredientAliases)
+      await db.insert(householdIngredientAliases)
         .values({
           aliasId: createId(),
           householdId,
@@ -597,7 +600,7 @@ function ensureDefaultIngredientCatalog(db: any, householdId: string) {
   }
 }
 
-function tryMatchVariantAttributes(db: any, householdId: string, normalizedPhrase: string): ResolvedIngredient | null {
+async function tryMatchVariantAttributes(db: any, householdId: string, normalizedPhrase: string): Promise<ResolvedIngredient | null> {
   const tokens = normalizedPhrase.split(" ").filter(Boolean);
   const attributes: string[] = [];
   let index = 0;
@@ -612,7 +615,7 @@ function tryMatchVariantAttributes(db: any, householdId: string, normalizedPhras
   }
 
   const basePhrase = tokens.slice(index).join(" ");
-  const exactCanonical = findCanonicalByKey(db, householdId, basePhrase);
+  const exactCanonical = await findCanonicalByKey(db, householdId, basePhrase);
 
   if (exactCanonical) {
     return resolvedIngredientFromCanonical(
@@ -624,7 +627,7 @@ function tryMatchVariantAttributes(db: any, householdId: string, normalizedPhras
     );
   }
 
-  const exactAlias = findAliasByKey(db, householdId, basePhrase);
+  const exactAlias = await findAliasByKey(db, householdId, basePhrase);
 
   if (exactAlias) {
     return resolvedIngredientFromCanonical(
@@ -639,19 +642,19 @@ function tryMatchVariantAttributes(db: any, householdId: string, normalizedPhras
   return null;
 }
 
-function tryMatchHierarchyRule(
+async function tryMatchHierarchyRule(
   db: any,
   householdId: string,
   normalizedPhrase: string,
   options?: { persist?: boolean },
-): ResolvedIngredient | null {
-  const familyCanonical = findHierarchyFamilyCandidate(db, householdId, normalizedPhrase);
+): Promise<ResolvedIngredient | null> {
+  const familyCanonical = await findHierarchyFamilyCandidate(db, householdId, normalizedPhrase);
 
   if (!familyCanonical) {
     return null;
   }
 
-  const leafCanonical = createCanonicalIngredient(db, householdId, normalizedPhrase, {
+  const leafCanonical = await createCanonicalIngredient(db, householdId, normalizedPhrase, {
     parentCanonicalIngredientId: familyCanonical.canonicalIngredientId,
     ingredientKind: "leaf",
   });
@@ -665,14 +668,14 @@ function tryMatchHierarchyRule(
   );
 }
 
-function findHierarchyFamilyCandidate(db: any, householdId: string, normalizedPhrase: string) {
-  const families = db.query.householdCanonicalIngredients.findMany({
+async function findHierarchyFamilyCandidate(db: any, householdId: string, normalizedPhrase: string) {
+  const families = await db.query.householdCanonicalIngredients.findMany({
     where: (table: typeof householdCanonicalIngredients) =>
       and(eq(table.householdId, householdId), eq(table.ingredientKind, "family")),
     with: {
       parentCanonicalIngredient: true,
     },
-  }).sync() as CanonicalWithParent[];
+  }) as CanonicalWithParent[];
 
   for (const family of families) {
     if (
@@ -687,12 +690,12 @@ function findHierarchyFamilyCandidate(db: any, householdId: string, normalizedPh
   return null;
 }
 
-function applyAiSuggestion(
+async function applyAiSuggestion(
   db: any,
   householdId: string,
   normalizedIngredientPhrase: string,
   aiSuggestions: IngredientReviewSuggestionView[],
-): ResolvedIngredient | null {
+): Promise<ResolvedIngredient | null> {
   const bestSuggestion = aiSuggestions[0];
 
   if (!bestSuggestion) {
@@ -704,7 +707,7 @@ function applyAiSuggestion(
     bestSuggestion.canonicalIngredientId &&
     bestSuggestion.confidence >= AI_AUTO_MATCH_CONFIDENCE_THRESHOLD
   ) {
-    const canonicalIngredient = findCanonicalById(db, householdId, bestSuggestion.canonicalIngredientId);
+    const canonicalIngredient = await findCanonicalById(db, householdId, bestSuggestion.canonicalIngredientId);
 
     if (!canonicalIngredient) {
       return null;
@@ -725,7 +728,7 @@ function applyAiSuggestion(
     bestSuggestion.parentCanonicalIngredientId &&
     bestSuggestion.confidence >= AI_AUTO_MATCH_CONFIDENCE_THRESHOLD
   ) {
-    const canonicalIngredient = createCanonicalIngredient(db, householdId, bestSuggestion.newCanonicalName, {
+    const canonicalIngredient = await createCanonicalIngredient(db, householdId, bestSuggestion.newCanonicalName, {
       parentCanonicalIngredientId: bestSuggestion.parentCanonicalIngredientId,
       ingredientKind: bestSuggestion.ingredientKind ?? "leaf",
     });
@@ -753,7 +756,7 @@ function applyAiSuggestion(
   );
 }
 
-function buildSearchResolution(
+async function buildSearchResolution(
   db: any,
   householdId: string,
   normalizedIngredientPhrase: string,
@@ -762,8 +765,8 @@ function buildSearchResolution(
   matchConfidence: number | null,
   matchedBy: string | null,
   normalizationStatus: IngredientNormalizationStatus,
-): IngredientSearchResolution {
-  const descendantCanonicalIngredientIds = getDescendantCanonicalIngredientIds(db, householdId, canonicalIngredient.canonicalIngredientId);
+): Promise<IngredientSearchResolution> {
+  const descendantCanonicalIngredientIds = await getDescendantCanonicalIngredientIds(db, householdId, canonicalIngredient.canonicalIngredientId);
   const searchCanonicalIngredientIds = [
     canonicalIngredient.canonicalIngredientId,
     ...descendantCanonicalIngredientIds,
@@ -785,18 +788,18 @@ function buildSearchResolution(
   };
 }
 
-function getDescendantCanonicalIngredientIds(
+async function getDescendantCanonicalIngredientIds(
   db: any,
   householdId: string,
   canonicalIngredientId: string,
 ) {
-  const canonicals = db.query.householdCanonicalIngredients.findMany({
+  const canonicals = await db.query.householdCanonicalIngredients.findMany({
     where: (table: typeof householdCanonicalIngredients) => and(eq(table.householdId, householdId)),
     columns: {
       canonicalIngredientId: true,
       parentCanonicalIngredientId: true,
     },
-  }).sync() as Array<{
+  }) as Array<{
     canonicalIngredientId: string;
     parentCanonicalIngredientId: string | null;
   }>;
@@ -830,8 +833,8 @@ function getDescendantCanonicalIngredientIds(
   return descendants;
 }
 
-function findPhraseMapping(db: any, householdId: string, normalizedPhrase: string) {
-  return db.query.householdIngredientPhraseMappings.findFirst({
+async function findPhraseMapping(db: any, householdId: string, normalizedPhrase: string) {
+  return await db.query.householdIngredientPhraseMappings.findFirst({
     where: (table: typeof householdIngredientPhraseMappings) =>
       and(eq(table.householdId, householdId), eq(table.normalizedPhrase, normalizedPhrase)),
     with: {
@@ -841,31 +844,31 @@ function findPhraseMapping(db: any, householdId: string, normalizedPhrase: strin
         },
       },
     },
-  }).sync();
+  });
 }
 
-function findCanonicalById(db: any, householdId: string, canonicalIngredientId: string) {
-  return db.query.householdCanonicalIngredients.findFirst({
+async function findCanonicalById(db: any, householdId: string, canonicalIngredientId: string) {
+  return await db.query.householdCanonicalIngredients.findFirst({
     where: (table: typeof householdCanonicalIngredients) =>
       and(eq(table.householdId, householdId), eq(table.canonicalIngredientId, canonicalIngredientId)),
     with: {
       parentCanonicalIngredient: true,
     },
-  }).sync() as CanonicalWithParent | undefined;
+  }) as CanonicalWithParent | undefined;
 }
 
-function findCanonicalByKey(db: any, householdId: string, normalizedKey: string) {
-  return db.query.householdCanonicalIngredients.findFirst({
+async function findCanonicalByKey(db: any, householdId: string, normalizedKey: string) {
+  return await db.query.householdCanonicalIngredients.findFirst({
     where: (table: typeof householdCanonicalIngredients) =>
       and(eq(table.householdId, householdId), eq(table.normalizedKey, normalizedKey)),
     with: {
       parentCanonicalIngredient: true,
     },
-  }).sync() as CanonicalWithParent | undefined;
+  }) as CanonicalWithParent | undefined;
 }
 
-function findAliasByKey(db: any, householdId: string, normalizedAlias: string) {
-  return db.query.householdIngredientAliases.findFirst({
+async function findAliasByKey(db: any, householdId: string, normalizedAlias: string) {
+  return await db.query.householdIngredientAliases.findFirst({
     where: (table: typeof householdIngredientAliases) =>
       and(eq(table.householdId, householdId), eq(table.normalizedAlias, normalizedAlias)),
     with: {
@@ -875,7 +878,7 @@ function findAliasByKey(db: any, householdId: string, normalizedAlias: string) {
         },
       },
     },
-  }).sync() as
+  }) as
     | {
         aliasId: string;
         canonicalIngredientId: string;
@@ -890,7 +893,7 @@ function findAliasByKey(db: any, householdId: string, normalizedAlias: string) {
     | undefined;
 }
 
-function upsertPhraseMapping(
+async function upsertPhraseMapping(
   db: any,
   householdId: string,
   normalizedPhrase: string,
@@ -898,7 +901,7 @@ function upsertPhraseMapping(
 ) {
   const now = new Date().toISOString();
 
-  db.insert(householdIngredientPhraseMappings)
+  await db.insert(householdIngredientPhraseMappings)
     .values({
       mappingId: createId(),
       householdId,
@@ -925,7 +928,7 @@ function upsertPhraseMapping(
     .run();
 }
 
-function upsertAlias(
+async function upsertAlias(
   db: any,
   householdId: string,
   aliasText: string,
@@ -934,7 +937,7 @@ function upsertAlias(
 ) {
   const now = new Date().toISOString();
 
-  db.insert(householdIngredientAliases)
+  await db.insert(householdIngredientAliases)
     .values({
       aliasId: createId(),
       householdId,

@@ -156,9 +156,9 @@ describe("ingredient extraction and normalization", () => {
 
   it("reuses prior confirmed mappings for repeated imports", async () => {
     await withTestDatabase(async ({ db, householdId }) => {
-      const canonical = createCanonicalIngredient(db, householdId, "Chili crisp");
+      const canonical = await createCanonicalIngredient(db, householdId, "Chili crisp");
 
-      upsertReviewedIngredientMapping({
+      await upsertReviewedIngredientMapping({
         db,
         householdId,
         normalizedPhrase: normalizeIngredientKey("momofuku chili crunch"),
@@ -187,7 +187,7 @@ describe("ingredient extraction and normalization", () => {
         originalText: "1 cup dark brown sugar",
         ingredientText: "dark brown sugar",
       });
-      const query = resolveIngredientSearchQuery(db, householdId, "brown sugar");
+      const query = await resolveIngredientSearchQuery(db, householdId, "brown sugar");
 
       expect(query?.canonicalIngredientId).toBeTruthy();
       expect(light.canonicalIngredientId).toBe(query?.canonicalIngredientId);
@@ -242,8 +242,8 @@ describe("ingredient extraction and normalization", () => {
 
   it("expands parent ingredient search to descendant ingredients but keeps child search specific", async () => {
     await withTestDatabase(async ({ db, householdId }) => {
-      const chickenQuery = resolveIngredientSearchQuery(db, householdId, "chicken");
-      const chickenBreastQuery = resolveIngredientSearchQuery(db, householdId, "chicken breast");
+      const chickenQuery = await resolveIngredientSearchQuery(db, householdId, "chicken");
+      const chickenBreastQuery = await resolveIngredientSearchQuery(db, householdId, "chicken breast");
 
       expect(chickenQuery).not.toBeNull();
       expect(chickenBreastQuery).not.toBeNull();

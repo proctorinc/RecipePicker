@@ -600,13 +600,13 @@ export const reviewIngredientAction = withActionLogging(
 
       const canonicalIngredient =
         resolvedReview.mode === "create_new"
-          ? createCanonicalIngredient(db, context.householdId, resolvedReview.displayName, {
+          ? await createCanonicalIngredient(db, context.householdId, resolvedReview.displayName, {
               parentCanonicalIngredientId: resolvedReview.parentCanonicalIngredientId,
               ingredientKind: resolvedReview.ingredientKind,
             })
           : { canonicalIngredientId: resolvedReview.canonicalIngredientId };
 
-      upsertReviewedIngredientMapping({
+      await upsertReviewedIngredientMapping({
         db,
         householdId: context.householdId,
         normalizedPhrase: normalizedPhrase || ingredient.normalizedIngredientPhrase || ingredient.originalText,
