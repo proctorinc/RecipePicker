@@ -1,7 +1,6 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useDeferredValue, useMemo, useState, useTransition } from "react";
 import {
   ChevronLeft,
@@ -13,6 +12,8 @@ import {
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import { AppTransitionLink } from "@/components/app-transition-link";
+import { useAppRouteTransition } from "@/components/app-route-transition";
 import { RecipeReviewDialog } from "@/components/recipe-review-dialog";
 import { ReviewDeleteButton } from "@/components/review-delete-button";
 import { StarRating } from "@/components/star-rating";
@@ -56,6 +57,7 @@ export function RecipeHistoryCalendar({
   const deferredSearchValue = useDeferredValue(searchValue);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
+  const { startNavigation } = useAppRouteTransition();
   const today = getTodayDayString();
   const selectedDay = useMemo(
     () =>
@@ -110,6 +112,7 @@ export function RecipeHistoryCalendar({
         setPickerDate(null);
         setDayDialogDate(date);
         setSearchValue("");
+        startNavigation(`/history?month=${history.month}`);
         router.refresh();
         return;
       }
@@ -138,11 +141,11 @@ export function RecipeHistoryCalendar({
                 className="h-11 w-11 justify-center px-3 sm:w-auto"
                 size="sm"
               >
-                <Link
+                <AppTransitionLink
                   href={`/history?month=${encodeURIComponent(history.previousMonth)}`}
                 >
                   <ChevronLeft className="h-4 w-4" />
-                </Link>
+                </AppTransitionLink>
               </Button>
               <Button
                 asChild
@@ -150,11 +153,11 @@ export function RecipeHistoryCalendar({
                 className="h-11 w-48 justify-center px-3 sm:hidden"
                 size="sm"
               >
-                <Link
+                <AppTransitionLink
                   href={`/history?month=${encodeURIComponent(getTodayDayString().slice(0, 7))}`}
                 >
                   Today
-                </Link>
+                </AppTransitionLink>
               </Button>
               <Button
                 asChild
@@ -162,11 +165,11 @@ export function RecipeHistoryCalendar({
                 className="h-11 w-11 justify-center px-3 sm:w-auto"
                 size="sm"
               >
-                <Link
+                <AppTransitionLink
                   href={`/history?month=${encodeURIComponent(history.nextMonth)}`}
                 >
                   <ChevronRight className="h-4 w-4" />
-                </Link>
+                </AppTransitionLink>
               </Button>
             </div>
           </div>
@@ -253,8 +256,9 @@ export function RecipeHistoryCalendar({
                 className="border border-border/70 bg-secondary/15 p-3 sm:p-4 rounded-2xl"
               >
                 <div className="flex gap-3 sm:gap-4">
-                  <Link
+                  <AppTransitionLink
                     href={`/recipe/${event.recipeId}`}
+                    prefetch
                     className="relative w-20 h-20 shrink-0 aspect-2/3 rounded-[14px] overflow-hidden bg-secondary/40 sm:h-24 sm:w-24 sm:rounded-[18px]"
                   >
                     {event.recipeImageUrl ? (
@@ -266,16 +270,17 @@ export function RecipeHistoryCalendar({
                         sizes="96px"
                       />
                     ) : null}
-                  </Link>
+                  </AppTransitionLink>
 
                   <div className="min-w-0 flex-1 space-y-3">
                     <div className="space-y-1">
-                      <Link
+                      <AppTransitionLink
                         href={`/recipe/${event.recipeId}`}
+                        prefetch
                         className="font-[family-name:var(--font-serif)] text-lg font-semibold sm:text-xl"
                       >
                         {event.recipeTitle}
-                      </Link>
+                      </AppTransitionLink>
                       <p className="text-xs text-muted-foreground sm:text-sm">
                         {event.isPlanned ? "Planned" : "Eaten"}
                       </p>

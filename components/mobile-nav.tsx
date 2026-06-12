@@ -1,18 +1,17 @@
 "use client";
 
-import Link from "next/link";
 import {
   Calendar,
   LayoutDashboard,
   Settings2,
   Sparkles,
-  Star,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 
+import { AppTransitionLink } from "@/components/app-transition-link";
 import { cn } from "@/lib/utils";
 
-const items = [
+const navItems = [
   {
     href: "/history",
     label: "History",
@@ -39,19 +38,19 @@ export function MobileNav({
   showAiPicker?: boolean;
 }) {
   const pathname = usePathname();
-  const navItems = showAiPicker
-    ? [
-        items[0],
-        items[1],
-        {
-          href: "/picker",
-          label: "AI Picker",
-          icon: Sparkles,
-          matches: (currentPath: string) => currentPath.startsWith("/picker"),
-        },
-        items[2],
-      ]
-    : items;
+  // const navItems = showAiPicker
+  //   ? [
+  //       items[0],
+  //       items[1],
+  //       {
+  //         href: "/picker",
+  //         label: "AI Picker",
+  //         icon: Sparkles,
+  //         matches: (currentPath: string) => currentPath.startsWith("/picker"),
+  //       },
+  //       items[2],
+  //     ]
+  //   : items;
 
   return (
     <nav className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-40 px-4 md:hidden">
@@ -61,9 +60,10 @@ export function MobileNav({
           const Icon = item.icon;
 
           return (
-            <Link
+            <AppTransitionLink
               key={item.href}
               href={item.href}
+              prefetch
               aria-current={isActive ? "page" : undefined}
               aria-label={item.label}
               title={item.label}
@@ -84,7 +84,7 @@ export function MobileNav({
               >
                 <Icon className="h-6 w-6" />
               </span>
-            </Link>
+            </AppTransitionLink>
           );
         })}
       </div>

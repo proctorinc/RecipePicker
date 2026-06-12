@@ -1,5 +1,6 @@
 import process from "node:process";
 
+import { logInfo, runScriptWithLogging } from "@/lib/server/logger";
 import { fetchAllBoards, requireEnv } from "./pinterest-api.js";
 
 async function main() {
@@ -7,17 +8,27 @@ async function main() {
   const boards = await fetchAllBoards(accessToken);
 
   if (boards.length === 0) {
-    console.log("No boards found for the authenticated user.");
+    logInfo("script.pinterest_list_boards.empty");
+    process.stdout.write("No boards found for the authenticated user.\n");
     return;
   }
 
+  logInfo("script.pinterest_list_boards.completed", {
+    result: {
+      boardCount: boards.length,
+    },
+  });
+
   for (const board of boards) {
-    console.log(`${board.name ?? "(untitled board)"}\t${board.id}`);
+    process.stdout.write(`${board.name ?? "(untitled board)"}\t${board.id}\n`);
   }
 }
 
-main().catch((error: unknown) => {
+runScriptWithLogging({
+  scriptName: "script.pinterest_list_boards",
+  fn: main,
+}).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
+  process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

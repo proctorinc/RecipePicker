@@ -4,12 +4,20 @@ import { NextResponse } from "next/server";
 import { getCurrentUserAccess } from "@/lib/server/access";
 import { requireHouseholdContext } from "@/lib/server/auth";
 import {
+  logInfo,
+  logWarn,
+  runBackgroundJob,
+  toErrorResponse,
+  withRouteLogging,
+} from "@/lib/server/logger";
+import {
   planPinterestAutoSync,
   runClaimedPinterestAutoSync,
 } from "@/lib/server/sync";
 
-export async function POST() {
-  try {
+export const POST = withRouteLogging(
+  "api.pinterest_sync_if_needed",
+  async () => {
     const [household, appAccess] = await Promise.all([
       requireHouseholdContext(),
       getCurrentUserAccess(),
@@ -21,27 +29,37 @@ export async function POST() {
 
     if (plan.status === "claimed") {
       after(async () => {
-        try {
-          await runClaimedPinterestAutoSync({
+        await runBackgroundJob({
+          name: "background.pinterest_auto_sync",
+          target: {
             householdId: household.householdId,
-          });
-        } catch (error) {
-          console.error(
-            `Background Pinterest sync failed for household ${household.householdId}`,
-            error,
-          );
-        }
+          },
+          fn: async () =>
+            runClaimedPinterestAutoSync({
+              householdId: household.householdId,
+            }),
+        });
       });
 
+      logInfo("pinterest.sync.claimed", {
+        target: {
+          householdId: household.householdId,
+        },
+      });
       return NextResponse.json({ status: "triggered" });
     }
 
+    logWarn("pinterest.sync.skipped", {
+      target: {
+        householdId: household.householdId,
+      },
+      result: {
+        status: plan.status,
+      },
+    });
     return NextResponse.json({ status: plan.status });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to evaluate Pinterest sync.";
-    return NextResponse.json(
-      { status: "error", message },
-      { status: 500 },
-    );
-  }
-}
+  },
+  {
+    onError: (error) => toErrorResponse(error, "Unable to evaluate Pinterest sync."),
+  },
+);

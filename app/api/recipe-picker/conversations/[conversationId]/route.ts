@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
 
+import { requirePremiumSubscription } from "@/lib/server/access";
 import { requireHouseholdContext } from "@/lib/server/auth";
+import { toErrorResponse, withRouteLogging } from "@/lib/server/logger";
 import { getRecipePickerConversationState } from "@/lib/server/recipe-picker";
 
-export async function GET(
+export const GET = withRouteLogging(
+  "api.recipe_picker_conversations.get",
+  async (
   _request: Request,
   { params }: { params: Promise<{ conversationId: string }> },
-) {
-  try {
+) => {
     const { conversationId } = await params;
-    const context = await requireHouseholdContext();
+    const [context] = await Promise.all([
+      requireHouseholdContext(),
+      requirePremiumSubscription(),
+    ]);
     const response = await getRecipePickerConversationState({
       householdId: context.householdId,
       clerkUserId: context.clerkUserId,
@@ -17,11 +23,9 @@ export async function GET(
     });
 
     return NextResponse.json(response);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("Authentication required")) {
-      return NextResponse.json({ message: "Authentication required." }, { status: 401 });
-    }
-
-    return NextResponse.json({ message: "Unable to load recipe picker conversation." }, { status: 500 });
-  }
-}
+  },
+  {
+    onError: (error) =>
+      toErrorResponse(error, "Unable to load recipe picker conversation."),
+  },
+);

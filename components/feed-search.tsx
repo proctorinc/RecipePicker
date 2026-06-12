@@ -4,6 +4,7 @@ import { useDeferredValue, useEffect, useState, useTransition } from "react";
 import { Search, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
+import { useAppRouteTransition } from "@/components/app-route-transition";
 import { Input } from "@/components/ui/input";
 
 export function FeedSearch({ initialQuery }: { initialQuery: string }) {
@@ -13,6 +14,7 @@ export function FeedSearch({ initialQuery }: { initialQuery: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { startNavigation } = useAppRouteTransition();
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -23,11 +25,13 @@ export function FeedSearch({ initialQuery }: { initialQuery: string }) {
         params.delete("q");
       }
 
+      const nextHref = params.toString()
+        ? `${pathname}?${params.toString()}`
+        : pathname;
+
       startTransition(() => {
-        router.replace(
-          params.toString() ? `${pathname}?${params.toString()}` : pathname,
-          { scroll: false },
-        );
+        startNavigation(nextHref);
+        router.replace(nextHref, { scroll: false });
       });
     }, 180);
 
@@ -55,7 +59,11 @@ export function FeedSearch({ initialQuery }: { initialQuery: string }) {
           </button>
         ) : null}
       </div>
-      {/*<p className="px-2 pt-3 text-xs text-muted-foreground">{isPending ? "Updating feed..." : "Search across recipes and extracted recipe content."}</p>*/}
+      <p className="px-2 pt-3 text-xs text-muted-foreground">
+        {isPending
+          ? "Updating feed..."
+          : "Search across recipes and extracted recipe content."}
+      </p>
     </div>
   );
 }

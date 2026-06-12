@@ -1,0 +1,273 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import BetterSqlite3 from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import * as schema from "@/lib/server/db";
+import {
+  householdBoards,
+  householdPins,
+  householdRecipes,
+  households,
+} from "@/lib/server/db";
+
+const {
+  mockGetCurrentUserAccess,
+  mockOpenDatabase,
+  mockRequireHouseholdContext,
+} = vi.hoisted(
+  () => ({
+    mockGetCurrentUserAccess: vi.fn(),
+    mockOpenDatabase: vi.fn(),
+    mockRequireHouseholdContext: vi.fn(),
+  }),
+);
+
+vi.mock("@/lib/server/access", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/server/access")>(
+    "@/lib/server/access",
+  );
+
+  return {
+    ...actual,
+    getCurrentUserAccess: mockGetCurrentUserAccess,
+  };
+});
+
+vi.mock("@/lib/server/auth", () => ({
+  listHouseholdMembers: vi.fn(),
+  requireHouseholdContext: mockRequireHouseholdContext,
+}));
+
+vi.mock("@/lib/server/database", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/server/database")>(
+    "@/lib/server/database",
+  );
+
+  return {
+    ...actual,
+    openDatabase: mockOpenDatabase,
+  };
+});
+
+import { getFeedPinsPage } from "@/lib/server/queries";
+
+let tempDir: string;
+let sqlitePath: string;
+let originalNodeEnv: string | undefined;
+
+function setNodeEnv(value: string | undefined) {
+  if (value === undefined) {
+    delete process.env.NODE_ENV;
+    return;
+  }
+
+  process.env.NODE_ENV = value;
+}
+
+beforeEach(async () => {
+  originalNodeEnv = process.env.NODE_ENV;
+  setNodeEnv("development");
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "food-picker-feed-"));
+  sqlitePath = path.join(tempDir, "test.sqlite");
+  process.env.SQLITE_PATH = sqlitePath;
+  mockGetCurrentUserAccess.mockResolvedValue({ subscriptionTier: "free" });
+  mockOpenDatabase.mockImplementation(async (pathOverride?: string) =>
+    createTestDatabaseHandle(pathOverride ?? sqlitePath),
+  );
+  mockRequireHouseholdContext.mockResolvedValue({
+    householdId: "household_1",
+    householdName: "Kitchen",
+    role: "member",
+    clerkUserId: "user_123",
+  });
+
+  const { db, sqlite } = await createTestDatabaseHandle(sqlitePath);
+
+  try {
+    await db.insert(households)
+      .values({
+        householdId: "household_1",
+        name: "Kitchen",
+        createdAt: "2026-06-10T00:00:00.000Z",
+        updatedAt: "2026-06-10T00:00:00.000Z",
+      })
+      .run();
+    await db.insert(householdBoards)
+      .values({
+        boardId: "board_1",
+        householdId: "household_1",
+        pinterestBoardId: "pinterest_board_1",
+        name: "Dinner",
+        rawJson: JSON.stringify({ id: "pinterest_board_1" }),
+        lastSyncedAt: "2026-06-10T00:00:00.000Z",
+      })
+      .run();
+    await seedFeedRecipe({
+      db,
+      recipeId: "recipe_a",
+      pinId: "pin_a",
+      pinterestPinId: "pinterest_a",
+      title: "Aardvark Pasta",
+      updatedAt: "2026-06-11T10:00:00.000Z",
+    });
+    await seedFeedRecipe({
+      db,
+      recipeId: "recipe_b",
+      pinId: "pin_b",
+      pinterestPinId: "pinterest_b",
+      title: "Basil Pasta",
+      updatedAt: "2026-06-11T10:00:00.000Z",
+    });
+    await seedFeedRecipe({
+      db,
+      recipeId: "recipe_c",
+      pinId: "pin_c",
+      pinterestPinId: "pinterest_c",
+      title: "Curry Soup",
+      updatedAt: "2026-06-10T10:00:00.000Z",
+    });
+  } finally {
+    await sqlite.close();
+  }
+});
+
+afterEach(() => {
+  setNodeEnv(originalNodeEnv);
+  delete process.env.SQLITE_PATH;
+  vi.restoreAllMocks();
+  mockGetCurrentUserAccess.mockReset();
+  mockOpenDatabase.mockReset();
+  mockRequireHouseholdContext.mockReset();
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+describe("getFeedPinsPage", () => {
+  it("returns the newest matching cards on the first page", async () => {
+    const page = await getFeedPinsPage({
+      pageSize: 2,
+    });
+
+    expect(page.items.map((item) => item.recipeId)).toEqual([
+      "recipe_b",
+      "recipe_a",
+    ]);
+    expect(page.hasMore).toBe(true);
+    expect(page.nextCursor).toBeTruthy();
+  });
+
+  it("resumes from the cursor without duplicates or gaps", async () => {
+    const firstPage = await getFeedPinsPage({
+      pageSize: 2,
+    });
+    const secondPage = await getFeedPinsPage({
+      cursor: firstPage.nextCursor,
+      pageSize: 2,
+    });
+
+    expect(secondPage.items.map((item) => item.recipeId)).toEqual(["recipe_c"]);
+    expect(secondPage.hasMore).toBe(false);
+    expect(secondPage.nextCursor).toBeNull();
+  });
+
+  it("returns hasMore false at the end of the feed", async () => {
+    const page = await getFeedPinsPage({
+      pageSize: 5,
+    });
+
+    expect(page.items).toHaveLength(3);
+    expect(page.hasMore).toBe(false);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("applies search filtering before pagination slicing", async () => {
+    const page = await getFeedPinsPage({
+      searchText: "pasta",
+      pageSize: 1,
+    });
+    const nextPage = await getFeedPinsPage({
+      searchText: "pasta",
+      cursor: page.nextCursor,
+      pageSize: 1,
+    });
+
+    expect(page.items.map((item) => item.recipeId)).toEqual(["recipe_b"]);
+    expect(nextPage.items.map((item) => item.recipeId)).toEqual(["recipe_a"]);
+    expect(nextPage.hasMore).toBe(false);
+  });
+});
+
+async function seedFeedRecipe({
+  db,
+  recipeId,
+  pinId,
+  pinterestPinId,
+  title,
+  updatedAt,
+}: {
+  db: ReturnType<typeof drizzle<typeof schema>>;
+  recipeId: string;
+  pinId: string;
+  pinterestPinId: string;
+  title: string;
+  updatedAt: string;
+}) {
+  await db.insert(householdPins)
+    .values({
+      pinId,
+      householdId: "household_1",
+      pinterestPinId,
+      boardId: "board_1",
+      pinterestBoardId: "pinterest_board_1",
+      title,
+      rawJson: JSON.stringify({
+        images: {
+          "236x": {
+            url: `https://images.example.com/${pinId}-236.jpg`,
+          },
+          "564x": {
+            url: `https://images.example.com/${pinId}-564.jpg`,
+          },
+        },
+      }),
+      updatedAt,
+    })
+    .run();
+
+  await db.insert(householdRecipes)
+    .values({
+      recipeId,
+      householdId: "household_1",
+      pinId,
+      title,
+      createdAt: updatedAt,
+      updatedAt,
+    })
+    .run();
+}
+
+function createTestDatabaseHandle(targetPath: string) {
+  const sqlite = new BetterSqlite3(targetPath);
+  sqlite.pragma("journal_mode = WAL");
+
+  const db = drizzle(sqlite, { schema });
+  migrate(db, { migrationsFolder: "drizzle" });
+
+  return {
+    db,
+    driver: "sqlite" as const,
+    sqlite: {
+      async close() {
+        sqlite.close();
+      },
+      async transaction<T>(work: (tx: never) => T) {
+        return db.transaction((tx) => work(tx as never));
+      },
+    },
+    targetLabel: targetPath,
+  };
+}

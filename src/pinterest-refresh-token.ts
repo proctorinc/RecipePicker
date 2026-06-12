@@ -1,5 +1,6 @@
 import process from "node:process";
 
+import { logInfo, runScriptWithLogging } from "@/lib/server/logger";
 import { getEnvFilePath, upsertEnvValue } from "./env-file.js";
 import { getApiBaseUrl, requireEnv } from "./pinterest-api.js";
 
@@ -48,12 +49,20 @@ async function main() {
     upsertEnvValue(envPath, "PINTEREST_REFRESH_TOKEN", token.refresh_token);
   }
 
-  console.log("Refreshed Pinterest token and saved it to .env");
-  console.log(JSON.stringify(token, null, 2));
+  logInfo("script.pinterest_refresh_token.succeeded", {
+    result: {
+      scopeCount: token.scope?.split(",").filter(Boolean).length ?? 0,
+      hasRefreshToken: Boolean(token.refresh_token),
+    },
+  });
+  process.stdout.write("Refreshed Pinterest token and saved it to the env file.\n");
 }
 
-main().catch((error: unknown) => {
+runScriptWithLogging({
+  scriptName: "script.pinterest_refresh_token",
+  fn: main,
+}).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
+  process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

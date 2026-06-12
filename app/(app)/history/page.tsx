@@ -1,4 +1,4 @@
-import { AppShell } from "@/components/app-shell";
+import { PageIntro, PageShell } from "@/components/page-shell";
 import { RecipeHistoryCalendar } from "@/components/recipe-history-calendar";
 import { getRecipeHistoryPage } from "@/lib/server/queries";
 
@@ -13,11 +13,12 @@ export default async function HistoryPage({
   const history = await getRecipeHistoryPage(month);
 
   return (
-    <AppShell
-      title="Meal History"
-      description="Track and review your recipes when your tried recipes"
-    >
+    <PageShell>
+      <PageIntro
+        title="Meal History"
+        description="Track and review your recipes when you want to revisit what you tried."
+      />
       <RecipeHistoryCalendar history={history} />
-    </AppShell>
+    </PageShell>
   );
 }

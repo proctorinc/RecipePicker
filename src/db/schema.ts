@@ -96,6 +96,7 @@ export const pinterestAccounts = sqliteTable(
     lastSyncAt: text("last_sync_at"),
     lastSyncStatus: text("last_sync_status"),
     lastSyncError: text("last_sync_error"),
+    autoSyncEnabled: integer("auto_sync_enabled", { mode: "boolean" }).notNull().default(true),
     syncInProgressAt: text("sync_in_progress_at"),
     connectionStatus: text("connection_status").notNull().default("active"),
     createdAt: text("created_at").notNull(),

@@ -1,22 +1,26 @@
 import { NextResponse } from "next/server";
 
+import { requirePremiumSubscription } from "@/lib/server/access";
 import { requireHouseholdContext } from "@/lib/server/auth";
+import { toErrorResponse, withRouteLogging } from "@/lib/server/logger";
 import { createRecipePickerConversation } from "@/lib/server/recipe-picker";
 
-export async function POST() {
-  try {
-    const context = await requireHouseholdContext();
+export const POST = withRouteLogging(
+  "api.recipe_picker_conversations.create",
+  async () => {
+    const [context] = await Promise.all([
+      requireHouseholdContext(),
+      requirePremiumSubscription(),
+    ]);
     const response = await createRecipePickerConversation({
       householdId: context.householdId,
       clerkUserId: context.clerkUserId,
     });
 
     return NextResponse.json(response);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("Authentication required")) {
-      return NextResponse.json({ message: "Authentication required." }, { status: 401 });
-    }
-
-    return NextResponse.json({ message: "Unable to create a new recipe picker conversation." }, { status: 500 });
-  }
-}
+  },
+  {
+    onError: (error) =>
+      toErrorResponse(error, "Unable to create a new recipe picker conversation."),
+  },
+);

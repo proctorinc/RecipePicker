@@ -1,6 +1,7 @@
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { migrate as migrateLibsql } from "drizzle-orm/libsql/migrator";
 
+import { logError, logInfo, maybeWithSqliteTarget } from "@/lib/server/logger";
 import { createDatabase } from "@/lib/server/db";
 import type { DatabaseClient } from "@/src/db/client";
 
@@ -27,18 +28,43 @@ export async function openDatabase(sqlitePath?: string) {
     shouldRunRuntimeMigrations() &&
     !migratedTargets.has(`${handle.driver}:${handle.targetLabel}`)
   ) {
-    if (handle.driver === "sqlite") {
-      migrate(handle.db as DatabaseClient & Parameters<typeof migrate>[0], {
-        migrationsFolder: "drizzle",
-      });
-    } else {
-      await migrateLibsql(
-        handle.db as DatabaseClient & Parameters<typeof migrateLibsql>[0],
-        { migrationsFolder: "drizzle" },
-      );
-    }
+    logInfo("db.runtime_migration.started", {
+      result: {
+        driver: handle.driver,
+      },
+      ...maybeWithSqliteTarget(handle.targetLabel),
+    });
 
-    migratedTargets.add(`${handle.driver}:${handle.targetLabel}`);
+    try {
+      if (handle.driver === "sqlite") {
+        migrate(handle.db as DatabaseClient & Parameters<typeof migrate>[0], {
+          migrationsFolder: "drizzle",
+        });
+      } else {
+        await migrateLibsql(
+          handle.db as DatabaseClient & Parameters<typeof migrateLibsql>[0],
+          { migrationsFolder: "drizzle" },
+        );
+      }
+
+      migratedTargets.add(`${handle.driver}:${handle.targetLabel}`);
+      logInfo("db.runtime_migration.completed", {
+        result: {
+          driver: handle.driver,
+          status: "success",
+        },
+        ...maybeWithSqliteTarget(handle.targetLabel),
+      });
+    } catch (error) {
+      logError("db.runtime_migration.failed", error, {
+        result: {
+          driver: handle.driver,
+          status: "error",
+        },
+        ...maybeWithSqliteTarget(handle.targetLabel),
+      });
+      throw error;
+    }
   }
 
   return handle;

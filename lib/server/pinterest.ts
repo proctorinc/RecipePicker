@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { and, eq } from "drizzle-orm";
 
+import { requireOwnerOrAdminIntegrationAccess } from "@/lib/server/access";
 import { openDatabase } from "@/lib/server/database";
 import {
   boardSyncSubscriptions,
@@ -9,6 +10,8 @@ import {
   pinterestAccounts,
   type pinterestAccounts as pinterestAccountsTable,
 } from "@/lib/server/db";
+import { AuthorizationError } from "@/lib/server/errors";
+import { logError } from "@/lib/server/logger";
 import { decryptSecret, encryptSecret } from "@/lib/server/security";
 import {
   fetchAllBoards,
@@ -28,6 +31,11 @@ type TokenResponse = {
   scope?: string;
 };
 
+const PINTEREST_OAUTH_FAILURE_MESSAGE =
+  "Pinterest could not complete the connection. Please try again.";
+const PINTEREST_REFRESH_FAILURE_MESSAGE =
+  "Pinterest could not refresh the connection. Please reconnect Pinterest.";
+
 type ConnectionRow = typeof pinterestAccountsTable.$inferSelect;
 
 export type PinterestConnectionStatus =
@@ -42,6 +50,7 @@ export type PinterestConnectionSummary = {
   status: PinterestConnectionStatus;
   accountLabel: string | null;
   scope: string[];
+  autoSyncEnabled: boolean;
   lastSyncAttemptAt: string | null;
   lastSyncAt: string | null;
   lastSyncStatus: string | null;
@@ -150,7 +159,13 @@ export async function exchangePinterestCode(code: string) {
   const raw = await response.text();
 
   if (!response.ok) {
-    throw new Error(`Pinterest token exchange failed (${response.status} ${response.statusText}): ${raw}`);
+    logError(
+      "pinterest.oauth.exchange_failed",
+      new Error(
+        `Pinterest token exchange failed (${response.status} ${response.statusText}): ${raw}`,
+      ),
+    );
+    throw new Error(PINTEREST_OAUTH_FAILURE_MESSAGE);
   }
 
   return JSON.parse(raw) as TokenResponse;
@@ -187,6 +202,7 @@ export async function upsertPinterestConnection(args: {
       lastSyncAt: null,
       lastSyncStatus: null,
       lastSyncError: null,
+      autoSyncEnabled: true,
       syncInProgressAt: null,
       connectionStatus: "active",
       createdAt: now.toISOString(),
@@ -232,6 +248,14 @@ export async function disconnectPinterestConnection(householdId: string) {
 }
 
 export async function getPinterestConnectionSummary(householdId: string): Promise<PinterestConnectionSummary> {
+  const { household, access } = await requireOwnerOrAdminIntegrationAccess();
+
+  if (household.householdId !== householdId && !access.isActualAdmin) {
+    throw new AuthorizationError(
+      "You do not have permission to view this integration.",
+    );
+  }
+
   const { db, sqlite } = await openDatabase();
 
   try {
@@ -244,6 +268,7 @@ export async function getPinterestConnectionSummary(householdId: string): Promis
         status: "not_connected",
         accountLabel: null,
         scope: [],
+        autoSyncEnabled: false,
         lastSyncAttemptAt: null,
         lastSyncAt: null,
         lastSyncStatus: null,
@@ -260,6 +285,7 @@ export async function getPinterestConnectionSummary(householdId: string): Promis
       status: deriveConnectionStatus(connection),
       accountLabel: connection.accountLabel,
       scope: connection.scope?.split(",").map((scope) => scope.trim()).filter(Boolean) ?? [],
+      autoSyncEnabled: connection.autoSyncEnabled,
       lastSyncAttemptAt: connection.lastSyncAttemptAt,
       lastSyncAt: connection.lastSyncAt,
       lastSyncStatus: connection.lastSyncStatus,
@@ -331,6 +357,36 @@ export async function updatePinterestConnectionSyncStatus(args: {
       })
       .where(and(eq(pinterestAccounts.householdId, args.householdId), eq(pinterestAccounts.provider, "pinterest")))
       .run();
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function setPinterestConnectionAutoSyncEnabled(args: {
+  householdId: string;
+  enabled: boolean;
+}) {
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const now = new Date().toISOString();
+    const result = await db.update(pinterestAccounts)
+      .set({
+        autoSyncEnabled: args.enabled,
+        updatedAt: now,
+      })
+      .where(and(eq(pinterestAccounts.householdId, args.householdId), eq(pinterestAccounts.provider, "pinterest")))
+      .run();
+
+    const affectedRows = "changes" in result
+      ? result.changes
+      : Array.isArray(result.rowsAffected)
+        ? result.rowsAffected.reduce((sum, count) => sum + count, 0)
+        : result.rowsAffected;
+
+    if ((affectedRows ?? 0) === 0) {
+      throw new Error("Pinterest is not connected for this household.");
+    }
   } finally {
     await sqlite.close();
   }
@@ -431,7 +487,13 @@ async function refreshPinterestToken(refreshToken: string) {
   const raw = await response.text();
 
   if (!response.ok) {
-    throw new Error(`Pinterest token refresh failed (${response.status} ${response.statusText}): ${raw}`);
+    logError(
+      "pinterest.oauth.refresh_failed",
+      new Error(
+        `Pinterest token refresh failed (${response.status} ${response.statusText}): ${raw}`,
+      ),
+    );
+    throw new Error(PINTEREST_REFRESH_FAILURE_MESSAGE);
   }
 
   return JSON.parse(raw) as TokenResponse;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   PINTEREST_SYNC_LEASE_MS,
   formatPinterestAutoSyncFrequency,
+  getNextPinterestAutoSyncEligibleAt,
   getPinterestAutoSyncCooldownMs,
   isPinterestSyncLeaseActive,
 } from "@/lib/server/sync";
@@ -24,6 +25,28 @@ describe("formatPinterestAutoSyncFrequency", () => {
 
   it("formats the premium tier label", () => {
     expect(formatPinterestAutoSyncFrequency("premium")).toBe("every 10m");
+  });
+});
+
+describe("getNextPinterestAutoSyncEligibleAt", () => {
+  it("returns the next eligible time when auto-sync is enabled", () => {
+    expect(
+      getNextPinterestAutoSyncEligibleAt({
+        autoSyncEnabled: true,
+        lastSyncAttemptAt: "2026-06-11T12:00:00.000Z",
+        subscriptionTier: "premium",
+      }),
+    ).toBe("2026-06-11T12:10:00.000Z");
+  });
+
+  it("returns null when auto-sync is disabled", () => {
+    expect(
+      getNextPinterestAutoSyncEligibleAt({
+        autoSyncEnabled: false,
+        lastSyncAttemptAt: "2026-06-11T12:00:00.000Z",
+        subscriptionTier: "free",
+      }),
+    ).toBeNull();
   });
 });
 

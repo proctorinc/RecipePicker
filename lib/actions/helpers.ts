@@ -1,6 +1,22 @@
 import { revalidatePath } from "next/cache";
 
+import {
+  isAuthenticationError,
+  isAuthorizationError,
+} from "@/lib/server/logger";
+
 export function toErrorState(error: unknown, fallback: string) {
+  if (isAuthenticationError(error)) {
+    return { status: "error" as const, message: "Authentication required." };
+  }
+
+  if (isAuthorizationError(error)) {
+    return {
+      status: "error" as const,
+      message: "You do not have permission for this action.",
+    };
+  }
+
   if (error instanceof Error) {
     return { status: "error" as const, message: `${fallback} ${error.message}` };
   }

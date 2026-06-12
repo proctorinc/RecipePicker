@@ -1,5 +1,6 @@
 import process from "node:process";
 
+import { runScriptWithLogging } from "@/lib/server/logger";
 import { extractRecipes } from "@/lib/server/extract";
 
 type Args = {
@@ -65,13 +66,16 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const result = await extractRecipes(args);
 
-  console.log(
-    `Processed ${result.processed} pins from ${result.sqlitePath}: ${result.extracted} extracted, ${result.reviewNeeded} review-needed, ${result.failed} failed, ${result.skipped} skipped.`,
+  process.stdout.write(
+    `Processed ${result.processed} pins from ${result.sqlitePath}: ${result.extracted} extracted, ${result.reviewNeeded} review-needed, ${result.failed} failed, ${result.skipped} skipped.\n`,
   );
 }
 
-main().catch((error: unknown) => {
+runScriptWithLogging({
+  scriptName: "script.extract_recipes",
+  fn: main,
+}).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
+  process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

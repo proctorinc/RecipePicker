@@ -8,6 +8,13 @@
       "when": 1781204433416,
       "tag": "0000_heavy_silvermane",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781204433417,
+      "tag": "0001_admin_pinterest_auto_sync",
+      "breakpoints": true
     }
   ]
 }

@@ -29,8 +29,7 @@ export default function RootLayout({
     <html lang="en" className={`${fraunces.variable} ${manrope.variable}`}>
       <body className="font-sans antialiased">
         <ClerkProvider>
-          {children}
-          <Providers />
+          <Providers>{children}</Providers>
         </ClerkProvider>
       </body>
     </html>

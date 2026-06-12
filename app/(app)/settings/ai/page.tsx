@@ -1,3 +1,5 @@
+import { notFound } from "next/navigation";
+
 import { AiSettingsForm } from "@/components/ai-settings-form";
 import { ActionForm } from "@/components/action-form";
 import { SettingsNav } from "@/components/settings-nav";
@@ -13,25 +15,42 @@ import {
   disconnectAiConnectionAction,
   saveAiConnectionAction,
 } from "@/lib/actions/operations";
-import { canConfigureAi, getCurrentUserAccess } from "@/lib/server/access";
+import {
+  canConfigureAi,
+  requireOwnerOrAdminIntegrationAccess,
+} from "@/lib/server/access";
 import {
   getAiModelCatalog,
   getHouseholdAiConnectionSummary,
   type AiProvider,
   type AiConnectionStatus,
 } from "@/lib/server/ai-provider";
-import { requireHouseholdContext } from "@/lib/server/auth";
+import { isAuthorizationError } from "@/lib/server/errors";
 import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function AiSettingsPage() {
-  const [context, appAccess, modelCatalog] = await Promise.all([
-    requireHouseholdContext(),
-    getCurrentUserAccess(),
+  let integrationAccess: Awaited<
+    ReturnType<typeof requireOwnerOrAdminIntegrationAccess>
+  >;
+
+  try {
+    integrationAccess = await requireOwnerOrAdminIntegrationAccess();
+  } catch (error) {
+    if (isAuthorizationError(error)) {
+      notFound();
+    }
+
+    throw error;
+  }
+
+  const { household: context, access: appAccess } = integrationAccess;
+
+  const [modelCatalog, connection] = await Promise.all([
     Promise.resolve(getAiModelCatalog()),
+    getHouseholdAiConnectionSummary(context.householdId),
   ]);
-  const connection = await getHouseholdAiConnectionSummary(context.householdId);
   const providerOptions = (Object.keys(modelCatalog) as AiProvider[]).map(
     (value) => ({
       value,

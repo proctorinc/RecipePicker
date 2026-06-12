@@ -6,11 +6,14 @@ import { generateObject } from "ai";
 import { eq } from "drizzle-orm";
 import { z, type ZodTypeAny } from "zod";
 
+import { requireOwnerOrAdminIntegrationAccess } from "@/lib/server/access";
 import { openDatabase } from "@/lib/server/database";
 import {
   householdAiConnections,
   type householdAiConnections as householdAiConnectionsTable,
 } from "@/lib/server/db";
+import { AuthorizationError } from "@/lib/server/errors";
+import { logError } from "@/lib/server/logger";
 import { decryptSecret, encryptSecret } from "@/lib/server/security";
 
 export type AiProvider = "openai" | "anthropic" | "google" | "openrouter";
@@ -121,6 +124,25 @@ export function getAiModelCatalog() {
 }
 
 export async function getHouseholdAiConnectionSummary(
+  householdId: string,
+): Promise<AiConnectionSummary> {
+  const { household, access } = await requireOwnerOrAdminIntegrationAccess();
+
+  if (household.householdId !== householdId && !access.isActualAdmin) {
+    throw new AuthorizationError(
+      "You do not have permission to view this integration.",
+    );
+  }
+
+  return readHouseholdAiConnectionSummary(householdId);
+}
+
+export async function getHouseholdAiConnectionStatus(householdId: string) {
+  const summary = await readHouseholdAiConnectionSummary(householdId);
+  return summary.status;
+}
+
+async function readHouseholdAiConnectionSummary(
   householdId: string,
 ): Promise<AiConnectionSummary> {
   const { db, sqlite } = await openDatabase();
@@ -269,10 +291,16 @@ export async function testHouseholdAiConnection(args: {
       error: null,
     };
   } catch (error) {
+    logError("ai.connection_test_failed", error, {
+      target: {
+        provider: args.provider,
+        model: args.model,
+      },
+    });
     return {
       ok: false,
       status: "test_failed" as const,
-      error: toProviderErrorMessage(error),
+      error: "Unable to validate the AI connection. Check the provider, model, and API key, then try again.",
     };
   }
 }
@@ -404,15 +432,4 @@ function toConnectionStatus(value: string): AiConnectionStatus {
   }
 
   return "invalid";
-}
-
-function toProviderErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    const message = error.message.trim();
-    if (message) {
-      return message;
-    }
-  }
-
-  return "Unable to validate the AI connection.";
 }

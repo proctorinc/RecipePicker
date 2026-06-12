@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import {
   ArrowLeft,
   Clock3,
@@ -11,7 +10,8 @@ import {
 import { notFound } from "next/navigation";
 
 import { ActionForm } from "@/components/action-form";
-import { AppShell } from "@/components/app-shell";
+import { AppTransitionLink } from "@/components/app-transition-link";
+import { PageShell } from "@/components/page-shell";
 import { RecipeReviewLauncher } from "@/components/recipe-review-launcher";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,13 +46,13 @@ export default async function RecipePage({
       : "Back to feed";
 
   return (
-    <AppShell>
+    <PageShell>
       <div className="flex items-center justify-between gap-3">
         <Button asChild variant="outline">
-          <Link href={backHref}>
+          <AppTransitionLink href={backHref} prefetch>
             <ArrowLeft className="size-4" />
             {backLabel}
-          </Link>
+          </AppTransitionLink>
         </Button>
       </div>
 
@@ -113,10 +113,10 @@ export default async function RecipePage({
       <div className="flex gap-2 w-full">
         {recipe.sourceUrl && (
           <Button asChild>
-            <Link href={recipe.sourceUrl}>
+            <a href={recipe.sourceUrl} target="_blank" rel="noreferrer">
               <ExternalLink className="size-4" />
               View recipe source
-            </Link>
+            </a>
           </Button>
         )}
 
@@ -234,15 +234,18 @@ export default async function RecipePage({
                 </Button>
               )}
               <Button asChild variant="ghost">
-                <Link href={`/settings/recipes/${recipe.recipeId}`}>
+                <AppTransitionLink
+                  href={`/settings/recipes/${recipe.recipeId}`}
+                  prefetch
+                >
                   Detailed settings
-                </Link>
+                </AppTransitionLink>
               </Button>
             </div>
           </CardContent>
         </Card>
       )}
-    </AppShell>
+    </PageShell>
   );
 }
 
@@ -278,7 +281,9 @@ function EmptyRecipeState({
           Extract recipe
         </ActionForm>
         <Button asChild variant="ghost">
-          <Link href={`/settings/recipes/${recipeId}`}>Open settings</Link>
+          <AppTransitionLink href={`/settings/recipes/${recipeId}`} prefetch>
+            Open settings
+          </AppTransitionLink>
         </Button>
       </div>
     </div>

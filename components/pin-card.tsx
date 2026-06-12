@@ -1,17 +1,32 @@
-import Image from "next/image";
-import Link from "next/link";
+"use client";
 
-import { Card } from "@/components/ui/card";
-import type { FeedPinCard } from "@/types/view-models";
+import Image from "next/image";
+import { useState } from "react";
 import { Star } from "lucide-react";
 
-export function PinCard({ card }: { card: FeedPinCard }) {
+import { AppTransitionLink } from "@/components/app-transition-link";
+import { Card } from "@/components/ui/card";
+import type { FeedPinCard } from "@/types/view-models";
+
+const FEED_IMAGE_SIZES =
+  "(max-width: 767px) 50vw, (max-width: 1023px) 33vw, 25vw";
+
+export function PinCard({
+  card,
+  priority = false,
+}: {
+  card: FeedPinCard;
+  priority?: boolean;
+}) {
   const aspectClass = getAspectClass(card.pinId);
+  const [isFullImageLoaded, setIsFullImageLoaded] = useState(false);
 
   return (
-    <Link
+    <AppTransitionLink
       href={card.destinationHref}
+      prefetch
       className="mb-2 md:mb-5 block break-inside-avoid"
+      pendingClassName="opacity-85"
     >
       <Card className="group overflow-hidden border-white/70 bg-white transition duration-300 hover:-translate-y-1 hover:shadow-[0_18px_48px_rgba(57,45,34,0.14)]">
         <div
@@ -21,13 +36,28 @@ export function PinCard({ card }: { card: FeedPinCard }) {
           }}
         >
           {card.imageUrl ? (
-            <Image
-              src={card.imageUrl}
-              alt={card.title}
-              fill
-              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
-              className="object-cover transition duration-500 group-hover:scale-[1.03]"
-            />
+            <>
+              {card.previewImageUrl ? (
+                <Image
+                  src={card.previewImageUrl}
+                  alt=""
+                  fill
+                  aria-hidden="true"
+                  sizes={FEED_IMAGE_SIZES}
+                  className={`object-cover scale-[1.06] blur-2xl transition duration-300 ${isFullImageLoaded ? "opacity-0" : "opacity-100"}`}
+                />
+              ) : null}
+              <Image
+                src={card.imageUrl}
+                alt={card.title}
+                fill
+                priority={priority}
+                loading={priority ? undefined : "lazy"}
+                sizes={FEED_IMAGE_SIZES}
+                onLoad={() => setIsFullImageLoaded(true)}
+                className={`object-cover transition duration-500 ${isFullImageLoaded ? "opacity-100 blur-0 scale-100" : "opacity-0 blur-md scale-[1.03]"} group-hover:scale-[1.03]`}
+              />
+            </>
           ) : null}
           <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
           {card.reviewCount > 0 ? (
@@ -40,7 +70,7 @@ export function PinCard({ card }: { card: FeedPinCard }) {
           ) : null}
         </div>
       </Card>
-    </Link>
+    </AppTransitionLink>
   );
 }
 

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { cookies } from "next/headers";
 
@@ -7,8 +8,15 @@ import {
   getAccessFlags,
   isPremiumTier,
 } from "@/lib/access";
+import { requireHouseholdContext } from "@/lib/server/auth";
 import { openDatabase } from "@/lib/server/database";
 import { userAccessTiers } from "@/lib/server/db";
+import {
+  AuthenticationError,
+  AuthorizationError,
+} from "@/lib/server/errors";
+import { logWarn } from "@/lib/server/logger";
+import { updateRequestContext } from "@/lib/server/request-context";
 
 export const ADMIN_ROLE_OVERRIDE_COOKIE = "food-picker-admin-role-override";
 export type { AppRole, SubscriptionTier } from "@/lib/access";
@@ -27,11 +35,12 @@ export type AppAccessContext = {
   roleOverride: AppRole | null;
 };
 
-export async function getCurrentUserAccess(): Promise<AppAccessContext> {
+export const getCurrentUserAccess = cache(async function getCurrentUserAccess(): Promise<AppAccessContext> {
   const { userId } = await auth();
 
   if (!userId) {
-    throw new Error("Authentication required.");
+    logWarn("auth.authentication_required");
+    throw new AuthenticationError();
   }
 
   const user = await currentUser();
@@ -56,6 +65,13 @@ export async function getCurrentUserAccess(): Promise<AppAccessContext> {
       isUserRole,
     } = getAccessFlags({ appRole, subscriptionTier });
 
+    updateRequestContext({
+      actor: {
+        clerkUserId: userId,
+        appRole,
+      },
+    });
+
     return {
       clerkUserId: userId,
       appRole,
@@ -72,13 +88,18 @@ export async function getCurrentUserAccess(): Promise<AppAccessContext> {
   } finally {
     await sqlite.close();
   }
-}
+});
 
 export async function requireAdminAccess() {
   const context = await getCurrentUserAccess();
 
   if (!context.isActualAdmin) {
-    throw new Error("This page requires admin access.");
+    logWarn("auth.admin_access_denied", {
+      result: {
+        actualAppRole: context.actualAppRole,
+      },
+    });
+    throw new AuthorizationError("This page requires admin access.");
   }
 
   return context;
@@ -88,10 +109,57 @@ export async function requirePremiumTier() {
   const context = await getCurrentUserAccess();
 
   if (!context.isPremium) {
-    throw new Error("Premium is required for this action.");
+    logWarn("auth.premium_required", {
+      result: {
+        subscriptionTier: context.subscriptionTier,
+      },
+    });
+    throw new AuthorizationError("Premium is required for this action.");
   }
 
   return context;
+}
+
+export async function requirePremiumSubscription() {
+  const context = await getCurrentUserAccess();
+
+  if (!context.isPremium) {
+    logWarn("auth.premium_required", {
+      result: {
+        subscriptionTier: context.subscriptionTier,
+      },
+    });
+    throw new AuthorizationError("Premium is required for this action.");
+  }
+
+  return context;
+}
+
+export async function requireOwnerOrAdminIntegrationAccess() {
+  const [household, access] = await Promise.all([
+    requireHouseholdContext(),
+    getCurrentUserAccess(),
+  ]);
+
+  if (household.role !== "owner" && !access.isActualAdmin) {
+    logWarn("auth.integration_view_denied", {
+      target: {
+        householdId: household.householdId,
+      },
+      result: {
+        householdRole: household.role,
+        actualAppRole: access.actualAppRole,
+      },
+    });
+    throw new AuthorizationError(
+      "You do not have permission to view this integration.",
+    );
+  }
+
+  return {
+    household,
+    access,
+  };
 }
 
 export function canConfigureAi(args: {

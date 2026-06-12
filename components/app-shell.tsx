@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import Link from "next/link";
 import {
   Sparkles,
   Soup,
@@ -7,13 +6,12 @@ import {
   Settings2,
   LayoutDashboard,
 } from "lucide-react";
-import { UserButton } from "@clerk/nextjs";
 
+import { AppShellProgress } from "@/components/app-route-transition";
+import { AppShellUserButton } from "@/components/app-shell-user-button";
+import { AppTransitionLink } from "@/components/app-transition-link";
 import { Button } from "@/components/ui/button";
 import { MobileNav } from "@/components/mobile-nav";
-import { getCurrentUserAccess } from "@/lib/server/access";
-import { requireHouseholdContext } from "@/lib/server/auth";
-import { cn } from "@/lib/utils";
 
 const baseLinks = [
   {
@@ -38,22 +36,14 @@ const baseLinks = [
 
 export async function AppShell({
   children,
-  title,
-  description,
-  showUserButton = false,
-  contentClassName,
+  householdName,
+  showAiPicker = false,
 }: {
   children: ReactNode;
-  title?: string;
-  description?: string;
-  showUserButton?: boolean;
-  contentClassName?: string;
+  householdName: string;
+  showAiPicker?: boolean;
 }) {
-  const [household, access] = await Promise.all([
-    requireHouseholdContext(),
-    getCurrentUserAccess(),
-  ]);
-  const links = access.isAdmin
+  const links = showAiPicker
     ? [
         baseLinks[0],
         {
@@ -70,8 +60,14 @@ export async function AppShell({
   return (
     <div className="min-h-screen bg-grain pb-16">
       <header className="sticky top-0 z-40 border-b border-white/50 bg-background/75 backdrop-blur-xl">
+        <AppShellProgress />
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <Link href="/" className="flex items-center gap-3">
+          <AppTransitionLink
+            href="/"
+            prefetch
+            className="flex items-center gap-3"
+            pendingClassName="opacity-80"
+          >
             <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
               <Soup className="h-5 w-5" />
             </div>
@@ -79,11 +75,9 @@ export async function AppShell({
               <p className="font-[family-name:var(--font-serif)] text-lg font-semibold">
                 Recipe Picker
               </p>
-              <p className="text-xs text-muted-foreground">
-                {household.householdName}
-              </p>
+              <p className="text-xs text-muted-foreground">{householdName}</p>
             </div>
-          </Link>
+          </AppTransitionLink>
 
           <nav className="hidden items-center gap-2 md:flex">
             {links.map((link) => (
@@ -93,53 +87,29 @@ export async function AppShell({
                 variant="ghost"
                 className="bg-transparent"
               >
-                <Link href={link.href} className="flex items-center gap-2">
+                <AppTransitionLink
+                  href={link.href}
+                  prefetch
+                  className="flex items-center gap-2"
+                  pendingClassName="opacity-60"
+                >
                   {"icon" in link && link.icon ? (
                     <link.icon className="h-4 w-4" />
                   ) : null}
                   {link.label}
-                </Link>
+                </AppTransitionLink>
               </Button>
             ))}
           </nav>
 
-          {showUserButton ? (
-            <div className="flex gap-2">
-              <UserButton
-                appearance={{
-                  elements: {
-                    userButtonAvatarBox: "w-10 h-10",
-                  },
-                }}
-              />
-            </div>
-          ) : null}
+          <AppShellUserButton />
         </div>
       </header>
 
-      <main
-        className={cn(
-          "mx-auto flex max-w-4xl flex-col gap-8 px-2 py-4 pb-24 sm:px-6 md:pb-4 lg:px-8",
-          contentClassName,
-        )}
-      >
-        {(title || description) && (
-          <section className="space-y-3">
-            {title && (
-              <h1 className="max-w-4xl font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight sm:text-5xl">
-                {title}
-              </h1>
-            )}
-            {description && (
-              <p className="max-w-2xl text-sm text-muted-foreground sm:text-base">
-                {description}
-              </p>
-            )}
-          </section>
-        )}
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-2 py-4 pb-24 sm:px-6 md:pb-4 lg:px-8">
         {children}
       </main>
-      <MobileNav showAiPicker={access.isAdmin} />
+      <MobileNav showAiPicker={showAiPicker} />
     </div>
   );
 }

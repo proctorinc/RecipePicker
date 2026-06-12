@@ -34,6 +34,8 @@ Shared app settings include:
 - `PINTEREST_APP_SECRET`
 - `PINTEREST_REDIRECT_URI`
 - `PINTEREST_TOKEN_ENCRYPTION_KEY`
+- `LOG_LEVEL`
+- `LOG_INCLUDE_DEBUG_SQLITE_TARGETS`
 
 The default Pinterest callback route is `http://localhost:3000/api/pinterest/callback`.
 

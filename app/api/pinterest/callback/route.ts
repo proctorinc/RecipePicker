@@ -1,34 +1,89 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
+import { getCurrentUserAccess } from "@/lib/server/access";
+import { getHouseholdMembership } from "@/lib/server/auth";
+import { logAudit, logWarn, withRouteLogging } from "@/lib/server/logger";
 import { consumePinterestOauthState, exchangePinterestCode, upsertPinterestConnection } from "@/lib/server/pinterest";
+import { updateRequestContext } from "@/lib/server/request-context";
 
-export async function GET(request: Request) {
+const OAUTH_ERROR_REDIRECT = "/settings/pinterest?oauthError=";
+const GENERIC_OAUTH_ERROR =
+  "Pinterest could not complete the connection. Please try again.";
+
+export const GET = withRouteLogging("api.pinterest_callback", async (request: Request) => {
   const url = new URL(request.url);
   const state = url.searchParams.get("state");
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
-  const errorDescription = url.searchParams.get("error_description");
   const { userId } = await auth();
 
   if (!userId) {
+    logWarn("pinterest.oauth.authentication_required");
     return NextResponse.redirect(new URL("/sign-in", url.origin));
   }
 
+  updateRequestContext({
+    actor: {
+      clerkUserId: userId,
+    },
+  });
+
   if (error) {
-    const message = errorDescription ? `${error}: ${errorDescription}` : error;
-    return NextResponse.redirect(new URL(`/settings?oauthError=${encodeURIComponent(message)}`, url.origin));
+    logWarn("pinterest.oauth.callback_failed", {
+      result: {
+        reason: error,
+      },
+    });
+    return NextResponse.redirect(
+      new URL(`${OAUTH_ERROR_REDIRECT}${encodeURIComponent(GENERIC_OAUTH_ERROR)}`, url.origin),
+    );
   }
 
   if (!state || !code) {
-    return NextResponse.redirect(new URL("/settings?oauthError=Missing%20OAuth%20response", url.origin));
+    logWarn("pinterest.oauth.callback_failed", {
+      result: {
+        reason: "missing_oauth_response",
+      },
+    });
+    return NextResponse.redirect(
+      new URL(`${OAUTH_ERROR_REDIRECT}${encodeURIComponent(GENERIC_OAUTH_ERROR)}`, url.origin),
+    );
   }
 
   try {
     const oauthState = await consumePinterestOauthState(state);
 
     if (oauthState.clerkUserId !== userId) {
-      return NextResponse.redirect(new URL("/settings?oauthError=OAuth%20state%20mismatch", url.origin));
+      logWarn("pinterest.oauth.state_mismatch");
+      return NextResponse.redirect(
+        new URL(`${OAUTH_ERROR_REDIRECT}${encodeURIComponent(GENERIC_OAUTH_ERROR)}`, url.origin),
+      );
+    }
+
+    updateRequestContext({
+      actor: {
+        clerkUserId: userId,
+        householdId: oauthState.householdId,
+      },
+    });
+    const [access, membership] = await Promise.all([
+      getCurrentUserAccess(),
+      getHouseholdMembership({
+        householdId: oauthState.householdId,
+        clerkUserId: userId,
+      }),
+    ]);
+
+    if (membership?.role !== "owner" && !access.isActualAdmin) {
+      logWarn("pinterest.oauth.authorization_denied", {
+        target: {
+          householdId: oauthState.householdId,
+        },
+      });
+      return NextResponse.redirect(
+        new URL(`${OAUTH_ERROR_REDIRECT}${encodeURIComponent(GENERIC_OAUTH_ERROR)}`, url.origin),
+      );
     }
 
     const token = await exchangePinterestCode(code);
@@ -37,10 +92,21 @@ export async function GET(request: Request) {
       connectedByClerkUserId: userId,
       token,
     });
+    logAudit("pinterest.oauth.callback_succeeded", {
+      target: {
+        householdId: oauthState.householdId,
+      },
+    });
 
     return NextResponse.redirect(new URL(oauthState.returnTo ?? "/settings", url.origin));
   } catch (callbackError) {
-    const message = callbackError instanceof Error ? callbackError.message : String(callbackError);
-    return NextResponse.redirect(new URL(`/settings?oauthError=${encodeURIComponent(message)}`, url.origin));
+    logWarn("pinterest.oauth.callback_failed", {
+      result: {
+        reason: "callback_error",
+      },
+    });
+    return NextResponse.redirect(
+      new URL(`${OAUTH_ERROR_REDIRECT}${encodeURIComponent(GENERIC_OAUTH_ERROR)}`, url.origin),
+    );
   }
-}
+});

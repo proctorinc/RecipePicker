@@ -14,16 +14,19 @@ import {
   isUserRole,
 } from "@/lib/access";
 import { openDatabase } from "@/lib/server/database";
-import { userAccessTiers } from "@/lib/server/db";
+import { households, householdMembers, userAccessTiers } from "@/lib/server/db";
 import {
   ADMIN_ROLE_OVERRIDE_COOKIE,
   canConfigureAi,
   getCurrentUserAccess,
   normalizeAppRole,
   normalizeRoleOverride,
+  requireOwnerOrAdminIntegrationAccess,
+  requirePremiumSubscription,
   resolveFeedCardHref,
   upsertUserSubscriptionTier,
 } from "@/lib/server/access";
+import { AuthorizationError } from "@/lib/server/errors";
 
 const { mockAuth, mockCookies, mockCurrentUser } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -201,6 +204,106 @@ describe("app access", () => {
     expect(canConfigureAi({ subscriptionTier: "premium", householdRole: "owner" })).toBe(true);
     expect(canConfigureAi({ subscriptionTier: "free", householdRole: "owner" })).toBe(false);
     expect(canConfigureAi({ subscriptionTier: "premium", householdRole: "member" })).toBe(false);
+  });
+
+  it("requires a premium subscription for premium-only features", async () => {
+    await expect(requirePremiumSubscription()).rejects.toBeInstanceOf(AuthorizationError);
+  });
+
+  it("allows premium users through the premium subscription guard", async () => {
+    await upsertUserSubscriptionTier({
+      clerkUserId: "user_123",
+      subscriptionTier: "premium",
+    });
+
+    const access = await requirePremiumSubscription();
+    expect(access.subscriptionTier).toBe("premium");
+  });
+
+  it("allows household owners to view integration settings", async () => {
+    const { db, sqlite } = await openDatabase(sqlitePath);
+
+    try {
+      await db.insert(households)
+        .values({
+          householdId: "household_1",
+          name: "Kitchen",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+      await db.insert(householdMembers)
+        .values({
+          householdId: "household_1",
+          clerkUserId: "user_123",
+          role: "owner",
+          joinedAt: new Date().toISOString(),
+        })
+        .run();
+    } finally {
+      await sqlite.close();
+    }
+
+    const result = await requireOwnerOrAdminIntegrationAccess();
+    expect(result.household.householdId).toBe("household_1");
+    expect(result.household.role).toBe("owner");
+  });
+
+  it("allows admins to view integration settings even when not household owners", async () => {
+    mockCurrentUser.mockResolvedValue({ publicMetadata: { appRole: "admin" } });
+    const { db, sqlite } = await openDatabase(sqlitePath);
+
+    try {
+      await db.insert(households)
+        .values({
+          householdId: "household_1",
+          name: "Kitchen",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+      await db.insert(householdMembers)
+        .values({
+          householdId: "household_1",
+          clerkUserId: "user_123",
+          role: "member",
+          joinedAt: new Date().toISOString(),
+        })
+        .run();
+    } finally {
+      await sqlite.close();
+    }
+
+    const result = await requireOwnerOrAdminIntegrationAccess();
+    expect(result.household.role).toBe("member");
+    expect(result.access.isActualAdmin).toBe(true);
+  });
+
+  it("blocks household members from viewing integration settings", async () => {
+    const { db, sqlite } = await openDatabase(sqlitePath);
+
+    try {
+      await db.insert(households)
+        .values({
+          householdId: "household_1",
+          name: "Kitchen",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+      await db.insert(householdMembers)
+        .values({
+          householdId: "household_1",
+          clerkUserId: "user_123",
+          role: "member",
+          joinedAt: new Date().toISOString(),
+        })
+        .run();
+    } finally {
+      await sqlite.close();
+    }
+
+    await expect(requireOwnerOrAdminIntegrationAccess()).rejects.toBeInstanceOf(AuthorizationError);
   });
 
   it("provides reusable UI access helpers", () => {

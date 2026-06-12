@@ -11,6 +11,7 @@ import {
   pinterestAccounts,
 } from "@/lib/server/db";
 import { extractRecipes } from "@/lib/server/extract";
+import { logError, logInfo, logWarn } from "@/lib/server/logger";
 import { getPinImageUrl } from "@/lib/server/media";
 import {
   fetchAllPins,
@@ -39,7 +40,7 @@ type SyncClaimOptions = {
 
 type SyncClaimResult =
   | { status: "claimed"; startedAt: string }
-  | { status: "skipped_not_connected" | "skipped_no_boards" | "skipped_cooldown" | "skipped_locked" };
+  | { status: "skipped_not_connected" | "skipped_no_boards" | "skipped_cooldown" | "skipped_locked" | "skipped_disabled" };
 
 type SyncBoardResult = {
   boardId: string;
@@ -59,6 +60,25 @@ export function getPinterestAutoSyncCooldownMs(tier: SubscriptionTier) {
 
 export function formatPinterestAutoSyncFrequency(tier: SubscriptionTier) {
   return tier === "premium" ? "every 10m" : "every 24h";
+}
+
+export function getNextPinterestAutoSyncEligibleAt(args: {
+  autoSyncEnabled: boolean;
+  lastSyncAttemptAt: string | null | undefined;
+  subscriptionTier: SubscriptionTier;
+}) {
+  if (!args.autoSyncEnabled || !args.lastSyncAttemptAt) {
+    return null;
+  }
+
+  const lastAttemptMs = new Date(args.lastSyncAttemptAt).getTime();
+  if (Number.isNaN(lastAttemptMs)) {
+    return null;
+  }
+
+  return new Date(
+    lastAttemptMs + getPinterestAutoSyncCooldownMs(args.subscriptionTier),
+  ).toISOString();
 }
 
 export function isPinterestSyncLeaseActive(
@@ -92,6 +112,11 @@ export async function planPinterestAutoSync(args: {
 export async function runClaimedPinterestAutoSync(args: {
   householdId: string;
 }) {
+  logInfo("pinterest.sync.auto.started", {
+    target: {
+      householdId: args.householdId,
+    },
+  });
   try {
     const syncResult = await syncAllBoards({
       householdId: args.householdId,
@@ -109,12 +134,27 @@ export async function runClaimedPinterestAutoSync(args: {
       status: "success",
     });
 
+    logInfo("pinterest.sync.auto.completed", {
+      target: {
+        householdId: args.householdId,
+      },
+      result: {
+        boardCount: syncResult.boards.length,
+        newRecipeCount: syncResult.newRecipeIds.length,
+      },
+    });
+
     return syncResult;
   } catch (error) {
     await updatePinterestConnectionSyncStatus({
       householdId: args.householdId,
       status: "error",
       errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    logError("pinterest.sync.auto.failed", error, {
+      target: {
+        householdId: args.householdId,
+      },
     });
     throw error;
   }
@@ -133,6 +173,15 @@ export async function runManualBoardSync(args: {
   });
 
   if (claim.status !== "claimed") {
+    logWarn("pinterest.sync.manual_board.skipped", {
+      target: {
+        householdId: args.householdId,
+        boardId: args.boardId,
+      },
+      result: {
+        status: claim.status,
+      },
+    });
     throw toSyncClaimError(claim.status);
   }
 
@@ -148,12 +197,29 @@ export async function runManualBoardSync(args: {
       status: "success",
     });
 
+    logInfo("pinterest.sync.manual_board.completed", {
+      target: {
+        householdId: args.householdId,
+        boardId: args.boardId,
+      },
+      result: {
+        syncedPins: result.syncedPins,
+        newRecipeCount: result.newRecipeIds.length,
+      },
+    });
+
     return result;
   } catch (error) {
     await updatePinterestConnectionSyncStatus({
       householdId: args.householdId,
       status: "error",
       errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    logError("pinterest.sync.manual_board.failed", error, {
+      target: {
+        householdId: args.householdId,
+        boardId: args.boardId,
+      },
     });
     throw error;
   }
@@ -169,6 +235,14 @@ export async function runManualSyncAllBoards(args: {
   });
 
   if (claim.status === "skipped_no_boards") {
+    logWarn("pinterest.sync.manual_all.skipped", {
+      target: {
+        householdId: args.householdId,
+      },
+      result: {
+        status: claim.status,
+      },
+    });
     return {
       boards: [],
       newRecipeIds: [],
@@ -176,6 +250,14 @@ export async function runManualSyncAllBoards(args: {
   }
 
   if (claim.status !== "claimed") {
+    logWarn("pinterest.sync.manual_all.skipped", {
+      target: {
+        householdId: args.householdId,
+      },
+      result: {
+        status: claim.status,
+      },
+    });
     throw toSyncClaimError(claim.status);
   }
 
@@ -189,12 +271,27 @@ export async function runManualSyncAllBoards(args: {
       status: "success",
     });
 
+    logInfo("pinterest.sync.manual_all.completed", {
+      target: {
+        householdId: args.householdId,
+      },
+      result: {
+        boardCount: result.boards.length,
+        newRecipeCount: result.newRecipeIds.length,
+      },
+    });
+
     return result;
   } catch (error) {
     await updatePinterestConnectionSyncStatus({
       householdId: args.householdId,
       status: "error",
       errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    logError("pinterest.sync.manual_all.failed", error, {
+      target: {
+        householdId: args.householdId,
+      },
     });
     throw error;
   }
@@ -204,6 +301,12 @@ export async function syncBoard(
   pinterestBoardId: string,
   options: SyncBoardOptions,
 ): Promise<SyncBoardResult> {
+  logInfo("pinterest.sync.board.started", {
+    target: {
+      householdId: options.householdId,
+      boardId: pinterestBoardId,
+    },
+  });
   const accessToken = await getValidPinterestAccessToken(options.householdId);
   const pinRecords = await fetchAllPins(pinterestBoardId, accessToken);
   const syncNow = new Date().toISOString();
@@ -363,6 +466,11 @@ export async function syncAllBoards(options: {
   householdId: string;
   sqlitePath?: string;
 }): Promise<SyncAllBoardsResult> {
+  logInfo("pinterest.sync.all_boards.started", {
+    target: {
+      householdId: options.householdId,
+    },
+  });
   const boardRecords = await listRemotePinterestBoards(options.householdId);
   const selectedBoardIds = await getSelectedBoardIds(
     options.householdId,
@@ -404,10 +512,30 @@ async function claimPinterestSyncRun(
     });
 
     if (!connection) {
+      logWarn("pinterest.sync.claim_skipped", {
+        target: {
+          householdId: options.householdId,
+        },
+        result: {
+          status: "skipped_not_connected",
+        },
+      });
       return { status: "skipped_not_connected" };
     }
 
     if (options.requireEnabledBoards) {
+      if (options.trigger === "auto_feed_load" && !connection.autoSyncEnabled) {
+        logWarn("pinterest.sync.claim_skipped", {
+          target: {
+            householdId: options.householdId,
+          },
+          result: {
+            status: "skipped_disabled",
+          },
+        });
+        return { status: "skipped_disabled" };
+      }
+
       const enabledBoard = await db.query.boardSyncSubscriptions.findFirst({
         where: (table, { and: whereAnd, eq: whereEq }) =>
           whereAnd(
@@ -420,15 +548,39 @@ async function claimPinterestSyncRun(
       });
 
       if (!enabledBoard) {
+        logWarn("pinterest.sync.claim_skipped", {
+          target: {
+            householdId: options.householdId,
+          },
+          result: {
+            status: "skipped_no_boards",
+          },
+        });
         return { status: "skipped_no_boards" };
       }
     }
 
     if (isPinterestSyncLeaseActive(connection.syncInProgressAt, now.getTime())) {
+      logWarn("pinterest.sync.claim_skipped", {
+        target: {
+          householdId: options.householdId,
+        },
+        result: {
+          status: "skipped_locked",
+        },
+      });
       return { status: "skipped_locked" };
     }
 
     if (options.cooldownMs && isWithinCooldown(connection.lastSyncAttemptAt, options.cooldownMs, now.getTime())) {
+      logWarn("pinterest.sync.claim_skipped", {
+        target: {
+          householdId: options.householdId,
+        },
+        result: {
+          status: "skipped_cooldown",
+        },
+      });
       return { status: "skipped_cooldown" };
     }
 
@@ -459,9 +611,26 @@ async function claimPinterestSyncRun(
         : result.rowsAffected;
 
     if ((affectedRows ?? 0) === 0) {
+      logWarn("pinterest.sync.claim_skipped", {
+        target: {
+          householdId: options.householdId,
+        },
+        result: {
+          status: "skipped_locked",
+        },
+      });
       return { status: "skipped_locked" };
     }
 
+    logInfo("pinterest.sync.claimed", {
+      target: {
+        householdId: options.householdId,
+      },
+      result: {
+        trigger: options.trigger,
+        startedAt: nowIso,
+      },
+    });
     return {
       status: "claimed",
       startedAt: nowIso,
@@ -521,6 +690,8 @@ function toSyncClaimError(status: SyncClaimResult["status"]) {
       return new Error("No boards are selected for sync yet.");
     case "skipped_cooldown":
       return new Error("Pinterest sync is cooling down.");
+    case "skipped_disabled":
+      return new Error("Pinterest auto-sync is disabled.");
     case "claimed":
       return new Error("Pinterest sync is already running.");
   }

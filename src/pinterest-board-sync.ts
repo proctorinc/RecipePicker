@@ -1,5 +1,6 @@
 import process from "node:process";
 
+import { runScriptWithLogging } from "@/lib/server/logger";
 import { syncBoard } from "@/lib/server/sync";
 
 function parseArgs(argv: string[]) {
@@ -25,13 +26,16 @@ async function main() {
   const { householdId, boardId, sqlitePath } = parseArgs(process.argv.slice(2));
   const result = await syncBoard(boardId, { householdId, sqlitePath });
 
-  console.log(
-    `Synced ${result.syncedPins} pins from board ${boardId} into ${result.sqlitePath}`,
+  process.stdout.write(
+    `Synced ${result.syncedPins} pins from board ${boardId} into ${result.sqlitePath}\n`,
   );
 }
 
-main().catch((error: unknown) => {
+runScriptWithLogging({
+  scriptName: "script.pinterest_board_sync",
+  fn: main,
+}).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
+  process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

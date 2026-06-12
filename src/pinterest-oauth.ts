@@ -3,6 +3,7 @@ import http from "node:http";
 import process from "node:process";
 import crypto from "node:crypto";
 
+import { logInfo, runScriptWithLogging } from "@/lib/server/logger";
 import { getEnvFilePath, upsertEnvValue } from "./env-file.js";
 import { getApiBaseUrl, requireEnv } from "./pinterest-api.js";
 
@@ -183,7 +184,12 @@ async function waitForAuthorizationCode(redirectUri: string, expectedState: stri
     });
 
     server.listen(port, redirectUrl.hostname, () => {
-      console.log(`Listening for Pinterest OAuth callback on ${redirectUri}`);
+      logInfo("script.pinterest_oauth.callback_listener_ready", {
+        result: {
+          redirectUri,
+        },
+      });
+      process.stdout.write(`Listening for Pinterest OAuth callback on ${redirectUri}\n`);
     });
   });
 }
@@ -197,29 +203,36 @@ async function main() {
   const state = crypto.randomUUID();
   const authorizeUrl = buildAuthorizeUrl(clientId, redirectUri, state);
 
-  console.log("1. Make sure this exact redirect URI is registered in your Pinterest app:");
-  console.log(`   ${redirectUri}`);
-  console.log("");
-  console.log("2. Open this URL in your browser and approve access:");
-  console.log(authorizeUrl);
-  console.log("");
+  process.stdout.write("1. Make sure this exact redirect URI is registered in your Pinterest app:\n");
+  process.stdout.write(`   ${redirectUri}\n\n`);
+  process.stdout.write("2. Open this URL in your browser and approve access:\n");
+  process.stdout.write(`${authorizeUrl}\n\n`);
 
   const code = await waitForAuthorizationCode(redirectUri, state);
   const token = await exchangeCodeForToken(clientId, clientSecret, redirectUri, code);
   saveTokens(token);
 
-  console.log("Pinterest OAuth succeeded.");
-  console.log("Saved PINTEREST_ACCESS_TOKEN to .env");
+  logInfo("script.pinterest_oauth.succeeded", {
+    result: {
+      hasRefreshToken: Boolean(token.refresh_token),
+      scopeCount: token.scope?.split(",").filter(Boolean).length ?? 0,
+    },
+  });
+  process.stdout.write("Pinterest OAuth succeeded.\n");
+  process.stdout.write("Saved PINTEREST_ACCESS_TOKEN to the env file.\n");
 
   if (token.refresh_token) {
-    console.log("Saved PINTEREST_REFRESH_TOKEN to .env");
+    process.stdout.write("Saved PINTEREST_REFRESH_TOKEN to the env file.\n");
   } else {
-    console.log("Pinterest did not return a refresh token in this response.");
+    process.stdout.write("Pinterest did not return a refresh token in this response.\n");
   }
 }
 
-main().catch((error: unknown) => {
+runScriptWithLogging({
+  scriptName: "script.pinterest_oauth",
+  fn: main,
+}).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
+  process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

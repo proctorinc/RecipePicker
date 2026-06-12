@@ -10,6 +10,7 @@ export type FeedPinCard = {
   pinId: string;
   title: string;
   imageUrl: string | null;
+  previewImageUrl: string | null;
   dominantColor: string | null;
   destinationHref: string;
   siteName: string | null;
@@ -18,6 +19,12 @@ export type FeedPinCard = {
   searchText: string;
   averageRating: number | null;
   reviewCount: number;
+};
+
+export type FeedPinsPage = {
+  items: FeedPinCard[];
+  nextCursor: string | null;
+  hasMore: boolean;
 };
 
 export type RecipeReviewAggregate = {

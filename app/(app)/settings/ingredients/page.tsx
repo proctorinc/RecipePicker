@@ -1,5 +1,4 @@
-import Link from "next/link";
-
+import { AppTransitionLink } from "@/components/app-transition-link";
 import { IngredientReviewTable } from "@/components/ingredient-review-table";
 import { SettingsNav } from "@/components/settings-nav";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,23 +47,25 @@ export default async function IngredientSettingsPage({
               </p>
               {queue.totalPages > 1 ? (
                 <div className="flex items-center gap-2">
-                  <Link
+                  <AppTransitionLink
                     href={previousHref}
+                    prefetch
                     aria-disabled={queue.page <= 1}
                     className="rounded-full border border-border px-4 py-2 text-foreground transition hover:bg-secondary aria-disabled:pointer-events-none aria-disabled:opacity-50"
                   >
                     Previous
-                  </Link>
+                  </AppTransitionLink>
                   <span>
                     Page {queue.page} of {queue.totalPages}
                   </span>
-                  <Link
+                  <AppTransitionLink
                     href={nextHref}
+                    prefetch
                     aria-disabled={queue.page >= queue.totalPages}
                     className="rounded-full border border-border px-4 py-2 text-foreground transition hover:bg-secondary aria-disabled:pointer-events-none aria-disabled:opacity-50"
                   >
                     Next
-                  </Link>
+                  </AppTransitionLink>
                 </div>
               ) : null}
             </div>

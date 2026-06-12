@@ -1,5 +1,4 @@
-import Link from "next/link";
-
+import { AppTransitionLink } from "@/components/app-transition-link";
 import { SettingsNav } from "@/components/settings-nav";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -26,46 +25,50 @@ export default async function SettingsPage() {
     requireHouseholdContext(),
     getCurrentUserAccess(),
   ]);
+  const canManageIntegrations = context.role === "owner" || access.isActualAdmin;
   const [summary, ingredientQueue, pinterestConnection, aiConnection, boards] =
     await Promise.all([
       getDashboardSummary(),
       getIngredientReviewQueue(1, 1),
-      getPinterestConnectionSummary(context.householdId),
-      getHouseholdAiConnectionSummary(context.householdId),
-      getBoardSyncOptions(),
+      canManageIntegrations
+        ? getPinterestConnectionSummary(context.householdId)
+        : Promise.resolve(null),
+      canManageIntegrations
+        ? getHouseholdAiConnectionSummary(context.householdId)
+        : Promise.resolve(null),
+      canManageIntegrations ? getBoardSyncOptions() : Promise.resolve([]),
     ]);
   const recipeAttentionCount =
     summary.pendingRecipes + summary.failedRecipes + summary.reviewNeeded;
   const ingredientAttentionCount = ingredientQueue.totalCount;
   const syncedBoardCount = boards.filter((board) => board.syncEnabled).length;
-  const canManageSettings = access.isOwner || access.isAdmin;
   const overviewItems = [
-    ...(canManageSettings
+    ...(canManageIntegrations
       ? [
           {
             title: "Pinterest",
             description: getPinterestDescription(
-              pinterestConnection.status,
+              pinterestConnection!.status,
               syncedBoardCount,
             ),
             href: "/settings/pinterest",
             ctaLabel: getPinterestCta(
-              pinterestConnection.status,
+              pinterestConnection!.status,
               syncedBoardCount,
             ),
             emphasized:
-              pinterestConnection.status !== "active" || syncedBoardCount === 0,
+              pinterestConnection!.status !== "active" || syncedBoardCount === 0,
           },
           {
             title: "AI",
             description: getAiDescription(
-              aiConnection.status,
-              aiConnection.providerLabel,
-              aiConnection.modelLabel,
+              aiConnection!.status,
+              aiConnection!.providerLabel,
+              aiConnection!.modelLabel,
             ),
             href: "/settings/ai",
-            ctaLabel: getAiCta(aiConnection.status),
-            emphasized: aiConnection.status !== "active",
+            ctaLabel: getAiCta(aiConnection!.status),
+            emphasized: aiConnection!.status !== "active",
           },
           {
             title: "Recipes",
@@ -93,18 +96,15 @@ export default async function SettingsPage() {
           },
         ]
       : []),
-    ...(access.isAdmin
+    ...(access.isPremium
       ? [
           {
             title: "AI Recipe Picker",
-            description: access.isPremium
-              ? "Open the premium prompt-based carousel to steer recipes with AI."
-              : "Upgrade to premium to unlock the separate AI recipe picker page.",
+            description:
+              "Open the premium prompt-based carousel to steer recipes with AI.",
             href: "/picker",
-            ctaLabel: access.isPremium
-              ? "Open AI picker"
-              : "View premium feature",
-            emphasized: access.isPremium,
+            ctaLabel: "Open AI picker",
+            emphasized: true,
           },
         ]
       : []),
@@ -173,14 +173,16 @@ function OverviewItem({
         <p className="font-medium">{title}</p>
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
-      <Link
+      <AppTransitionLink
         href={href}
+        prefetch
         className={buttonVariants({
           variant: emphasized ? "default" : "outline",
         })}
+        pendingClassName="opacity-75"
       >
         {ctaLabel}
-      </Link>
+      </AppTransitionLink>
     </div>
   );
 }

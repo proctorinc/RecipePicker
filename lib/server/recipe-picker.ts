@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import {
-  getHouseholdAiConnectionSummary,
+  getHouseholdAiConnectionStatus,
   generateRecipePickerWithHouseholdAi,
 } from "@/lib/server/ai-provider";
 import { requireHouseholdContext } from "@/lib/server/auth";
@@ -242,8 +242,8 @@ export async function getRecipePickerConversationState(args: {
   clerkUserId: string;
   conversationId: string;
 }): Promise<RecipePickerResponse> {
-  const aiConnection = await getHouseholdAiConnectionSummary(args.householdId);
-  const requiresAiSetup = aiConnection.status !== "active";
+  const aiConnectionStatus = await getHouseholdAiConnectionStatus(args.householdId);
+  const requiresAiSetup = aiConnectionStatus !== "active";
   const { db, sqlite } = await openDatabase();
 
   try {
@@ -471,8 +471,8 @@ async function generateRecipePickerTurn(args: {
   request: RecipePickerRequest;
 }): Promise<GeneratedTurn> {
   const request = normalizeRequest(args.request);
-  const aiConnection = await getHouseholdAiConnectionSummary(args.householdId);
-  const requiresAiSetup = aiConnection.status !== "active";
+  const aiConnectionStatus = await getHouseholdAiConnectionStatus(args.householdId);
+  const requiresAiSetup = aiConnectionStatus !== "active";
   const { db, sqlite } = await openDatabase();
 
   try {

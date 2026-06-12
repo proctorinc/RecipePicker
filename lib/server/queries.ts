@@ -20,7 +20,7 @@ import {
   getCanonicalIngredientOptionsForHousehold,
   resolveIngredientSearchQuery,
 } from "@/lib/server/ingredient-normalization";
-import { getPinImageUrl } from "@/lib/server/media";
+import { getPinImageSources, getPinImageUrl } from "@/lib/server/media";
 import { listRemotePinterestBoards } from "@/lib/server/pinterest";
 import { summarizeRecipeOps } from "@/lib/server/recipe-ops-summary";
 import { derivePinStatus } from "@/lib/server/status";
@@ -40,6 +40,7 @@ import type {
   CanonicalIngredientOption,
   DashboardSummary,
   FeedPinCard,
+  FeedPinsPage,
   HouseholdMemberView,
   IngredientReviewItemView,
   IngredientReviewQueuePageView,
@@ -56,6 +57,14 @@ import type {
 
 type DatabaseHandle = Awaited<ReturnType<typeof openDatabase>>["db"];
 type RecipeGraph = Awaited<ReturnType<typeof getFeedRecipeRows>>[number];
+type FeedCardRow = FeedPinCard & {
+  ingredientMatchScore: number;
+  pin: RecipeGraph["pin"];
+  updatedAt: string;
+};
+
+const DEFAULT_FEED_PAGE_SIZE = 24;
+const MAX_FEED_PAGE_SIZE = 48;
 
 export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
   const [context, appAccess] = await Promise.all([
@@ -66,40 +75,68 @@ export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
 
   try {
     const rows = await getFeedRecipeRows(db, context.householdId);
-    const normalizedQuery = searchText?.trim().toLowerCase() ?? "";
-    const ingredientQuery = normalizedQuery
-      ? resolveIngredientSearchQuery(db, context.householdId, normalizedQuery)
-      : null;
+    return prepareFeedCards({
+      rows,
+      householdId: context.householdId,
+      db,
+      searchText,
+      subscriptionTier: appAccess.subscriptionTier,
+    }).map(({ updatedAt: _updatedAt, ingredientMatchScore: _score, ...card }) => card);
+  } finally {
+    await sqlite.close();
+  }
+}
 
-    return rows
-      .map((row) => {
-        const card = toFeedCard(row, appAccess.subscriptionTier);
-        const ingredientMatchScore = ingredientQuery
-          ? getIngredientMatchScore(row, ingredientQuery)
-          : 0;
-        return {
-          ...card,
-          ingredientMatchScore,
-        };
-      })
-      .filter(
-        (row) =>
-          !normalizedQuery ||
-          row.searchText.includes(normalizedQuery) ||
-          row.ingredientMatchScore > 0,
-      )
-      .sort((left, right) => {
-        if (right.ingredientMatchScore !== left.ingredientMatchScore) {
-          return right.ingredientMatchScore - left.ingredientMatchScore;
-        }
+export async function getFeedPinsPage({
+  searchText,
+  cursor,
+  pageSize = DEFAULT_FEED_PAGE_SIZE,
+}: {
+  searchText?: string;
+  cursor?: string | null;
+  pageSize?: number;
+}): Promise<FeedPinsPage> {
+  const [context, appAccess] = await Promise.all([
+    requireHouseholdContext(),
+    getCurrentUserAccess(),
+  ]);
+  const { db, sqlite } = await openDatabase();
 
-        return (right.pin.updatedAt ?? "").localeCompare(
-          left.pin.updatedAt ?? "",
-        );
-      })
-      .map(
-        ({ pin, ingredientMatchScore: _ingredientMatchScore, ...card }) => card,
-      );
+  try {
+    const rows = await getFeedRecipeRows(db, context.householdId);
+    const cards = prepareFeedCards({
+      rows,
+      householdId: context.householdId,
+      db,
+      searchText,
+      subscriptionTier: appAccess.subscriptionTier,
+    });
+    const normalizedPageSize = Number.isInteger(pageSize)
+      ? Math.min(Math.max(pageSize, 1), MAX_FEED_PAGE_SIZE)
+      : DEFAULT_FEED_PAGE_SIZE;
+    const decodedCursor = decodeFeedCursor(cursor);
+    const exactCursorIndex = decodedCursor
+      ? cards.findIndex((card) => matchesCursor(card, decodedCursor))
+      : -1;
+    const startIndex = decodedCursor
+      ? exactCursorIndex >= 0
+        ? exactCursorIndex + 1
+        : cards.findIndex((card) => isAfterCursor(card, decodedCursor))
+      : 0;
+    const safeStartIndex = startIndex > 0 ? startIndex : 0;
+    const items = cards
+      .slice(safeStartIndex, safeStartIndex + normalizedPageSize)
+      .map(({ updatedAt, ...card }) => card);
+    const nextItem = cards[safeStartIndex + normalizedPageSize];
+    const lastVisibleItem =
+      items.length > 0 ? cards[safeStartIndex + items.length - 1] : null;
+
+    return {
+      items,
+      nextCursor:
+        nextItem && lastVisibleItem ? encodeFeedCursor(lastVisibleItem) : null,
+      hasMore: Boolean(nextItem),
+    };
   } finally {
     await sqlite.close();
   }
@@ -1041,6 +1078,7 @@ function toFeedCard(row: RecipeGraph, subscriptionTier: "free" | "premium") {
     )
     .join(" ");
   const aggregate = getRecipeReviewAggregate(row.reviews);
+  const imageSources = getPinImageSources(row.pin.mediaJson, row.pin.rawJson);
 
   return {
     recipeId: row.recipeId,
@@ -1053,7 +1091,11 @@ function toFeedCard(row: RecipeGraph, subscriptionTier: "free" | "premium") {
     imageUrl:
       row.imageUrl ??
       row.recipeInstructions?.imageUrl ??
-      getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
+      imageSources.imageUrl,
+    previewImageUrl:
+      imageSources.previewImageUrl !== imageSources.imageUrl
+        ? imageSources.previewImageUrl
+        : null,
     dominantColor: row.pin.dominantColor,
     destinationHref: resolveFeedCardHref({
       recipeId: row.recipeId,
@@ -1089,6 +1131,112 @@ function toFeedCard(row: RecipeGraph, subscriptionTier: "free" | "premium") {
       .toLowerCase(),
     pin: row.pin,
   };
+}
+
+function prepareFeedCards({
+  rows,
+  householdId,
+  db,
+  searchText,
+  subscriptionTier,
+}: {
+  rows: RecipeGraph[];
+  householdId: string;
+  db: DatabaseHandle;
+  searchText?: string;
+  subscriptionTier: "free" | "premium";
+}) {
+  const normalizedQuery = searchText?.trim().toLowerCase() ?? "";
+  const ingredientQuery = normalizedQuery
+    ? resolveIngredientSearchQuery(db, householdId, normalizedQuery)
+    : null;
+
+  return rows
+    .map((row) => {
+      const card = toFeedCard(row, subscriptionTier);
+      const ingredientMatchScore = ingredientQuery
+        ? getIngredientMatchScore(row, ingredientQuery)
+        : 0;
+
+      return {
+        ...card,
+        ingredientMatchScore,
+        updatedAt: row.pin.updatedAt ?? "",
+      };
+    })
+    .filter(
+      (row) =>
+        !normalizedQuery ||
+        row.searchText.includes(normalizedQuery) ||
+        row.ingredientMatchScore > 0,
+    )
+    .sort(compareFeedRows);
+}
+
+function compareFeedRows(left: FeedCardRow, right: FeedCardRow) {
+  if (right.ingredientMatchScore !== left.ingredientMatchScore) {
+    return right.ingredientMatchScore - left.ingredientMatchScore;
+  }
+
+  const updatedAtCompare = right.updatedAt.localeCompare(left.updatedAt);
+  if (updatedAtCompare !== 0) {
+    return updatedAtCompare;
+  }
+
+  return right.recipeId.localeCompare(left.recipeId);
+}
+
+function encodeFeedCursor(row: FeedCardRow) {
+  return Buffer.from(
+    JSON.stringify({
+      updatedAt: row.updatedAt,
+      recipeId: row.recipeId,
+    }),
+  ).toString("base64url");
+}
+
+function decodeFeedCursor(cursor: string | null | undefined) {
+  if (!cursor) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8"),
+    ) as { updatedAt?: unknown; recipeId?: unknown };
+
+    if (
+      typeof parsed.updatedAt !== "string"
+      || typeof parsed.recipeId !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      updatedAt: parsed.updatedAt,
+      recipeId: parsed.recipeId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isAfterCursor(
+  row: FeedCardRow,
+  cursor: { updatedAt: string; recipeId: string },
+) {
+  if (row.updatedAt !== cursor.updatedAt) {
+    return row.updatedAt.localeCompare(cursor.updatedAt) < 0;
+  }
+
+  return row.recipeId.localeCompare(cursor.recipeId) < 0;
+}
+
+function matchesCursor(
+  row: FeedCardRow,
+  cursor: { updatedAt: string; recipeId: string },
+) {
+  return row.updatedAt === cursor.updatedAt && row.recipeId === cursor.recipeId;
 }
 
 async function getFeedRecipeRows(db: DatabaseHandle, householdId: string) {

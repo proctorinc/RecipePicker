@@ -1,17 +1,25 @@
-import { redirect } from "next/navigation";
+import { NextResponse } from "next/server";
 
 import { requireHouseholdRole } from "@/lib/server/auth";
+import { logAudit, withRouteLogging } from "@/lib/server/logger";
 import { buildPinterestAuthorizeUrl, createPinterestOauthState } from "@/lib/server/pinterest";
 
-export async function GET(request: Request) {
+export const GET = withRouteLogging("api.pinterest_connect", async (request: Request) => {
   const context = await requireHouseholdRole("owner");
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo");
+  const safeReturnTo = returnTo?.startsWith("/settings") ? returnTo : "/settings";
   const state = await createPinterestOauthState({
     householdId: context.householdId,
     clerkUserId: context.clerkUserId,
-    returnTo: returnTo?.startsWith("/settings") ? returnTo : "/settings",
+    returnTo: safeReturnTo,
+  });
+  logAudit("pinterest.oauth.start", {
+    target: {
+      householdId: context.householdId,
+      returnTo: safeReturnTo,
+    },
   });
 
-  redirect(buildPinterestAuthorizeUrl(state));
-}
+  return NextResponse.redirect(buildPinterestAuthorizeUrl(state));
+});

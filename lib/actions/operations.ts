@@ -42,7 +42,11 @@ import {
   type AiProvider,
   upsertHouseholdAiConnection,
 } from "@/lib/server/ai-provider";
-import { disconnectPinterestConnection } from "@/lib/server/pinterest";
+import { logAudit, withActionLogging } from "@/lib/server/logger";
+import {
+  disconnectPinterestConnection,
+  setPinterestConnectionAutoSyncEnabled,
+} from "@/lib/server/pinterest";
 import { getRecipeHouseholdPinId } from "@/lib/server/queries";
 import { extractRecipes } from "@/lib/server/extract";
 import { revalidateAll, recipeScopedPaths, toErrorState, toOptionalString } from "@/lib/actions/helpers";
@@ -52,15 +56,35 @@ import type { IngredientReviewSuggestionView, RecipeExtractionFeedbackCategory }
 
 type DatabaseHandle = Awaited<ReturnType<typeof openDatabase>>["db"];
 
-export async function extractRecipeAction(_: ActionState, formData: FormData): Promise<ActionState> {
-  return runRecipeExtraction(formData, false);
-}
+export const extractRecipeAction = withActionLogging(
+  "action.extract_recipe",
+  async (_: ActionState, formData: FormData): Promise<ActionState> =>
+    runRecipeExtraction(formData, false),
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+      },
+    }),
+  },
+);
 
-export async function rerunRecipeAction(_: ActionState, formData: FormData): Promise<ActionState> {
-  return runRecipeExtraction(formData, true);
-}
+export const rerunRecipeAction = withActionLogging(
+  "action.rerun_recipe",
+  async (_: ActionState, formData: FormData): Promise<ActionState> =>
+    runRecipeExtraction(formData, true),
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+      },
+    }),
+  },
+);
 
-export async function rerunRecipesAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const rerunRecipesAction = withActionLogging(
+  "action.rerun_recipes",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const rawRecipeIds = String(formData.get("recipeIds") ?? "");
 
   let recipeIds: string[] = [];
@@ -115,9 +139,19 @@ export async function rerunRecipesAction(_: ActionState, formData: FormData): Pr
   } finally {
     await sqlite.close();
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      result: {
+        recipeCount: parseJsonStringArrayCount(formData.get("recipeIds")),
+      },
+    }),
+  },
+);
 
-export async function createInviteAction(_: ActionState, _formData: FormData): Promise<ActionState> {
+export const createInviteAction = withActionLogging(
+  "action.create_invite",
+  async (_: ActionState, _formData: FormData): Promise<ActionState> => {
   try {
     const context = await requireHouseholdRole("owner");
     const { db, sqlite } = await openDatabase();
@@ -140,6 +174,12 @@ export async function createInviteAction(_: ActionState, _formData: FormData): P
       await sqlite.close();
     }
 
+    logAudit("household.invite_created", {
+      target: {
+        householdId: context.householdId,
+      },
+    });
+
     revalidateAll(recipeScopedPaths());
     return {
       status: "success",
@@ -148,12 +188,20 @@ export async function createInviteAction(_: ActionState, _formData: FormData): P
   } catch (error) {
     return toErrorState(error, "Unable to create an invite.");
   }
-}
+},
+);
 
-export async function disconnectPinterestAction(_: ActionState, _formData: FormData): Promise<ActionState> {
+export const disconnectPinterestAction = withActionLogging(
+  "action.disconnect_pinterest",
+  async (_: ActionState, _formData: FormData): Promise<ActionState> => {
   try {
     const context = await requireHouseholdRole("owner");
     await disconnectPinterestConnection(context.householdId);
+    logAudit("pinterest.connection_disconnected", {
+      target: {
+        householdId: context.householdId,
+      },
+    });
     revalidateAll(recipeScopedPaths());
     return {
       status: "success",
@@ -162,9 +210,12 @@ export async function disconnectPinterestAction(_: ActionState, _formData: FormD
   } catch (error) {
     return toErrorState(error, "Unable to disconnect Pinterest.");
   }
-}
+},
+);
 
-export async function saveAiConnectionAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const saveAiConnectionAction = withActionLogging(
+  "action.save_ai_connection",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const rawProvider = String(formData.get("provider") ?? "").trim();
   const model = String(formData.get("model") ?? "").trim();
   const newApiKey = String(formData.get("apiKey") ?? "").trim();
@@ -214,6 +265,17 @@ export async function saveAiConnectionAction(_: ActionState, formData: FormData)
       lastTestError: testResult.error,
     });
 
+    logAudit("ai.connection_saved", {
+      target: {
+        householdId: context.householdId,
+      },
+      result: {
+        provider: rawProvider,
+        model,
+        testStatus: testResult.status,
+      },
+    });
+
     revalidateAll(recipeScopedPaths());
 
     if (!testResult.ok) {
@@ -230,9 +292,21 @@ export async function saveAiConnectionAction(_: ActionState, formData: FormData)
   } catch (error) {
     return toErrorState(error, "Unable to save the AI connection.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      result: {
+        provider: String(formData.get("provider") ?? "").trim() || null,
+        model: String(formData.get("model") ?? "").trim() || null,
+        apiKeyProvided: Boolean(String(formData.get("apiKey") ?? "").trim()),
+      },
+    }),
+  },
+);
 
-export async function disconnectAiConnectionAction(_: ActionState, _formData: FormData): Promise<ActionState> {
+export const disconnectAiConnectionAction = withActionLogging(
+  "action.disconnect_ai_connection",
+  async (_: ActionState, _formData: FormData): Promise<ActionState> => {
   try {
     const appAccess = await getCurrentUserAccess();
     const context = await requireHouseholdRole("owner");
@@ -248,6 +322,11 @@ export async function disconnectAiConnectionAction(_: ActionState, _formData: Fo
     }
 
     await disconnectHouseholdAiConnection(context.householdId);
+    logAudit("ai.connection_disconnected", {
+      target: {
+        householdId: context.householdId,
+      },
+    });
     revalidateAll(recipeScopedPaths());
     return {
       status: "success",
@@ -256,9 +335,12 @@ export async function disconnectAiConnectionAction(_: ActionState, _formData: Fo
   } catch (error) {
     return toErrorState(error, "Unable to disconnect the AI connection.");
   }
-}
+},
+);
 
-export async function updateSubscriptionTierAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const updateSubscriptionTierAction = withActionLogging(
+  "action.update_subscription_tier",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const requestedTier = normalizeSubscriptionTier(formData.get("subscriptionTier"));
   const rawTier = String(formData.get("subscriptionTier") ?? "").trim();
 
@@ -272,6 +354,11 @@ export async function updateSubscriptionTierAction(_: ActionState, formData: For
       clerkUserId: access.clerkUserId,
       subscriptionTier: requestedTier,
     });
+    logAudit("admin.subscription_tier_updated", {
+      result: {
+        subscriptionTier: requestedTier,
+      },
+    });
     revalidateAll(recipeScopedPaths());
     return {
       status: "success",
@@ -280,9 +367,19 @@ export async function updateSubscriptionTierAction(_: ActionState, formData: For
   } catch (error) {
     return toErrorState(error, "Unable to update the subscription tier.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      result: {
+        subscriptionTier: String(formData.get("subscriptionTier") ?? "").trim() || null,
+      },
+    }),
+  },
+);
 
-export async function updateRoleOverrideAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const updateRoleOverrideAction = withActionLogging(
+  "action.update_role_override",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const requestedRole = normalizeRoleOverride(formData.get("appRole"));
   const rawRole = String(formData.get("appRole") ?? "").trim();
 
@@ -299,6 +396,11 @@ export async function updateRoleOverrideAction(_: ActionState, formData: FormDat
       sameSite: "lax",
       path: "/",
     });
+    logAudit("admin.role_override_updated", {
+      result: {
+        appRole: requestedRole ?? "admin",
+      },
+    });
 
     return {
       status: "success",
@@ -307,9 +409,62 @@ export async function updateRoleOverrideAction(_: ActionState, formData: FormDat
   } catch (error) {
     return toErrorState(error, "Unable to update the frontend role preview.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      result: {
+        appRole: String(formData.get("appRole") ?? "").trim() || null,
+      },
+    }),
+  },
+);
 
-export async function joinHouseholdInviteAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const setPinterestAutoSyncEnabledAction = withActionLogging(
+  "action.set_pinterest_auto_sync_enabled",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const enabled = String(formData.get("enabled") ?? "").trim() === "true";
+
+    try {
+      await requireAdminAccess();
+      const household = await requireHouseholdContext();
+
+      await setPinterestConnectionAutoSyncEnabled({
+        householdId: household.householdId,
+        enabled,
+      });
+
+      logAudit("admin.pinterest_auto_sync_updated", {
+        target: {
+          householdId: household.householdId,
+        },
+        result: {
+          enabled,
+        },
+      });
+
+      revalidateAll(recipeScopedPaths());
+      return {
+        status: "success",
+        message: enabled
+          ? "Pinterest auto-sync is on."
+          : "Pinterest auto-sync is off.",
+      };
+    } catch (error) {
+      return toErrorState(error, "Unable to update Pinterest auto-sync.");
+    }
+  },
+  {
+    getStartData: (_state, formData) => ({
+      result: {
+        enabled: String(formData.get("enabled") ?? "").trim() === "true",
+      },
+    }),
+  },
+);
+
+export const joinHouseholdInviteAction = withActionLogging(
+  "action.join_household_invite",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const inviteToken = String(formData.get("inviteToken") ?? "").trim();
 
   if (!inviteToken) {
@@ -352,6 +507,12 @@ export async function joinHouseholdInviteAction(_: ActionState, formData: FormDa
         })
         .where(eq(householdInvites.inviteToken, inviteToken))
         .run();
+
+      logAudit("household.invite_joined", {
+        target: {
+          householdId: invite.householdId,
+        },
+      });
     } finally {
       await sqlite.close();
     }
@@ -364,9 +525,12 @@ export async function joinHouseholdInviteAction(_: ActionState, formData: FormDa
   } catch (error) {
     return toErrorState(error, "Unable to join this household.");
   }
-}
+},
+);
 
-export async function reviewIngredientAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const reviewIngredientAction = withActionLogging(
+  "action.review_ingredient",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const ingredientId = String(formData.get("ingredientId") ?? "").trim();
   const recipeId = String(formData.get("recipeId") ?? "").trim();
   const normalizedPhrase = String(formData.get("normalizedIngredientPhrase") ?? "").trim();
@@ -484,9 +648,25 @@ export async function reviewIngredientAction(_: ActionState, formData: FormData)
   } catch (error) {
     return toErrorState(error, "Unable to save the ingredient review.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        ingredientId: String(formData.get("ingredientId") ?? "").trim() || null,
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+      },
+      result: {
+        reviewMode: String(formData.get("reviewMode") ?? "").trim() || null,
+        savePhraseMapping: toChecked(formData.get("savePhraseMapping")),
+        saveAlias: toChecked(formData.get("saveAlias")),
+      },
+    }),
+  },
+);
 
-export async function saveRecipeContentAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const saveRecipeContentAction = withActionLogging(
+  "action.save_recipe_content",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const recipeId = String(formData.get("recipeId") ?? "").trim();
   const ingredients = parseRecipeContentItems(formData.get("ingredientsJson"), isRecipeIngredientInput);
   const steps = parseRecipeContentItems(formData.get("stepsJson"), isRecipeStepInput);
@@ -578,9 +758,23 @@ export async function saveRecipeContentAction(_: ActionState, formData: FormData
   } catch (error) {
     return toErrorState(error, "Unable to save the recipe content.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+      },
+      result: {
+        ingredientCount: parseRecipeContentItems(formData.get("ingredientsJson"), isRecipeIngredientInput).length,
+        stepCount: parseRecipeContentItems(formData.get("stepsJson"), isRecipeStepInput).length,
+      },
+    }),
+  },
+);
 
-export async function saveRecipeFeedbackAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const saveRecipeFeedbackAction = withActionLogging(
+  "action.save_recipe_feedback",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const recipeId = String(formData.get("recipeId") ?? "").trim();
   const summary = toOptionalString(formData.get("summary"));
   const note = toOptionalString(formData.get("note"));
@@ -649,9 +843,23 @@ export async function saveRecipeFeedbackAction(_: ActionState, formData: FormDat
   } catch (error) {
     return toErrorState(error, "Unable to save recipe guidance.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+      },
+      result: {
+        hasSummary: Boolean(toOptionalString(formData.get("summary"))),
+        hasNote: Boolean(toOptionalString(formData.get("note"))),
+      },
+    }),
+  },
+);
 
-export async function saveExtractionFeedbackAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const saveExtractionFeedbackAction = withActionLogging(
+  "action.save_extraction_feedback",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const recipeId = String(formData.get("recipeId") ?? "").trim();
   const extractionId = toOptionalString(formData.get("extractionId"));
   const category = toRecipeExtractionFeedbackCategory(String(formData.get("category") ?? "").trim());
@@ -724,9 +932,23 @@ export async function saveExtractionFeedbackAction(_: ActionState, formData: For
   } catch (error) {
     return toErrorState(error, "Unable to save run feedback.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+        extractionId: toOptionalString(formData.get("extractionId")),
+      },
+      result: {
+        category: String(formData.get("category") ?? "").trim() || null,
+      },
+    }),
+  },
+);
 
-export async function createRecipeEventAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const createRecipeEventAction = withActionLogging(
+  "action.create_recipe_event",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const recipeId = String(formData.get("recipeId") ?? "").trim();
   const date = String(formData.get("date") ?? "").trim();
 
@@ -778,9 +1000,22 @@ export async function createRecipeEventAction(_: ActionState, formData: FormData
   } catch (error) {
     return toErrorState(error, "Unable to save this recipe event.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+      },
+      result: {
+        date: String(formData.get("date") ?? "").trim() || null,
+      },
+    }),
+  },
+);
 
-export async function createRecipeReviewAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const createRecipeReviewAction = withActionLogging(
+  "action.create_recipe_review",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const recipeId = String(formData.get("recipeId") ?? "").trim();
   const eventId = String(formData.get("eventId") ?? "").trim() || null;
   const ratingValue = parseRatingValue(formData.get("ratingValue"));
@@ -887,9 +1122,24 @@ export async function createRecipeReviewAction(_: ActionState, formData: FormDat
   } catch (error) {
     return toErrorState(error, "Unable to save this review.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+        eventId: String(formData.get("eventId") ?? "").trim() || null,
+      },
+      result: {
+        ratingValue: parseRatingValue(formData.get("ratingValue")),
+        hasEatenOn: Boolean(toOptionalString(formData.get("eatenOn"))),
+      },
+    }),
+  },
+);
 
-export async function updateRecipeReviewAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const updateRecipeReviewAction = withActionLogging(
+  "action.update_recipe_review",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const reviewId = String(formData.get("reviewId") ?? "").trim();
   const eventId = String(formData.get("eventId") ?? "").trim() || null;
   const ratingValue = parseRatingValue(formData.get("ratingValue"));
@@ -979,9 +1229,24 @@ export async function updateRecipeReviewAction(_: ActionState, formData: FormDat
   } catch (error) {
     return toErrorState(error, "Unable to update this review.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        reviewId: String(formData.get("reviewId") ?? "").trim() || null,
+        eventId: String(formData.get("eventId") ?? "").trim() || null,
+      },
+      result: {
+        ratingValue: parseRatingValue(formData.get("ratingValue")),
+        hasEatenOn: Boolean(toOptionalString(formData.get("eatenOn"))),
+      },
+    }),
+  },
+);
 
-export async function deleteRecipeReviewAction(_: ActionState, formData: FormData): Promise<ActionState> {
+export const deleteRecipeReviewAction = withActionLogging(
+  "action.delete_recipe_review",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const reviewId = String(formData.get("reviewId") ?? "").trim();
 
   if (!reviewId) {
@@ -1018,7 +1283,15 @@ export async function deleteRecipeReviewAction(_: ActionState, formData: FormDat
   } catch (error) {
     return toErrorState(error, "Unable to delete this review.");
   }
-}
+},
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        reviewId: String(formData.get("reviewId") ?? "").trim() || null,
+      },
+    }),
+  },
+);
 
 type ReviewMode = "match_existing" | "create_new";
 type RecipeIngredientInput = { id: string; originalText: string; notes: string | null };
@@ -1066,6 +1339,21 @@ function parseIngredientReviewSuggestions(value: FormDataEntryValue | null): Ing
     return Array.isArray(parsed) ? parsed.filter(isIngredientReviewSuggestion) : [];
   } catch {
     return [];
+  }
+}
+
+function parseJsonStringArrayCount(value: FormDataEntryValue | null) {
+  if (!value) {
+    return 0;
+  }
+
+  try {
+    const parsed = JSON.parse(String(value));
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).length
+      : 0;
+  } catch {
+    return 0;
   }
 }
 

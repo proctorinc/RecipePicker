@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { ActionForm } from "@/components/action-form";
-import { AppShell } from "@/components/app-shell";
+import { PageIntro, PageShell } from "@/components/page-shell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { joinHouseholdInviteAction } from "@/lib/actions/operations";
 import { openDatabase } from "@/lib/server/database";
@@ -25,10 +25,11 @@ export default async function JoinHouseholdPage({ params }: { params: Promise<{ 
     }
 
     return (
-      <AppShell
-        title="Join shared household"
-        description="Accept this invite to share one Pinterest-backed recipe space with another member."
-      >
+      <PageShell>
+        <PageIntro
+          title="Join shared household"
+          description="Accept this invite to share one Pinterest-backed recipe space with another member."
+        />
         <Card className="max-w-2xl bg-white/90">
           <CardHeader>
             <CardTitle>{invite.household.name}</CardTitle>
@@ -45,7 +46,7 @@ export default async function JoinHouseholdPage({ params }: { params: Promise<{ 
             </ActionForm>
           </CardContent>
         </Card>
-      </AppShell>
+      </PageShell>
     );
   } finally {
     await sqlite.close();
