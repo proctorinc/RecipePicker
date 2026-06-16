@@ -30,7 +30,6 @@ export default async function RecipePage({
   const { recipeId } = await params;
   const { reviewRecipeId } = await searchParams;
   const recipe = await getRecipeDetail(recipeId);
-  const isEnabled = false;
 
   if (!recipe) {
     notFound();
@@ -138,113 +137,109 @@ export default async function RecipePage({
         reviews={recipe.reviews}
       />
 
-      {isEnabled && (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-[1.1fr_0.9fr]">
-          {recipe.ingredients.length > 0 && (
-            <Card className="bg-white/85">
-              <CardHeader>
-                <CardTitle>Ingredients</CardTitle>
-              </CardHeader>
-              <CardContent className="px-10">
-                {recipe.ingredients.length > 0 ? (
-                  <ul className="space-y-3">
-                    {recipe.ingredients.map((ingredient) => (
-                      <li
-                        key={ingredient.id}
-                        className="list-disc"
-                        // className="rounded-[22px] bg-secondary/60 px-4 py-4"
-                      >
-                        <p className="font-medium text-foreground">
-                          {ingredient.displayText}
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-[1.1fr_0.9fr]">
+        {recipe.ingredients.length > 0 && (
+          <Card className="bg-white/85">
+            <CardHeader>
+              <CardTitle>Ingredients</CardTitle>
+            </CardHeader>
+            <CardContent className="px-10">
+              {recipe.ingredients.length > 0 ? (
+                <ul className="space-y-3">
+                  {recipe.ingredients.map((ingredient) => (
+                    <li
+                      key={ingredient.id}
+                      className="list-disc"
+                      // className="rounded-[22px] bg-secondary/60 px-4 py-4"
+                    >
+                      <p className="font-medium text-foreground">
+                        {ingredient.displayText}
+                      </p>
+                      {ingredient.notes ? (
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {ingredient.notes}
                         </p>
-                        {ingredient.notes ? (
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {ingredient.notes}
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <EmptyRecipeState
+                  recipeId={recipe.recipeId}
+                  status={recipe.status}
+                />
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {recipe.steps.length > 0 && (
+          <Card className="bg-white/85">
+            <CardHeader>
+              <CardTitle>Recipe</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {recipe.steps.length > 0 ? (
+                <ol className="space-y-4">
+                  {recipe.steps.map((step, index) => (
+                    <li
+                      key={step.id}
+                      className="flex gap-4 rounded-[24px] bg-secondary/40 p-4"
+                    >
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-sm font-semibold shadow-sm">
+                        {index + 1}
+                      </div>
+                      <div>
+                        {step.section ? (
+                          <p className="mb-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                            {step.section}
                           </p>
                         ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <EmptyRecipeState
-                    recipeId={recipe.recipeId}
-                    status={recipe.status}
-                  />
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {recipe.steps.length > 0 && (
-            <Card className="bg-white/85">
-              <CardHeader>
-                <CardTitle>Recipe</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {recipe.steps.length > 0 ? (
-                  <ol className="space-y-4">
-                    {recipe.steps.map((step, index) => (
-                      <li
-                        key={step.id}
-                        className="flex gap-4 rounded-[24px] bg-secondary/40 p-4"
-                      >
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-sm font-semibold shadow-sm">
-                          {index + 1}
-                        </div>
-                        <div>
-                          {step.section ? (
-                            <p className="mb-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                              {step.section}
-                            </p>
-                          ) : null}
-                          <p className="leading-7">{step.text}</p>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                ) : (
-                  <EmptyRecipeState
-                    recipeId={recipe.recipeId}
-                    status={recipe.status}
-                  />
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {isEnabled && (
-        <Card className="bg-white/85">
-          <CardContent className="flex flex-col gap-4 py-6 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-medium">Recipe source and parsing</p>
-              <p className="text-sm text-muted-foreground">
-                {recipe.extractionSummary ??
-                  "This recipe has not been parsed into structured instructions yet."}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              {recipe.sourceUrl && (
-                <Button asChild variant="outline">
-                  <a href={recipe.sourceUrl} target="_blank" rel="noreferrer">
-                    Source page
-                    <ExternalLink className="h-4 w-4" />
-                  </a>
-                </Button>
+                        <p className="leading-7">{step.text}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <EmptyRecipeState
+                  recipeId={recipe.recipeId}
+                  status={recipe.status}
+                />
               )}
-              <Button asChild variant="ghost">
-                <AppTransitionLink
-                  href={`/settings/recipes/${recipe.recipeId}`}
-                  prefetch
-                >
-                  Detailed settings
-                </AppTransitionLink>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      <Card className="bg-white/85">
+        <CardContent className="flex flex-col gap-4 py-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-medium">Recipe source and parsing</p>
+            <p className="text-sm text-muted-foreground">
+              {recipe.extractionSummary ??
+                "This recipe has not been parsed into structured instructions yet."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {recipe.sourceUrl && (
+              <Button asChild variant="outline">
+                <a href={recipe.sourceUrl} target="_blank" rel="noreferrer">
+                  Source page
+                  <ExternalLink className="h-4 w-4" />
+                </a>
               </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            )}
+            <Button asChild variant="ghost">
+              <AppTransitionLink
+                href={`/settings/recipes/${recipe.recipeId}`}
+                prefetch
+              >
+                Detailed settings
+              </AppTransitionLink>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </PageShell>
   );
 }
