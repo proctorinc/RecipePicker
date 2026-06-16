@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { extractRecipeAction } from "@/lib/actions/operations";
 import { getRecipeDetail } from "@/lib/server/queries";
+import { formatIso8601Duration } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,26 @@ export default async function RecipePage({
     reviewRecipeId && reviewRecipeId === recipeId
       ? "Back to review"
       : "Back to feed";
+  const detailItems = [
+    {
+      label: "Total time",
+      value: formatIso8601Duration(recipe.totalTime),
+    },
+    {
+      label: "Prep time",
+      value: formatIso8601Duration(recipe.prepTime),
+    },
+    {
+      label: "Cook time",
+      value: formatIso8601Duration(recipe.cookTime),
+    },
+    {
+      label: "Servings",
+      value: recipe.yieldText,
+    },
+  ].filter((item): item is { label: string; value: string } =>
+    Boolean(item.value),
+  );
 
   return (
     <PageShell>
@@ -55,7 +76,7 @@ export default async function RecipePage({
         </Button>
       </div>
 
-      <section className="overflow-hidden rounded-[36px] border border-white/70 bg-white/70 shadow-soft">
+      <section className="overflow-hidden rounded-t-[36px] border border-white/70 bg-white/70 shadow-soft">
         <div className="relative aspect-[16/10] sm:aspect-[16/8]">
           {recipe.imageUrl ? (
             <Image
@@ -75,24 +96,20 @@ export default async function RecipePage({
             />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
-          <div className="absolute inset-x-0 bottom-0 p-6 text-white sm:p-8">
+          <div className="absolute inset-x-0 bottom-0 p-2 text-white sm:p-8">
             <div className="mb-3 flex flex-wrap gap-2">
               {recipe.totalTime ? (
                 <MetaChip
                   icon={<Clock3 className="h-4 w-4" />}
-                  label={recipe.totalTime}
+                  label={
+                    formatIso8601Duration(recipe.totalTime) ?? recipe.totalTime
+                  }
                 />
               ) : null}
               {recipe.yieldText ? (
                 <MetaChip
                   icon={<ListChecks className="h-4 w-4" />}
-                  label={recipe.yieldText}
-                />
-              ) : null}
-              {recipe.siteName ? (
-                <MetaChip
-                  icon={<Sparkles className="h-4 w-4" />}
-                  label={recipe.siteName}
+                  label={`${recipe.yieldText} servings`}
                 />
               ) : null}
             </div>
@@ -138,7 +155,32 @@ export default async function RecipePage({
       />
 
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-[1.1fr_0.9fr]">
-        {recipe.ingredients.length > 0 && (
+        <div className="space-y-6">
+          {detailItems.length > 0 ? (
+            <Card className="bg-white/85">
+              <CardHeader>
+                <CardTitle>Recipe details</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  {detailItems.map((item) => (
+                    <div
+                      key={item.label}
+                      className="rounded-[20px] bg-secondary/35 px-4 py-3"
+                    >
+                      <dt className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                        {item.label}
+                      </dt>
+                      <dd className="mt-1 text-base font-medium text-foreground">
+                        {item.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card className="bg-white/85">
             <CardHeader>
               <CardTitle>Ingredients</CardTitle>
@@ -147,19 +189,10 @@ export default async function RecipePage({
               {recipe.ingredients.length > 0 ? (
                 <ul className="space-y-3">
                   {recipe.ingredients.map((ingredient) => (
-                    <li
-                      key={ingredient.id}
-                      className="list-disc"
-                      // className="rounded-[22px] bg-secondary/60 px-4 py-4"
-                    >
+                    <li key={ingredient.id} className="list-disc">
                       <p className="font-medium text-foreground">
                         {ingredient.displayText}
                       </p>
-                      {ingredient.notes ? (
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {ingredient.notes}
-                        </p>
-                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -171,7 +204,7 @@ export default async function RecipePage({
               )}
             </CardContent>
           </Card>
-        )}
+        </div>
 
         {recipe.steps.length > 0 && (
           <Card className="bg-white/85">
