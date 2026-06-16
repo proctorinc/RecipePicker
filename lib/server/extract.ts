@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { openDatabase } from "@/lib/server/database";
 import {
+  householdRecipes,
   householdRecipeExtractionAttempts,
   householdRecipeExtractions,
   householdRecipeIngredients,
@@ -21,18 +22,23 @@ type ExtractArgs = {
   rerun?: boolean;
 };
 
+type RecipeExtractionRow = Awaited<ReturnType<typeof loadRecipeExtractionRows>>[number];
+
+export type ExtractSingleRecipeResult = {
+  outcome: "extracted" | "review_needed" | "failed" | "skipped";
+  extracted: number;
+  reviewNeeded: number;
+  failed: number;
+  skipped: number;
+  extractionId: string | null;
+};
+
 export async function extractRecipes(args: ExtractArgs) {
   const { db, sqlite, targetLabel } = await openDatabase(args.sqlitePath);
   const scopedRecipeIds = args.recipeIds ? new Set(args.recipeIds) : null;
 
   try {
-    const rows = await db.query.householdRecipes.findMany({
-      where: (table, { eq }) => eq(table.householdId, args.householdId),
-      with: {
-        pin: true,
-        recipeInstructions: true,
-      },
-    });
+    const rows = await loadRecipeExtractionRows(db, args.householdId);
 
     const filteredRows = rows.filter((row) => {
       if (!row.pin.link) {
@@ -60,96 +66,207 @@ export async function extractRecipes(args: ExtractArgs) {
     };
 
     for (const row of filteredRows) {
-      if (!row.pin.link) {
-        outcomes.skipped += 1;
-        continue;
-      }
-
-      const alreadyExtracted = row.recipeInstructions !== null;
-      if (alreadyExtracted && !args.rerun) {
-        outcomes.skipped += 1;
-        continue;
-      }
-
-      const extractionResult = await extractRecipeWithFallbacks(row.pin.link, {
-        householdId: args.householdId,
-      });
-      const sourceIdsByKey = await persistSourcesForAttempts(
-        db,
-        args.householdId,
-        row.pinId,
-        row.pin.link,
-        extractionResult.attempts,
-      );
-      const selectedSourceId =
-        getAttemptSourceId(sourceIdsByKey, extractionResult.fetchStrategy, extractionResult.sourceUrl ?? row.pin.link) ?? null;
-
-      const extractionId = (
-        await db
-          .insert(householdRecipeExtractions)
-          .values({
-            householdId: args.householdId,
-            pinId: row.pinId,
-            sourceId: selectedSourceId,
-            status: extractionResult.status,
-            method: extractionResult.method,
-            fetchStrategy: extractionResult.fetchStrategy,
-            contentVariant: extractionResult.contentVariant,
-            extractionStrategy: extractionResult.extractionStrategy,
-            qualityScore: extractionResult.qualityScore,
-            confidence: extractionResult.confidence,
-            selected: extractionResult.selected,
-            lowConfidence: extractionResult.lowConfidence,
-            failureReason: extractionResult.failureReason,
-            warningsJson: JSON.stringify(extractionResult.warnings),
-            qualitySignalsJson: extractionResult.qualitySignals
-              ? JSON.stringify(extractionResult.qualitySignals)
-              : null,
-            candidateCount: extractionResult.candidateCount,
-            payloadJson: JSON.stringify(extractionResult.payload),
-            createdAt: new Date().toISOString(),
-          })
-          .returning()
-          .get()
-      )?.extractionId;
-
-      if (extractionId) {
-        await persistAttemptRows(
-          db,
-          args.householdId,
-          row.pinId,
-          extractionId,
-          extractionResult,
-          sourceIdsByKey,
-        );
-      }
-
-      if (extractionResult.status === "recipe_extracted" && extractionResult.recipe && selectedSourceId) {
-        const reviewCount = await persistRecipeInstructions(
-          db,
-          args.householdId,
-          row.recipeId,
-          selectedSourceId,
-          extractionResult,
-        );
-        outcomes.extracted += 1;
-        if (reviewCount > 0 || extractionResult.lowConfidence) {
-          outcomes.reviewNeeded += 1;
-        }
-        continue;
-      }
-
-      if (extractionResult.lowConfidence || extractionResult.status === "multiple_recipes_needs_review") {
-        outcomes.reviewNeeded += 1;
-      } else {
-        outcomes.failed += 1;
-      }
+      const result = await extractRecipeRow(db, args.householdId, row, args.rerun ?? false);
+      outcomes.extracted += result.extracted;
+      outcomes.reviewNeeded += result.reviewNeeded;
+      outcomes.failed += result.failed;
+      outcomes.skipped += result.skipped;
     }
 
     return outcomes;
   } finally {
     await sqlite.close();
   }
+}
+
+export async function extractSingleRecipe(args: {
+  householdId: string;
+  recipeId: string;
+  sqlitePath?: string;
+  rerun?: boolean;
+}): Promise<ExtractSingleRecipeResult> {
+  const { db, sqlite } = await openDatabase(args.sqlitePath);
+
+  try {
+    const row = await db.query.householdRecipes.findFirst({
+      where: (table, { and, eq }) => and(eq(table.householdId, args.householdId), eq(table.recipeId, args.recipeId)),
+      with: {
+        pin: true,
+        recipeInstructions: true,
+      },
+    });
+
+    if (!row) {
+      return {
+        outcome: "failed",
+        extracted: 0,
+        reviewNeeded: 0,
+        failed: 1,
+        skipped: 0,
+        extractionId: null,
+      };
+    }
+
+    return extractRecipeRow(db, args.householdId, row, args.rerun ?? false);
+  } finally {
+    await sqlite.close();
+  }
+}
+
+async function loadRecipeExtractionRows(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  householdId: string,
+) {
+  return db.query.householdRecipes.findMany({
+    where: (table, { eq }) => eq(table.householdId, householdId),
+    with: {
+      pin: true,
+      recipeInstructions: true,
+    },
+  });
+}
+
+async function extractRecipeRow(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  householdId: string,
+  row: RecipeExtractionRow,
+  rerun: boolean,
+): Promise<ExtractSingleRecipeResult> {
+  if (!row.pin.link) {
+    return {
+      outcome: "skipped",
+      extracted: 0,
+      reviewNeeded: 0,
+      failed: 0,
+      skipped: 1,
+      extractionId: null,
+    };
+  }
+
+  if (row.recipeInstructions !== null && !rerun) {
+    return {
+      outcome: "skipped",
+      extracted: 0,
+      reviewNeeded: 0,
+      failed: 0,
+      skipped: 1,
+      extractionId: null,
+    };
+  }
+
+  const extractionResult = await extractRecipeWithFallbacks(row.pin.link, {
+    householdId,
+  });
+  const sourceIdsByKey = await persistSourcesForAttempts(
+    db,
+    householdId,
+    row.pinId,
+    row.pin.link,
+    extractionResult.attempts,
+  );
+  const selectedSourceId =
+    getAttemptSourceId(sourceIdsByKey, extractionResult.fetchStrategy, extractionResult.sourceUrl ?? row.pin.link) ?? null;
+  const extractionId = await persistExtractionRow(db, householdId, row.pinId, extractionResult, selectedSourceId);
+
+  if (extractionId) {
+    await persistAttemptRows(
+      db,
+      householdId,
+      row.pinId,
+      extractionId,
+      extractionResult,
+      sourceIdsByKey,
+    );
+  }
+
+  if (extractionResult.status === "recipe_extracted" && extractionResult.recipe && selectedSourceId) {
+    const reviewCount = await persistRecipeInstructions(
+      db,
+      householdId,
+      row.recipeId,
+      selectedSourceId,
+      extractionResult,
+    );
+    await touchRecipeUpdatedAt(db, row.recipeId);
+    return {
+      outcome: reviewCount > 0 || extractionResult.lowConfidence ? "review_needed" : "extracted",
+      extracted: 1,
+      reviewNeeded: reviewCount > 0 || extractionResult.lowConfidence ? 1 : 0,
+      failed: 0,
+      skipped: 0,
+      extractionId,
+    };
+  }
+
+  await touchRecipeUpdatedAt(db, row.recipeId);
+  if (extractionResult.lowConfidence || extractionResult.status === "multiple_recipes_needs_review") {
+    return {
+      outcome: "review_needed",
+      extracted: 0,
+      reviewNeeded: 1,
+      failed: 0,
+      skipped: 0,
+      extractionId,
+    };
+  }
+
+  return {
+    outcome: "failed",
+    extracted: 0,
+    reviewNeeded: 0,
+    failed: 1,
+    skipped: 0,
+    extractionId,
+  };
+}
+
+async function persistExtractionRow(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  householdId: string,
+  pinId: string,
+  extractionResult: ExtractionResult,
+  selectedSourceId: string | null,
+) {
+  return (
+    await db
+      .insert(householdRecipeExtractions)
+      .values({
+        householdId,
+        pinId,
+        sourceId: selectedSourceId,
+        status: extractionResult.status,
+        method: extractionResult.method,
+        fetchStrategy: extractionResult.fetchStrategy,
+        contentVariant: extractionResult.contentVariant,
+        extractionStrategy: extractionResult.extractionStrategy,
+        qualityScore: extractionResult.qualityScore,
+        confidence: extractionResult.confidence,
+        selected: extractionResult.selected,
+        lowConfidence: extractionResult.lowConfidence,
+        failureReason: extractionResult.failureReason,
+        warningsJson: JSON.stringify(extractionResult.warnings),
+        qualitySignalsJson: extractionResult.qualitySignals
+          ? JSON.stringify(extractionResult.qualitySignals)
+          : null,
+        candidateCount: extractionResult.candidateCount,
+        payloadJson: JSON.stringify(extractionResult.payload),
+        createdAt: new Date().toISOString(),
+      })
+      .returning()
+      .get()
+  )?.extractionId ?? null;
+}
+
+async function touchRecipeUpdatedAt(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  recipeId: string,
+) {
+  await db.update(householdRecipes)
+    .set({
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(householdRecipes.recipeId, recipeId))
+    .run();
 }
 
 async function persistRecipeInstructions(

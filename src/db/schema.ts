@@ -442,6 +442,68 @@ export const householdRecipeExtractions = sqliteTable(
   }),
 );
 
+export const householdRecipeParseJobs = sqliteTable(
+  "household_recipe_parse_jobs",
+  {
+    jobId: generatedId("job_id"),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.householdId),
+    status: text("status").notNull(),
+    requestedByClerkUserId: text("requested_by_clerk_user_id").notNull(),
+    mode: text("mode").notNull(),
+    rerun: integer("rerun", { mode: "boolean" }).notNull().default(true),
+    filtersJson: text("filters_json"),
+    recipeIdsJson: text("recipe_ids_json").notNull(),
+    totalRecipes: integer("total_recipes").notNull().default(0),
+    processedRecipes: integer("processed_recipes").notNull().default(0),
+    succeededRecipes: integer("succeeded_recipes").notNull().default(0),
+    reviewNeededRecipes: integer("review_needed_recipes").notNull().default(0),
+    failedRecipes: integer("failed_recipes").notNull().default(0),
+    cancelRequestedAt: text("cancel_requested_at"),
+    startedAt: text("started_at"),
+    completedAt: text("completed_at"),
+    lastHeartbeatAt: text("last_heartbeat_at"),
+    lastError: text("last_error"),
+    workerToken: text("worker_token").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    householdCreatedIdx: index("idx_household_recipe_parse_jobs_household_created").on(table.householdId, table.createdAt),
+    householdStatusIdx: index("idx_household_recipe_parse_jobs_household_status").on(table.householdId, table.status),
+    householdCompletedIdx: index("idx_household_recipe_parse_jobs_household_completed").on(table.householdId, table.completedAt),
+  }),
+);
+
+export const householdRecipeParseJobItems = sqliteTable(
+  "household_recipe_parse_job_items",
+  {
+    jobItemId: generatedId("job_item_id"),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => householdRecipeParseJobs.jobId),
+    recipeId: text("recipe_id")
+      .notNull()
+      .references(() => householdRecipes.recipeId),
+    position: integer("position").notNull(),
+    status: text("status").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    startedAt: text("started_at"),
+    completedAt: text("completed_at"),
+    lastError: text("last_error"),
+    lastExtractionId: text("last_extraction_id").references(() => householdRecipeExtractions.extractionId),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    jobPositionUniqueIdx: uniqueIndex("idx_household_recipe_parse_job_items_job_position_unique").on(table.jobId, table.position),
+    jobRecipeUniqueIdx: uniqueIndex("idx_household_recipe_parse_job_items_job_recipe_unique").on(table.jobId, table.recipeId),
+    jobStatusIdx: index("idx_household_recipe_parse_job_items_job_status").on(table.jobId, table.status),
+    recipeIdx: index("idx_household_recipe_parse_job_items_recipe_id").on(table.recipeId),
+  }),
+);
+
 export const householdRecipeExtractionFeedback = sqliteTable(
   "household_recipe_extraction_feedback",
   {
@@ -835,6 +897,30 @@ export const householdRecipeExtractionsRelations = relations(householdRecipeExtr
   }),
   attempts: many(householdRecipeExtractionAttempts),
   feedback: many(householdRecipeExtractionFeedback),
+  parseJobItems: many(householdRecipeParseJobItems),
+}));
+
+export const householdRecipeParseJobsRelations = relations(householdRecipeParseJobs, ({ one, many }) => ({
+  household: one(households, {
+    fields: [householdRecipeParseJobs.householdId],
+    references: [households.householdId],
+  }),
+  items: many(householdRecipeParseJobItems),
+}));
+
+export const householdRecipeParseJobItemsRelations = relations(householdRecipeParseJobItems, ({ one }) => ({
+  job: one(householdRecipeParseJobs, {
+    fields: [householdRecipeParseJobItems.jobId],
+    references: [householdRecipeParseJobs.jobId],
+  }),
+  recipe: one(householdRecipes, {
+    fields: [householdRecipeParseJobItems.recipeId],
+    references: [householdRecipes.recipeId],
+  }),
+  extraction: one(householdRecipeExtractions, {
+    fields: [householdRecipeParseJobItems.lastExtractionId],
+    references: [householdRecipeExtractions.extractionId],
+  }),
 }));
 
 export const householdRecipeExtractionFeedbackRelations = relations(householdRecipeExtractionFeedback, ({ one }) => ({

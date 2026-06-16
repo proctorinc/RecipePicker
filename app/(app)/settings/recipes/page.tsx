@@ -1,7 +1,7 @@
 import { RecipeOpsTable } from "@/components/recipe-ops-table";
 import { SettingsNav } from "@/components/settings-nav";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getBoardSyncOptions, getRecipeOpsList } from "@/lib/server/queries";
+import { getBoardSyncOptions, getRecipeOpsList, getRecipeParseJobSummaries } from "@/lib/server/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,11 @@ export default async function RecipeSettingsPage({
 }) {
   const params = (await searchParams) ?? {};
   const query = typeof params.q === "string" ? params.q : "";
-  const [items, boards] = await Promise.all([getRecipeOpsList(query), getBoardSyncOptions()]);
+  const [items, boards, jobs] = await Promise.all([
+    getRecipeOpsList(query),
+    getBoardSyncOptions(),
+    getRecipeParseJobSummaries(),
+  ]);
   const boardLabelById = new Map(boards.map((board) => [board.boardId, board.name ?? board.boardId]));
   const boardOptions = [...new Set(items.map((item) => item.boardId))]
     .sort((left, right) => (boardLabelById.get(left) ?? left).localeCompare(boardLabelById.get(right) ?? right))
@@ -27,10 +31,10 @@ export default async function RecipeSettingsPage({
       <Card>
         <CardHeader>
           <CardTitle>Recipe operations</CardTitle>
-          <CardDescription>Filter recipes by board or status, then re-parse all filtered recipes or just the ones you select.</CardDescription>
+          <CardDescription>Filter recipes by board or status, then start a background re-parse job for all filtered recipes or just the ones you select.</CardDescription>
         </CardHeader>
         <CardContent>
-          <RecipeOpsTable items={items} boardOptions={boardOptions} />
+          <RecipeOpsTable items={items} boardOptions={boardOptions} jobs={jobs} />
         </CardContent>
       </Card>
     </div>

@@ -206,6 +206,57 @@ export type RecipeOpsListItem = {
   sourceUrl: string | null;
 };
 
+export type RecipeParseJobStatus =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "completed"
+  | "cancelled";
+
+export type RecipeParseJobItemStatus =
+  | "queued"
+  | "processing"
+  | "extracted"
+  | "review_needed"
+  | "failed"
+  | "cancelled";
+
+export type RecipeParseJobSummary = {
+  jobId: string;
+  status: RecipeParseJobStatus;
+  requestedByLabel: string;
+  totalRecipes: number;
+  processedRecipes: number;
+  succeededRecipes: number;
+  reviewNeededRecipes: number;
+  failedRecipes: number;
+  cancelledRecipes: number;
+  percentComplete: number;
+  rerun: boolean;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  cancelRequestedAt: string | null;
+  lastHeartbeatAt: string | null;
+  lastError: string | null;
+  currentPhase: string;
+  canCancel: boolean;
+};
+
+export type RecipeParseJobDetail = RecipeParseJobSummary & {
+  items: Array<{
+    jobItemId: string;
+    recipeId: string;
+    title: string;
+    status: RecipeParseJobItemStatus;
+    attemptCount: number;
+    startedAt: string | null;
+    completedAt: string | null;
+    lastError: string | null;
+    lastExtractionId: string | null;
+  }>;
+};
+
 export type RecipeExtractionFeedbackCategory =
   | "missing_ingredients"
   | "missing_steps"

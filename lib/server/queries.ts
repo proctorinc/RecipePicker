@@ -11,6 +11,8 @@ import {
   boardSyncSubscriptions,
   householdBoards,
   householdInvites,
+  householdRecipeParseJobItems,
+  householdRecipeParseJobs,
   householdRecipeIngredients,
   householdRecipeEvents,
   householdRecipeInstructions,
@@ -52,6 +54,8 @@ import type {
   RecipeHistoryRecipeOption,
   RecipeOpsDetail,
   RecipeOpsListItem,
+  RecipeParseJobDetail,
+  RecipeParseJobSummary,
   RecipeReviewView,
 } from "@/types/view-models";
 
@@ -695,6 +699,88 @@ export async function getRecipeOpsDetail(
   }
 }
 
+export async function getRecipeParseJobSummaries(): Promise<RecipeParseJobSummary[]> {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const jobs = await db.query.householdRecipeParseJobs.findMany({
+      where: (table, { eq }) => eq(table.householdId, context.householdId),
+      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
+      limit: 10,
+      with: {
+        items: {
+          columns: {
+            status: true,
+          },
+        },
+      },
+    });
+
+    return jobs.map((job) => toRecipeParseJobSummary(job, context.clerkUserId));
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function getRecipeParseJobDetail(jobId: string): Promise<RecipeParseJobDetail | null> {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const job = await db.query.householdRecipeParseJobs.findFirst({
+      where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.jobId, jobId)),
+      with: {
+        items: {
+          orderBy: (table, { asc: orderAsc }) => [orderAsc(table.position)],
+          with: {
+            recipe: {
+              columns: {
+                recipeId: true,
+                title: true,
+              },
+              with: {
+                pin: {
+                  columns: {
+                    title: true,
+                  },
+                },
+                recipeInstructions: {
+                  columns: {
+                    title: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!job) {
+      return null;
+    }
+
+    const summary = toRecipeParseJobSummary(job, context.clerkUserId);
+    return {
+      ...summary,
+      items: job.items.map((item) => ({
+        jobItemId: item.jobItemId,
+        recipeId: item.recipeId,
+        title: item.recipe.title ?? item.recipe.pin.title ?? item.recipe.recipeInstructions?.title ?? "Untitled recipe",
+        status: item.status as RecipeParseJobDetail["items"][number]["status"],
+        attemptCount: item.attemptCount,
+        startedAt: item.startedAt,
+        completedAt: item.completedAt,
+        lastError: item.lastError,
+        lastExtractionId: item.lastExtractionId,
+      })),
+    };
+  } finally {
+    await sqlite.close();
+  }
+}
+
 export async function getBoardSummaries(): Promise<BoardSyncSummary[]> {
   const context = await requireHouseholdContext();
   const { db, sqlite } = await openDatabase();
@@ -1195,6 +1281,94 @@ function encodeFeedCursor(row: FeedCardRow) {
       recipeId: row.recipeId,
     }),
   ).toString("base64url");
+}
+
+function toRecipeParseJobSummary(
+  job: {
+    jobId: string;
+    status: string;
+    requestedByClerkUserId: string;
+    totalRecipes: number;
+    processedRecipes: number;
+    succeededRecipes: number;
+    reviewNeededRecipes: number;
+    failedRecipes: number;
+    rerun: boolean;
+    createdAt: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    cancelRequestedAt: string | null;
+    lastHeartbeatAt: string | null;
+    lastError: string | null;
+    items: Array<{ status: string }>;
+  },
+  currentClerkUserId: string,
+): RecipeParseJobSummary {
+  const cancelledRecipes = job.items.filter((item) => item.status === "cancelled").length;
+  const attemptedRecipes = job.processedRecipes;
+  const percentComplete = job.totalRecipes > 0
+    ? Math.min(100, Math.round((attemptedRecipes / job.totalRecipes) * 100))
+    : 0;
+
+  return {
+    jobId: job.jobId,
+    status: job.status as RecipeParseJobSummary["status"],
+    requestedByLabel: job.requestedByClerkUserId === currentClerkUserId ? "You" : job.requestedByClerkUserId,
+    totalRecipes: job.totalRecipes,
+    processedRecipes: job.processedRecipes,
+    succeededRecipes: job.succeededRecipes,
+    reviewNeededRecipes: job.reviewNeededRecipes,
+    failedRecipes: job.failedRecipes,
+    cancelledRecipes,
+    percentComplete,
+    rerun: job.rerun,
+    createdAt: job.createdAt,
+    startedAt: job.startedAt,
+    completedAt: job.completedAt,
+    cancelRequestedAt: job.cancelRequestedAt,
+    lastHeartbeatAt: job.lastHeartbeatAt,
+    lastError: job.lastError,
+    currentPhase: describeRecipeParseJobPhase({
+      status: job.status,
+      cancelRequestedAt: job.cancelRequestedAt,
+      processedRecipes: job.processedRecipes,
+      totalRecipes: job.totalRecipes,
+      cancelledRecipes,
+    }),
+    canCancel: job.status === "queued" || job.status === "running" || job.status === "cancelling",
+  };
+}
+
+function describeRecipeParseJobPhase(input: {
+  status: string;
+  cancelRequestedAt: string | null;
+  processedRecipes: number;
+  totalRecipes: number;
+  cancelledRecipes: number;
+}) {
+  if (input.status === "queued") {
+    return "Queued";
+  }
+
+  if (input.status === "running") {
+    return `Parsing ${input.processedRecipes} of ${input.totalRecipes}`;
+  }
+
+  if (input.status === "cancelling") {
+    return "Finishing current chunk before cancelling";
+  }
+
+  if (input.status === "cancelled") {
+    return input.cancelledRecipes > 0
+      ? `Cancelled after ${input.processedRecipes} recipes`
+      : "Cancelled";
+  }
+
+  if (input.cancelRequestedAt) {
+    return "Cancelled";
+  }
+
+  return "Completed";
 }
 
 function decodeFeedCursor(cursor: string | null | undefined) {

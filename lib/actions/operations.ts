@@ -3,6 +3,7 @@
 import crypto from "node:crypto";
 
 import { auth } from "@clerk/nextjs/server";
+import { after } from "next/server";
 import { cookies } from "next/headers";
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -42,11 +43,16 @@ import {
   type AiProvider,
   upsertHouseholdAiConnection,
 } from "@/lib/server/ai-provider";
-import { logAudit, withActionLogging } from "@/lib/server/logger";
+import { logAudit, runBackgroundJob, withActionLogging } from "@/lib/server/logger";
 import {
   disconnectPinterestConnection,
   setPinterestConnectionAutoSyncEnabled,
 } from "@/lib/server/pinterest";
+import {
+  cancelRecipeParseJob,
+  createRecipeParseJob,
+  runRecipeParseJobWorker,
+} from "@/lib/server/recipe-parse-jobs";
 import { getRecipeHouseholdPinId } from "@/lib/server/queries";
 import { extractRecipes } from "@/lib/server/extract";
 import { revalidateAll, recipeScopedPaths, toErrorState, toOptionalString } from "@/lib/actions/helpers";
@@ -102,48 +108,86 @@ export const rerunRecipesAction = withActionLogging(
     return { status: "error", message: "Choose at least one recipe to re-parse." };
   }
 
-  const context = await requireHouseholdContext();
-  const { db, sqlite } = await openDatabase();
-
   try {
-    const existingRecipes = await db.query.householdRecipes.findMany({
-      where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), inArray(table.recipeId, recipeIds)),
-      columns: {
-        recipeId: true,
-      },
+    const context = await requireHouseholdContext();
+    const result = await createRecipeParseJob({
+      householdId: context.householdId,
+      requestedByClerkUserId: context.clerkUserId,
+      recipeIds,
+      rerun: true,
+      mode: "bulk_rerun_selection",
     });
-    const allowedRecipeIds = existingRecipes.map((recipe) => recipe.recipeId);
 
-    if (allowedRecipeIds.length === 0) {
-      return { status: "error", message: "No matching recipes were found." };
+    if (!result.ok) {
+      return { status: "error", message: result.message };
     }
 
-    let extracted = 0;
-    let reviewNeeded = 0;
-    let failed = 0;
-
-    for (const recipeId of allowedRecipeIds) {
-      const result = await extractRecipes({ householdId: context.householdId, recipeId, rerun: true });
-      extracted += result.extracted;
-      reviewNeeded += result.reviewNeeded;
-      failed += result.failed;
-    }
+    after(async () => {
+      await runBackgroundJob({
+        name: "background.recipe_parse_job",
+        target: {
+          householdId: context.householdId,
+          jobId: result.jobId,
+        },
+        fn: async () =>
+          runRecipeParseJobWorker({
+            jobId: result.jobId,
+            workerToken: result.workerToken,
+          }),
+      });
+    });
 
     revalidateAll(recipeScopedPaths());
     return {
       status: "success",
-      message: `Re-parsed ${allowedRecipeIds.length} recipes. Extracted ${extracted}, review ${reviewNeeded}, failed ${failed}.`,
+      message: `Started a background parse job for ${result.totalRecipes} recipes.`,
     };
   } catch (error) {
-    return toErrorState(error, "Unable to re-parse the selected recipes.");
-  } finally {
-    await sqlite.close();
+    return toErrorState(error, "Unable to start the recipe parse job.");
   }
 },
   {
     getStartData: (_state, formData) => ({
       result: {
         recipeCount: parseJsonStringArrayCount(formData.get("recipeIds")),
+      },
+    }),
+  },
+);
+
+export const cancelRecipeParseJobAction = withActionLogging(
+  "action.cancel_recipe_parse_job",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const jobId = String(formData.get("jobId") ?? "").trim();
+
+    if (!jobId) {
+      return { status: "error", message: "Job ID is required." };
+    }
+
+    try {
+      const context = await requireHouseholdContext();
+      const result = await cancelRecipeParseJob({
+        householdId: context.householdId,
+        jobId,
+      });
+
+      if (!result.ok) {
+        return { status: "error", message: result.message };
+      }
+
+      revalidateAll(recipeScopedPaths());
+      return {
+        status: "success",
+        message: result.message,
+      };
+    } catch (error) {
+      return toErrorState(error, "Unable to cancel this parse job.");
+    }
+  },
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        jobId: String(formData.get("jobId") ?? "").trim() || null,
       },
     }),
   },

@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { toast } from "sonner";
 
+import { cancelRecipeParseJobAction } from "@/lib/actions/operations";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +20,7 @@ import {
 import { rerunRecipesAction } from "@/lib/actions/operations";
 import { formatStatusLabel } from "@/lib/server/status";
 import type { ActionState } from "@/lib/actions/types";
-import type { PinStatus, RecipeOpsListItem } from "@/types/view-models";
+import type { PinStatus, RecipeOpsListItem, RecipeParseJobSummary } from "@/types/view-models";
 import { formatDate } from "@/lib/utils";
 
 const initialState: ActionState = {
@@ -42,14 +44,19 @@ const statusOptions: Array<{ value: PinStatus; label: string }> = [
 export function RecipeOpsTable({
   items,
   boardOptions,
+  jobs,
 }: {
   items: RecipeOpsListItem[];
   boardOptions: BoardOption[];
+  jobs: RecipeParseJobSummary[];
 }) {
   const [boardFilter, setBoardFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
   const [state, formAction] = useActionState(rerunRecipesAction, initialState);
+  const [cancelState, cancelFormAction] = useActionState(cancelRecipeParseJobAction, initialState);
+  const router = useRouter();
+  const [isRefreshing, startRefresh] = useTransition();
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -81,6 +88,26 @@ export function RecipeOpsTable({
     }
   }, [state]);
 
+  useEffect(() => {
+    if (cancelState.status === "success") {
+      toast.success(cancelState.message);
+    } else if (cancelState.status === "error") {
+      toast.error(cancelState.message);
+    }
+  }, [cancelState]);
+
+  useEffect(() => {
+    if (!jobs.some((job) => job.canCancel)) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      router.refresh();
+    }, 15000);
+
+    return () => window.clearInterval(timer);
+  }, [jobs, router]);
+
   function toggleRecipe(recipeId: string, checked: boolean) {
     setSelectedRecipeIds((current) => {
       if (checked) {
@@ -103,6 +130,12 @@ export function RecipeOpsTable({
 
   return (
     <div className="space-y-4">
+      <RecipeParseJobsPanel
+        jobs={jobs}
+        onRefresh={() => startRefresh(() => router.refresh())}
+        refreshing={isRefreshing}
+        cancelFormAction={cancelFormAction}
+      />
       <div className="flex flex-col gap-4 rounded-[24px] border border-border/60 bg-secondary/20 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -147,8 +180,8 @@ export function RecipeOpsTable({
             />
             <BulkRerunButton disabled={targetRecipeIds.length === 0}>
               {selectedCount > 0
-                ? `Re-parse ${selectedCount} recipes`
-                : `Re-parse ${filteredItems.length} recipes`}
+                ? `Start re-parse job for ${selectedCount} recipes`
+                : `Start re-parse job for ${filteredItems.length} recipes`}
             </BulkRerunButton>
           </form>
         </div>
@@ -247,7 +280,95 @@ function BulkRerunButton({
 
   return (
     <Button type="submit" variant="secondary" disabled={pending || disabled}>
-      {pending ? "Re-parsing..." : children}
+      {pending ? "Starting job..." : children}
     </Button>
+  );
+}
+
+function RecipeParseJobsPanel({
+  jobs,
+  onRefresh,
+  refreshing,
+  cancelFormAction,
+}: {
+  jobs: RecipeParseJobSummary[];
+  onRefresh: () => void;
+  refreshing: boolean;
+  cancelFormAction: (payload: FormData) => void;
+}) {
+  if (jobs.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-3 rounded-[24px] border border-border/60 bg-background/70 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-medium">Bulk parse jobs</h3>
+          <p className="text-sm text-muted-foreground">
+            Refresh to check progress or cancel an in-flight parse after the current chunk.
+          </p>
+        </div>
+        <Button type="button" variant="outline" onClick={onRefresh} disabled={refreshing}>
+          {refreshing ? "Refreshing..." : "Refresh jobs"}
+        </Button>
+      </div>
+
+      <div className="grid gap-3">
+        {jobs.map((job) => (
+          <div
+            key={job.jobId}
+            className="rounded-[20px] border border-border/60 bg-secondary/10 p-4"
+          >
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">Job {job.jobId.slice(0, 8)}</span>
+                  <StatusPill status={job.status} />
+                  <span className="text-sm text-muted-foreground">{job.currentPhase}</span>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Requested by {job.requestedByLabel} on {formatDate(job.createdAt)}
+                </p>
+                <p className="text-sm">
+                  {job.processedRecipes}/{job.totalRecipes} processed ({job.percentComplete}%)
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Success {job.succeededRecipes} • Review {job.reviewNeededRecipes} • Failed {job.failedRecipes}
+                  {job.cancelledRecipes > 0 ? ` • Cancelled ${job.cancelledRecipes}` : ""}
+                </p>
+                {job.lastHeartbeatAt ? (
+                  <p className="text-xs text-muted-foreground">
+                    Last update {formatDate(job.lastHeartbeatAt)}
+                  </p>
+                ) : null}
+                {job.lastError ? (
+                  <p className="text-xs text-destructive">{job.lastError}</p>
+                ) : null}
+              </div>
+
+              {job.canCancel ? (
+                <form action={cancelFormAction}>
+                  <input type="hidden" name="jobId" value={job.jobId} />
+                  <Button type="submit" variant="outline">
+                    {job.status === "cancelling" ? "Cancelling..." : "Cancel job"}
+                  </Button>
+                </form>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StatusPill({ status }: { status: RecipeParseJobSummary["status"] }) {
+  const label = status.replaceAll("_", " ");
+
+  return (
+    <span className="rounded-full border border-border/60 px-2 py-1 text-xs uppercase tracking-wide text-muted-foreground">
+      {label}
+    </span>
   );
 }
