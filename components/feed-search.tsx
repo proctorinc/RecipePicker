@@ -59,11 +59,6 @@ export function FeedSearch({ initialQuery }: { initialQuery: string }) {
           </button>
         ) : null}
       </div>
-      <p className="px-2 pt-3 text-xs text-muted-foreground">
-        {isPending
-          ? "Updating feed..."
-          : "Search across recipes and extracted recipe content."}
-      </p>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { Star } from "lucide-react";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { Card } from "@/components/ui/card";
+import { getFeedCardAspectClass } from "@/lib/feed-layout";
 import type { FeedPinCard } from "@/types/view-models";
 
 const FEED_IMAGE_SIZES =
@@ -18,7 +19,7 @@ export function PinCard({
   card: FeedPinCard;
   priority?: boolean;
 }) {
-  const aspectClass = getAspectClass(card.pinId);
+  const aspectClass = getFeedCardAspectClass(card.pinId);
   const [isFullImageLoaded, setIsFullImageLoaded] = useState(false);
 
   return (
@@ -72,17 +73,6 @@ export function PinCard({
       </Card>
     </AppTransitionLink>
   );
-}
-
-function getAspectClass(pinId: string) {
-  const value = pinId.charCodeAt(pinId.length - 1) % 3;
-  if (value === 0) {
-    return "aspect-[4/5]";
-  }
-  if (value === 1) {
-    return "aspect-[4/6]";
-  }
-  return "aspect-[4/4.75]";
 }
 
 function FeedCardStars({ value }: { value: number }) {

@@ -68,6 +68,41 @@ export function formatRatingValue(value: number | null | undefined) {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
+export function formatIso8601Duration(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const match = value.match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/i);
+  if (!match) {
+    return value;
+  }
+
+  const days = Number(match[1] ?? 0);
+  const hours = Number(match[2] ?? 0);
+  const minutes = Number(match[3] ?? 0);
+  const seconds = Number(match[4] ?? 0);
+  const totalMinutes = days * 24 * 60 + hours * 60 + minutes + (seconds > 0 ? 1 : 0);
+
+  if (totalMinutes === 0) {
+    return "0 min";
+  }
+
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+  const parts: string[] = [];
+
+  if (wholeHours > 0) {
+    parts.push(`${wholeHours} hr`);
+  }
+
+  if (remainingMinutes > 0) {
+    parts.push(`${remainingMinutes} min`);
+  }
+
+  return parts.join(" ");
+}
+
 export function isValidDayString(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime());
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCalendarDays,
+  formatIso8601Duration,
   formatRelativeTimeShort,
   getTodayDayString,
   getTodayMonthString,
@@ -33,6 +34,24 @@ describe("formatRelativeTimeShort", () => {
 
   it("handles missing timestamps", () => {
     expect(formatRelativeTimeShort(null, now)).toBe("Unknown");
+  });
+});
+
+describe("formatIso8601Duration", () => {
+  it("formats hours and minutes from ISO 8601 durations", () => {
+    expect(formatIso8601Duration("PT1H30M")).toBe("1 hr 30 min");
+    expect(formatIso8601Duration("PT45M")).toBe("45 min");
+    expect(formatIso8601Duration("PT2H")).toBe("2 hr");
+  });
+
+  it("rolls days into hours and rounds partial minutes up", () => {
+    expect(formatIso8601Duration("P1DT15M")).toBe("24 hr 15 min");
+    expect(formatIso8601Duration("PT59S")).toBe("1 min");
+  });
+
+  it("returns null for empty values and preserves unrecognized strings", () => {
+    expect(formatIso8601Duration(null)).toBeNull();
+    expect(formatIso8601Duration("about an hour")).toBe("about an hour");
   });
 });
 

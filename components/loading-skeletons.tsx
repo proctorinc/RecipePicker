@@ -1,4 +1,8 @@
 import { cn } from "@/lib/utils";
+import {
+  getFeedCardAspectClassFromVariant,
+  type FeedCardAspectVariant,
+} from "@/lib/feed-layout";
 
 export function Skeleton({ className }: { className?: string }) {
   return (
@@ -14,26 +18,60 @@ export function Skeleton({ className }: { className?: string }) {
 export function FeedPageSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="columns-2 gap-2 pb-24 sm:columns-2 md:columns-3 md:gap-5 lg:columns-4">
-        {Array.from({ length: 10 }, (_unused, index) => (
-          <Skeleton
-            key={index}
-            className={cn(
-              "mb-2 break-inside-avoid border border-white/70 md:mb-5",
-              index % 3 === 0
-                ? "aspect-[4/6]"
-                : index % 2 === 0
-                  ? "aspect-[4/5]"
-                  : "aspect-[4/4.75]",
-            )}
-          />
-        ))}
+      <div className="md:hidden">{renderFeedSkeletonColumns(2)}</div>
+      <div className="hidden md:block lg:hidden">
+        {renderFeedSkeletonColumns(3)}
       </div>
+      <div className="hidden lg:block">{renderFeedSkeletonColumns(4)}</div>
       <div className="fixed bottom-24 left-0 right-0 z-30 px-3 md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">
           <Skeleton className="h-14 rounded-full border border-white/80" />
         </div>
       </div>
+    </div>
+  );
+}
+
+export function FeedCardSkeleton({
+  aspectVariant,
+}: {
+  aspectVariant: FeedCardAspectVariant;
+}) {
+  return (
+    <Skeleton
+      className={cn(
+        "w-full rounded-[28px] border border-white/70",
+        getFeedCardAspectClassFromVariant(aspectVariant),
+      )}
+    />
+  );
+}
+
+function renderFeedSkeletonColumns(columnCount: number) {
+  return (
+    <div
+      className={cn(
+        "grid items-start gap-2 pb-24 md:gap-5",
+        columnCount === 2
+          ? "grid-cols-2"
+          : columnCount === 3
+            ? "grid-cols-3"
+            : "grid-cols-4",
+      )}
+    >
+      {Array.from({ length: columnCount }, (_unused, columnIndex) => (
+        <div key={columnIndex} className="flex flex-col gap-2 md:gap-5">
+          <FeedCardSkeleton
+            aspectVariant={columnIndex % 3 === 0 ? "taller" : "tall"}
+          />
+          <FeedCardSkeleton
+            aspectVariant={columnIndex % 2 === 0 ? "square" : "taller"}
+          />
+          {columnIndex < Math.max(1, columnCount - 2) ? (
+            <FeedCardSkeleton aspectVariant="tall" />
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }
