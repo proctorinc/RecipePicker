@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { toast } from "sonner";
 
-import { cancelRecipeParseJobAction } from "@/lib/actions/operations";
+import { cancelRecipeParseJobAction, resumeRecipeParseJobAction } from "@/lib/actions/operations";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,6 +55,7 @@ export function RecipeOpsTable({
   const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
   const [state, formAction] = useActionState(rerunRecipesAction, initialState);
   const [cancelState, cancelFormAction] = useActionState(cancelRecipeParseJobAction, initialState);
+  const [resumeState, resumeFormAction] = useActionState(resumeRecipeParseJobAction, initialState);
   const router = useRouter();
   const [isRefreshing, startRefresh] = useTransition();
 
@@ -97,7 +98,15 @@ export function RecipeOpsTable({
   }, [cancelState]);
 
   useEffect(() => {
-    if (!jobs.some((job) => job.canCancel)) {
+    if (resumeState.status === "success") {
+      toast.success(resumeState.message);
+    } else if (resumeState.status === "error") {
+      toast.error(resumeState.message);
+    }
+  }, [resumeState]);
+
+  useEffect(() => {
+    if (!jobs.some((job) => job.canCancel || job.canResume)) {
       return;
     }
 
@@ -135,6 +144,7 @@ export function RecipeOpsTable({
         onRefresh={() => startRefresh(() => router.refresh())}
         refreshing={isRefreshing}
         cancelFormAction={cancelFormAction}
+        resumeFormAction={resumeFormAction}
       />
       <div className="flex flex-col gap-4 rounded-[24px] border border-border/60 bg-secondary/20 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -290,11 +300,13 @@ function RecipeParseJobsPanel({
   onRefresh,
   refreshing,
   cancelFormAction,
+  resumeFormAction,
 }: {
   jobs: RecipeParseJobSummary[];
   onRefresh: () => void;
   refreshing: boolean;
   cancelFormAction: (payload: FormData) => void;
+  resumeFormAction: (payload: FormData) => void;
 }) {
   if (jobs.length === 0) {
     return null;
@@ -347,14 +359,24 @@ function RecipeParseJobsPanel({
                 ) : null}
               </div>
 
-              {job.canCancel ? (
-                <form action={cancelFormAction}>
-                  <input type="hidden" name="jobId" value={job.jobId} />
-                  <Button type="submit" variant="outline">
-                    {job.status === "cancelling" ? "Cancelling..." : "Cancel job"}
-                  </Button>
-                </form>
-              ) : null}
+              <div className="flex flex-wrap gap-2">
+                {job.canResume ? (
+                  <form action={resumeFormAction}>
+                    <input type="hidden" name="jobId" value={job.jobId} />
+                    <Button type="submit" variant="secondary">
+                      Resume job
+                    </Button>
+                  </form>
+                ) : null}
+                {job.canCancel ? (
+                  <form action={cancelFormAction}>
+                    <input type="hidden" name="jobId" value={job.jobId} />
+                    <Button type="submit" variant="outline">
+                      {job.status === "cancelling" ? "Cancelling..." : "Cancel job"}
+                    </Button>
+                  </form>
+                ) : null}
+              </div>
             </div>
           </div>
         ))}

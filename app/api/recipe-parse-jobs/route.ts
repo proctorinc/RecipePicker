@@ -67,7 +67,6 @@ export const POST = withRouteLogging(
           runRecipeParseJobWorker({
             jobId: result.jobId,
             workerToken: result.workerToken,
-            requestUrl: request.url,
           }),
       });
     });

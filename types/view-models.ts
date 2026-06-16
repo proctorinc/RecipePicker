@@ -241,6 +241,7 @@ export type RecipeParseJobSummary = {
   lastError: string | null;
   currentPhase: string;
   canCancel: boolean;
+  canResume: boolean;
 };
 
 export type RecipeParseJobDetail = RecipeParseJobSummary & {
@@ -411,4 +412,5 @@ export type RecipeHistoryPageView = {
   nextMonth: string;
   days: RecipeHistoryDayView[];
   recipeOptions: RecipeHistoryRecipeOption[];
+  selectedRecipe: RecipeHistoryRecipeOption | null;
 };

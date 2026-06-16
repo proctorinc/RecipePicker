@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import Image from "next/image";
 import {
-  ArrowLeft,
   Clock3,
   ExternalLink,
   ListChecks,
@@ -12,6 +11,7 @@ import { notFound } from "next/navigation";
 import { ActionForm } from "@/components/action-form";
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { PageShell } from "@/components/page-shell";
+import { RecipeMetadataEditor } from "@/components/recipe-metadata-editor";
 import { RecipeReviewLauncher } from "@/components/recipe-review-launcher";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,10 +26,10 @@ export default async function RecipePage({
   searchParams,
 }: {
   params: Promise<{ recipeId: string }>;
-  searchParams: Promise<{ reviewRecipeId?: string }>;
+  searchParams: Promise<{ reviewRecipeId?: string; historyMonth?: string }>;
 }) {
   const { recipeId } = await params;
-  const { reviewRecipeId } = await searchParams;
+  const { reviewRecipeId, historyMonth } = await searchParams;
   const recipe = await getRecipeDetail(recipeId);
 
   if (!recipe) {
@@ -38,7 +38,7 @@ export default async function RecipePage({
 
   const backHref =
     reviewRecipeId && reviewRecipeId === recipeId
-      ? `/history?reviewRecipeId=${encodeURIComponent(recipeId)}`
+      ? `/history?recipeId=${encodeURIComponent(recipeId)}&from=recipe${historyMonth ? `&month=${encodeURIComponent(historyMonth)}` : ""}`
       : "/";
   const backLabel =
     reviewRecipeId && reviewRecipeId === recipeId
@@ -67,64 +67,54 @@ export default async function RecipePage({
 
   return (
     <PageShell>
-      <div className="flex items-center justify-between gap-3">
-        <Button asChild variant="outline">
-          <AppTransitionLink href={backHref} prefetch>
-            <ArrowLeft className="size-4" />
-            {backLabel}
-          </AppTransitionLink>
-        </Button>
-      </div>
-
-      <section className="overflow-hidden rounded-t-[36px] border border-white/70 bg-white/70 shadow-soft">
-        <div className="relative aspect-[16/10] sm:aspect-[16/8]">
-          {recipe.imageUrl ? (
-            <Image
-              src={recipe.imageUrl}
-              alt={recipe.title}
-              fill
-              className="object-cover"
-              sizes="100vw"
-            />
-          ) : (
-            <div
-              className="absolute inset-0"
-              style={{
-                backgroundColor:
-                  recipe.dominantColor ?? "rgba(214, 196, 176, 0.65)",
-              }}
-            />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
-          <div className="absolute inset-x-0 bottom-0 p-2 text-white sm:p-8">
-            <div className="mb-3 flex flex-wrap gap-2">
-              {recipe.totalTime ? (
-                <MetaChip
-                  icon={<Clock3 className="h-4 w-4" />}
-                  label={
-                    formatIso8601Duration(recipe.totalTime) ?? recipe.totalTime
-                  }
-                />
-              ) : null}
-              {recipe.yieldText ? (
-                <MetaChip
-                  icon={<ListChecks className="h-4 w-4" />}
-                  label={`${recipe.yieldText} servings`}
-                />
-              ) : null}
+      <RecipeMetadataEditor
+        recipeId={recipe.recipeId}
+        title={recipe.title}
+        description={recipe.description}
+        backHref={backHref}
+        backLabel={backLabel}
+      >
+        <section className="overflow-hidden rounded-t-[36px] border border-white/70 bg-white/70 shadow-soft">
+          <div className="relative aspect-[16/10] sm:aspect-[16/8]">
+            {recipe.imageUrl ? (
+              <Image
+                src={recipe.imageUrl}
+                alt={recipe.title}
+                fill
+                className="object-cover"
+                sizes="100vw"
+              />
+            ) : (
+              <div
+                className="absolute inset-0"
+                style={{
+                  backgroundColor:
+                    recipe.dominantColor ?? "rgba(214, 196, 176, 0.65)",
+                }}
+              />
+            )}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
+            <div className="absolute inset-x-0 bottom-0 p-2 text-white sm:p-8">
+              <div className="mb-3 flex flex-wrap gap-2">
+                {recipe.totalTime ? (
+                  <MetaChip
+                    icon={<Clock3 className="h-4 w-4" />}
+                    label={
+                      formatIso8601Duration(recipe.totalTime) ?? recipe.totalTime
+                    }
+                  />
+                ) : null}
+                {recipe.yieldText ? (
+                  <MetaChip
+                    icon={<ListChecks className="h-4 w-4" />}
+                    label={`${recipe.yieldText} servings`}
+                  />
+                ) : null}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
-
-      <div className="flex flex-col gap-2 px-4">
-        <h2 className="max-w-2xl font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight sm:text-5xl">
-          {recipe.title}
-        </h2>
-        <p className="text-sm text-muted-foreground sm:text-base">
-          {recipe.description}
-        </p>
-      </div>
+        </section>
+      </RecipeMetadataEditor>
 
       <div className="flex gap-2 w-full">
         {recipe.sourceUrl && (

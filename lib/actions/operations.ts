@@ -51,6 +51,7 @@ import {
 import {
   cancelRecipeParseJob,
   createRecipeParseJob,
+  resumeRecipeParseJob,
   runRecipeParseJobWorker,
 } from "@/lib/server/recipe-parse-jobs";
 import { getRecipeHouseholdPinId } from "@/lib/server/queries";
@@ -182,6 +183,59 @@ export const cancelRecipeParseJobAction = withActionLogging(
       };
     } catch (error) {
       return toErrorState(error, "Unable to cancel this parse job.");
+    }
+  },
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        jobId: String(formData.get("jobId") ?? "").trim() || null,
+      },
+    }),
+  },
+);
+
+export const resumeRecipeParseJobAction = withActionLogging(
+  "action.resume_recipe_parse_job",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const jobId = String(formData.get("jobId") ?? "").trim();
+
+    if (!jobId) {
+      return { status: "error", message: "Job ID is required." };
+    }
+
+    try {
+      const context = await requireHouseholdContext();
+      const result = await resumeRecipeParseJob({
+        householdId: context.householdId,
+        jobId,
+      });
+
+      if (!result.ok) {
+        return { status: "error", message: result.message };
+      }
+
+      after(async () => {
+        await runBackgroundJob({
+          name: "background.recipe_parse_job",
+          target: {
+            householdId: context.householdId,
+            jobId,
+          },
+          fn: async () =>
+            runRecipeParseJobWorker({
+              jobId,
+              workerToken: result.workerToken,
+            }),
+        });
+      });
+
+      revalidateAll(recipeScopedPaths());
+      return {
+        status: "success",
+        message: result.message,
+      };
+    } catch (error) {
+      return toErrorState(error, "Unable to resume this parse job.");
     }
   },
   {
@@ -816,6 +870,74 @@ export const saveRecipeContentAction = withActionLogging(
   },
 );
 
+export const saveRecipeMetadataAction = withActionLogging(
+  "action.save_recipe_metadata",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+  const recipeId = String(formData.get("recipeId") ?? "").trim();
+  const title = String(formData.get("title") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+
+  if (!recipeId) {
+    return { status: "error", message: "Recipe ID is required." };
+  }
+
+  if (!title) {
+    return { status: "error", message: "Title cannot be empty." };
+  }
+
+  try {
+    const context = await requireHouseholdContext();
+    const { db, sqlite } = await openDatabase();
+    const now = new Date().toISOString();
+
+    try {
+      const recipe = await db.query.householdRecipes.findFirst({
+        where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+        columns: {
+          recipeId: true,
+        },
+      });
+
+      if (!recipe) {
+        return { status: "error", message: "Recipe was not found." };
+      }
+
+      await db.update(householdRecipes)
+        .set({
+          title,
+          description: description || null,
+          titleOverridden: true,
+          descriptionOverridden: true,
+          updatedAt: now,
+        })
+        .where(and(eq(householdRecipes.recipeId, recipeId), eq(householdRecipes.householdId, context.householdId)))
+        .run();
+    } finally {
+      await sqlite.close();
+    }
+
+    revalidateAll(recipeScopedPaths(undefined, recipeId));
+    return {
+      status: "success",
+      message: "Saved the recipe details.",
+    };
+  } catch (error) {
+    return toErrorState(error, "Unable to save the recipe details.");
+  }
+},
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+      },
+      result: {
+        hasTitle: String(formData.get("title") ?? "").trim().length > 0,
+        hasDescription: String(formData.get("description") ?? "").trim().length > 0,
+      },
+    }),
+  },
+);
+
 export const saveRecipeFeedbackAction = withActionLogging(
   "action.save_recipe_feedback",
   async (_: ActionState, formData: FormData): Promise<ActionState> => {
@@ -1008,6 +1130,7 @@ export const createRecipeEventAction = withActionLogging(
     const context = await requireHouseholdContext();
     const { db, sqlite } = await openDatabase();
     const now = new Date().toISOString();
+    let eventId: string | null = null;
 
     try {
       const recipe = await db.query.householdRecipes.findFirst({
@@ -1022,16 +1145,13 @@ export const createRecipeEventAction = withActionLogging(
         return { status: "error", message: "Recipe was not found." };
       }
 
-      await db.insert(householdRecipeEvents)
-        .values({
-          householdId: context.householdId,
-          recipeId: recipe.recipeId,
-          date,
-          createdByClerkUserId: context.clerkUserId,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      eventId = await insertRecipeEvent(db, {
+        householdId: context.householdId,
+        recipeId: recipe.recipeId,
+        date,
+        clerkUserId: context.clerkUserId,
+        now,
+      });
     } finally {
       await sqlite.close();
     }
@@ -1040,6 +1160,9 @@ export const createRecipeEventAction = withActionLogging(
     return {
       status: "success",
       message: date > getTodayDayString() ? "Planned recipe added to the calendar." : "Meal added to history.",
+      data: {
+        eventId,
+      },
     };
   } catch (error) {
     return toErrorState(error, "Unable to save this recipe event.");

@@ -273,6 +273,7 @@ export async function getRecipeDetail(
 
 export async function getRecipeHistoryPage(
   monthParam?: string,
+  selectedRecipeId?: string,
 ): Promise<RecipeHistoryPageView> {
   const context = await requireHouseholdContext();
   const { db, sqlite } = await openDatabase();
@@ -332,6 +333,9 @@ export async function getRecipeHistoryPage(
           }) satisfies RecipeHistoryRecipeOption,
       )
       .sort((left, right) => left.recipeTitle.localeCompare(right.recipeTitle));
+    const selectedRecipe =
+      recipeOptions.find((recipe) => recipe.recipeId === selectedRecipeId) ??
+      null;
     const eventsByDate = new Map<string, RecipeHistoryEventView[]>();
 
     for (const event of eventRows) {
@@ -358,6 +362,7 @@ export async function getRecipeHistoryPage(
       nextMonth,
       days,
       recipeOptions,
+      selectedRecipe,
     };
   } finally {
     await sqlite.close();
@@ -1306,6 +1311,9 @@ function toRecipeParseJobSummary(
 ): RecipeParseJobSummary {
   const cancelledRecipes = job.items.filter((item) => item.status === "cancelled").length;
   const attemptedRecipes = job.processedRecipes;
+  const needsResume = job.status !== "completed"
+    && job.status !== "cancelled"
+    && (Boolean(job.lastError) || isRecipeParseJobHeartbeatStale(job.status, job.lastHeartbeatAt));
   const percentComplete = job.totalRecipes > 0
     ? Math.min(100, Math.round((attemptedRecipes / job.totalRecipes) * 100))
     : 0;
@@ -1334,8 +1342,11 @@ function toRecipeParseJobSummary(
       processedRecipes: job.processedRecipes,
       totalRecipes: job.totalRecipes,
       cancelledRecipes,
+      lastError: job.lastError,
+      needsResume,
     }),
     canCancel: job.status === "queued" || job.status === "running" || job.status === "cancelling",
+    canResume: needsResume,
   };
 }
 
@@ -1345,7 +1356,15 @@ function describeRecipeParseJobPhase(input: {
   processedRecipes: number;
   totalRecipes: number;
   cancelledRecipes: number;
+  lastError: string | null;
+  needsResume: boolean;
 }) {
+  if (input.needsResume) {
+    return input.lastError
+      ? "Needs resume after a worker scheduling error"
+      : "May be stalled. Resume to continue parsing";
+  }
+
   if (input.status === "queued") {
     return "Queued";
   }
@@ -1369,6 +1388,23 @@ function describeRecipeParseJobPhase(input: {
   }
 
   return "Completed";
+}
+
+function isRecipeParseJobHeartbeatStale(status: string, lastHeartbeatAt: string | null) {
+  if (status !== "running" && status !== "cancelling") {
+    return false;
+  }
+
+  if (!lastHeartbeatAt) {
+    return true;
+  }
+
+  const heartbeatMs = new Date(lastHeartbeatAt).getTime();
+  if (Number.isNaN(heartbeatMs)) {
+    return true;
+  }
+
+  return Date.now() - heartbeatMs >= 2 * 60 * 1000;
 }
 
 function decodeFeedCursor(cursor: string | null | undefined) {

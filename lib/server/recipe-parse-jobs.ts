@@ -8,13 +8,13 @@ import {
   householdRecipeParseJobs,
 } from "@/lib/server/db";
 import { extractSingleRecipe } from "@/lib/server/extract";
-import { logWarn } from "@/lib/server/logger";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancelling"] as const;
 const TERMINAL_JOB_STATUSES = ["completed", "cancelled"] as const;
 const RECIPE_PARSE_CHUNK_SIZE = 20;
 const RECIPE_PARSE_CONCURRENCY = 3;
 const RECIPE_PARSE_LEASE_MS = 90 * 1000;
+const RECIPE_PARSE_STALE_HEARTBEAT_MS = 2 * 60 * 1000;
 
 export type RecipeParseJobStatus =
   | "queued"
@@ -214,10 +214,73 @@ export async function cancelRecipeParseJob(input: {
   }
 }
 
+export async function resumeRecipeParseJob(input: {
+  householdId: string;
+  jobId: string;
+}): Promise<
+  | { ok: true; message: string; workerToken: string }
+  | { ok: false; message: string }
+> {
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const job = await db.query.householdRecipeParseJobs.findFirst({
+      where: (table, { and, eq }) => and(eq(table.householdId, input.householdId), eq(table.jobId, input.jobId)),
+    });
+
+    if (!job) {
+      return {
+        ok: false,
+        message: "The parse job was not found.",
+      };
+    }
+
+    if (TERMINAL_JOB_STATUSES.includes(job.status as (typeof TERMINAL_JOB_STATUSES)[number])) {
+      return {
+        ok: false,
+        message: "This parse job has already finished.",
+      };
+    }
+
+    const now = new Date();
+    await requeueStaleProcessingItems(db, job.jobId, now);
+
+    const activeProcessingItems = await db.query.householdRecipeParseJobItems.findMany({
+      where: (table, { and, eq }) => and(eq(table.jobId, job.jobId), eq(table.status, "processing")),
+      columns: {
+        jobItemId: true,
+      },
+    });
+
+    if (activeProcessingItems.length > 0 && !isJobHeartbeatStale(job.lastHeartbeatAt, now)) {
+      return {
+        ok: false,
+        message: "This parse job is already actively processing.",
+      };
+    }
+
+    await db.update(householdRecipeParseJobs)
+      .set({
+        status: job.cancelRequestedAt ? "cancelling" : "queued",
+        lastError: null,
+        updatedAt: now.toISOString(),
+      })
+      .where(eq(householdRecipeParseJobs.jobId, job.jobId))
+      .run();
+
+    return {
+      ok: true,
+      message: "Resume requested. The next parse chunk is starting.",
+      workerToken: job.workerToken,
+    };
+  } finally {
+    await sqlite.close();
+  }
+}
+
 export async function runRecipeParseJobWorker(input: {
   jobId: string;
   workerToken: string;
-  requestUrl?: string | null;
 }) {
   const { db, sqlite } = await openDatabase();
 
@@ -319,7 +382,6 @@ export async function runRecipeParseJobWorker(input: {
       where: (table, { eq }) => eq(table.jobId, job.jobId),
       columns: {
         cancelRequestedAt: true,
-        workerToken: true,
       },
     });
 
@@ -328,48 +390,12 @@ export async function runRecipeParseJobWorker(input: {
       return { status: "cancelled" as const };
     }
 
-    await scheduleNextRecipeParseJobChunk({
-      jobId: job.jobId,
-      workerToken: job.workerToken,
-      requestUrl: input.requestUrl ?? null,
-    });
-
     return {
       status: "continued" as const,
       remaining: counts.queued,
     };
   } finally {
     await sqlite.close();
-  }
-}
-
-export async function scheduleNextRecipeParseJobChunk(input: {
-  jobId: string;
-  workerToken: string;
-  requestUrl?: string | null;
-}) {
-  const baseUrl = resolveAppBaseUrl(input.requestUrl ?? null);
-  const routeUrl = new URL("/api/recipe-parse-jobs/worker", baseUrl);
-
-  try {
-    await fetch(routeUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-recipe-parse-job-token": input.workerToken,
-      },
-      body: JSON.stringify({
-        jobId: input.jobId,
-      }),
-      cache: "no-store",
-    });
-  } catch (error) {
-    logWarn("recipe.parse_job.schedule_failed", {
-      target: {
-        jobId: input.jobId,
-      },
-      errorMessage: error instanceof Error ? error.message : String(error),
-    });
   }
 }
 
@@ -564,28 +590,6 @@ async function requeueStaleProcessingItems(
   }
 }
 
-function resolveAppBaseUrl(requestUrl: string | null) {
-  if (requestUrl) {
-    try {
-      return new URL(requestUrl).origin;
-    } catch {
-      // Fall back below.
-    }
-  }
-
-  const explicitAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (explicitAppUrl) {
-    return explicitAppUrl;
-  }
-
-  const vercelUrl = process.env.VERCEL_URL?.trim();
-  if (vercelUrl) {
-    return vercelUrl.startsWith("http") ? vercelUrl : `https://${vercelUrl}`;
-  }
-
-  return "http://localhost:3000";
-}
-
 function normalizeRecipeParseJobStatus(status: string): RecipeParseJobStatus {
   return status === "queued"
     || status === "running"
@@ -594,6 +598,19 @@ function normalizeRecipeParseJobStatus(status: string): RecipeParseJobStatus {
     || status === "cancelled"
     ? status
     : "running";
+}
+
+function isJobHeartbeatStale(lastHeartbeatAt: string | null, now: Date) {
+  if (!lastHeartbeatAt) {
+    return true;
+  }
+
+  const heartbeatMs = new Date(lastHeartbeatAt).getTime();
+  if (Number.isNaN(heartbeatMs)) {
+    return true;
+  }
+
+  return now.getTime() - heartbeatMs >= RECIPE_PARSE_STALE_HEARTBEAT_MS;
 }
 
 async function runWithConcurrency<T>(

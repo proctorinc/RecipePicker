@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { ReviewDeleteButton } from "@/components/review-delete-button";
@@ -15,7 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import type { RecipeReviewView } from "@/types/view-models";
-import { formatDay, formatRatingValue } from "@/lib/utils";
+import { formatDay, formatRatingValue, getTodayMonthString } from "@/lib/utils";
 
 type RecipeReviewLauncherProps = {
   recipeId: string;
@@ -32,6 +33,7 @@ export function RecipeReviewLauncher({
   reviewCount,
   reviews,
 }: RecipeReviewLauncherProps) {
+  const [rateFlowOpen, setRateFlowOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedRating, setSelectedRating] = useState(5);
   const [editingReview, setEditingReview] = useState<RecipeReviewView | null>(
@@ -78,7 +80,7 @@ export function RecipeReviewLauncher({
                 variant="secondary"
                 onClick={() => {
                   setSelectedRating(5);
-                  setCreateOpen(true);
+                  setRateFlowOpen(true);
                 }}
               >
                 Rate recipe
@@ -109,7 +111,9 @@ export function RecipeReviewLauncher({
                                 </span>
                               </div>
                               <p className="text-sm text-muted-foreground">
-                                {review.eatenOn ? `${formatDay(review.eatenOn)} by ` : "No date included by "}
+                                {review.eatenOn
+                                  ? `${formatDay(review.eatenOn)} by `
+                                  : "No date included by "}
                                 {review.reviewerName}
                               </p>
                               {review.note ? (
@@ -149,12 +153,60 @@ export function RecipeReviewLauncher({
         </div>
       </div>
 
+      <Dialog open={rateFlowOpen} onOpenChange={setRateFlowOpen}>
+        <DialogContent className="w-[min(92vw,32rem)]">
+          <DialogHeader>
+            <DialogTitle>Add a rating</DialogTitle>
+            <DialogDescription>
+              Did you eat this recipe on a specific day?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-auto w-full whitespace-normal justify-start rounded-[24px] px-5 py-4 text-left"
+              onClick={() => {
+                setRateFlowOpen(false);
+                setCreateOpen(true);
+              }}
+            >
+              <span className="flex min-w-0 flex-col items-start">
+                <span className="font-medium">No date</span>
+                <span className="text-sm font-normal leading-5 text-muted-foreground">
+                  Eat it too long ago? Just add a review for this recipe
+                </span>
+              </span>
+            </Button>
+            <Button
+              asChild
+              type="button"
+              variant="secondary"
+              className="h-auto w-full whitespace-normal justify-start rounded-[24px] px-5 py-4 text-left"
+            >
+              <Link
+                href={`/history?month=${encodeURIComponent(getTodayMonthString())}&recipeId=${encodeURIComponent(recipeId)}&from=recipe`}
+                className="w-full"
+              >
+                <span className="flex min-w-0 flex-col items-start">
+                  <span className="font-medium">Add date</span>
+                  <span className="text-sm font-normal leading-5 text-muted-foreground">
+                    Ate this recently? Add this to your meal history.
+                  </span>
+                </span>
+              </Link>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <RecipeReviewDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
         recipeId={recipeId}
         recipeTitle={recipeTitle}
         initialRating={selectedRating}
+        showDateField={false}
       />
       <RecipeReviewDialog
         open={Boolean(editingReview)}

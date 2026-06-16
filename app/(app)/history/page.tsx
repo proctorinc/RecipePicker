@@ -7,10 +7,10 @@ export const dynamic = "force-dynamic";
 export default async function HistoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; recipeId?: string; from?: string }>;
 }) {
-  const { month } = await searchParams;
-  const history = await getRecipeHistoryPage(month);
+  const { month, recipeId, from } = await searchParams;
+  const history = await getRecipeHistoryPage(month, recipeId);
 
   return (
     <PageShell>
@@ -18,7 +18,7 @@ export default async function HistoryPage({
         title="Meal History"
         description="Track and review your recipes when you want to revisit what you tried."
       />
-      <RecipeHistoryCalendar history={history} />
+      <RecipeHistoryCalendar history={history} fromRecipe={from === "recipe"} />
     </PageShell>
   );
 }

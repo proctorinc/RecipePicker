@@ -1,7 +1,8 @@
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 
 import { runRecipeParseJobWorker } from "@/lib/server/recipe-parse-jobs";
-import { toErrorResponse, withRouteLogging } from "@/lib/server/logger";
+import { runBackgroundJob, toErrorResponse, withRouteLogging } from "@/lib/server/logger";
 
 export const maxDuration = 60;
 
@@ -19,11 +20,26 @@ export const POST = withRouteLogging(
     const result = await runRecipeParseJobWorker({
       jobId,
       workerToken,
-      requestUrl: request.url,
     });
 
     if (result.status === "unauthorized") {
       return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
+    }
+
+    if (result.status === "continued") {
+      after(async () => {
+        await runBackgroundJob({
+          name: "background.recipe_parse_job",
+          target: {
+            jobId,
+          },
+          fn: async () =>
+            runRecipeParseJobWorker({
+              jobId,
+              workerToken,
+            }),
+        });
+      });
     }
 
     return NextResponse.json(result);

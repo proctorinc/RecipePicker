@@ -39,7 +39,9 @@ type RecipeReviewDialogProps = {
   viewRecipeHref?: string;
   eventId?: string | null;
   initialEatenOn?: string | null;
+  showDateField?: boolean;
   allowDateEditing?: boolean;
+  dismissLabel?: string;
   onSuccess?: () => void;
 };
 
@@ -53,7 +55,9 @@ export function RecipeReviewDialog({
   viewRecipeHref,
   eventId,
   initialEatenOn,
+  showDateField = true,
   allowDateEditing = true,
+  dismissLabel = "Cancel",
   onSuccess,
 }: RecipeReviewDialogProps) {
   const action = review ? updateRecipeReviewAction : createRecipeReviewAction;
@@ -147,51 +151,53 @@ export function RecipeReviewDialog({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <span className="text-sm font-medium text-foreground">
-              Date eaten
-            </span>
-            {allowDateEditing ? (
-              <div className="flex gap-3">
-                {dateIncluded ? (
-                  <Input
-                    ref={dateInputRef}
-                    type="date"
-                    name="eatenOn"
-                    value={eatenOn}
-                    onChange={(event) => setEatenOn(event.target.value)}
-                    aria-label="Date eaten"
-                    className="h-11 w-1/2 border-primary bg-primary py-0 text-primary-foreground [color-scheme:dark]"
-                    max={getTodayDayString()}
-                  />
-                ) : (
+          {showDateField ? (
+            <div className="space-y-2">
+              <span className="text-sm font-medium text-foreground">
+                Date eaten
+              </span>
+              {allowDateEditing ? (
+                <div className="flex gap-3">
+                  {dateIncluded ? (
+                    <Input
+                      ref={dateInputRef}
+                      type="date"
+                      name="eatenOn"
+                      value={eatenOn}
+                      onChange={(event) => setEatenOn(event.target.value)}
+                      aria-label="Date eaten"
+                      className="h-11 w-1/2 border-primary bg-primary py-0 text-primary-foreground [color-scheme:dark]"
+                      max={getTodayDayString()}
+                    />
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-1/2"
+                      onClick={() => setEatenOn(todayDate())}
+                    >
+                      Add a date
+                    </Button>
+                  )}
                   <Button
                     type="button"
-                    variant="outline"
+                    variant={dateIncluded ? "outline" : "default"}
                     className="w-1/2"
-                    onClick={() => setEatenOn(todayDate())}
+                    onClick={() => setEatenOn("")}
                   >
-                    Add a date
+                    No date
                   </Button>
-                )}
-                <Button
-                  type="button"
-                  variant={dateIncluded ? "outline" : "default"}
-                  className="w-1/2"
-                  onClick={() => setEatenOn("")}
-                >
-                  No date
-                </Button>
-              </div>
-            ) : (
-              <>
-                <input type="hidden" name="eatenOn" value={eatenOn} />
-                <div className="rounded-[24px] border border-border/70 bg-secondary/20 px-4 py-3 text-sm text-foreground">
-                  {formatDay(eatenOn)}
                 </div>
-              </>
-            )}
-          </div>
+              ) : (
+                <>
+                  <input type="hidden" name="eatenOn" value={eatenOn} />
+                  <div className="rounded-[24px] border border-border/70 bg-secondary/20 px-4 py-3 text-sm text-foreground">
+                    {formatDay(eatenOn)}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
 
           <label className="block space-y-2">
             <span className="text-sm font-medium text-foreground">Notes</span>
@@ -214,7 +220,7 @@ export function RecipeReviewDialog({
                 variant="ghost"
                 onClick={() => onOpenChange(false)}
               >
-                Cancel
+                {dismissLabel}
               </Button>
               <ReviewSubmitButton>
                 {review ? "Save changes" : "Save review"}
