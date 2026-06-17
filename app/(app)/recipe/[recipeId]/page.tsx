@@ -10,6 +10,7 @@ import { RecipeMetadataEditor } from "@/components/recipe-metadata-editor";
 import { RecipeReviewLauncher } from "@/components/recipe-review-launcher";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { RecipePageScrollToTop } from "@/app/(app)/recipe/[recipeId]/scroll-to-top";
 import { extractRecipeAction } from "@/lib/actions/operations";
 import { getRecipeDetail } from "@/lib/server/queries";
 import { formatIso8601Duration } from "@/lib/utils";
@@ -62,6 +63,7 @@ export default async function RecipePage({
 
   return (
     <PageShell>
+      <RecipePageScrollToTop />
       <RecipeMetadataEditor
         recipeId={recipe.recipeId}
         title={recipe.title}

@@ -9,6 +9,8 @@ import {
   householdPins,
   householdRecipes,
   pinterestAccounts,
+  recipeFolderMemberships,
+  recipeFolders,
 } from "@/lib/server/db";
 import { extractRecipes } from "@/lib/server/extract";
 import { logError, logInfo, logWarn } from "@/lib/server/logger";
@@ -21,6 +23,7 @@ import {
 } from "@/lib/server/pinterest";
 
 export const PINTEREST_SYNC_LEASE_MS = 10 * 60 * 1000;
+const PINTEREST_FOLDER_SOURCE = "pinterest";
 
 type SyncBoardOptions = {
   householdId: string;
@@ -54,12 +57,68 @@ type SyncAllBoardsResult = {
   newRecipeIds: string[];
 };
 
+type PinterestSectionSummary = {
+  id: string;
+  name: string | null;
+  rawJson: string;
+};
+
 export function getPinterestAutoSyncCooldownMs(tier: SubscriptionTier) {
   return tier === "premium" ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000;
 }
 
 export function formatPinterestAutoSyncFrequency(tier: SubscriptionTier) {
   return tier === "premium" ? "every 10m" : "every 24h";
+}
+
+function getPinterestSectionName(pin: Awaited<ReturnType<typeof fetchAllPins>>[number]) {
+  const sectionCandidate = pin.board_section;
+
+  if (sectionCandidate && typeof sectionCandidate === "object" && "name" in sectionCandidate) {
+    const name = sectionCandidate.name;
+    return typeof name === "string" && name.trim() ? name.trim() : null;
+  }
+
+  const fallbackCandidates = [
+    pin.board_section_name,
+    pin.section_name,
+    pin.board_section_title,
+  ];
+
+  for (const candidate of fallbackCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+}
+
+function collectPinterestSections(pinRecords: Awaited<ReturnType<typeof fetchAllPins>>) {
+  const sections = new Map<string, PinterestSectionSummary>();
+
+  for (const pin of pinRecords) {
+    const sectionId = pin.board_section_id?.trim();
+    if (!sectionId) {
+      continue;
+    }
+
+    if (sections.has(sectionId)) {
+      continue;
+    }
+
+    const name = getPinterestSectionName(pin);
+    sections.set(sectionId, {
+      id: sectionId,
+      name: name ?? sectionId,
+      rawJson: JSON.stringify({
+        id: sectionId,
+        name: name ?? sectionId,
+      }),
+    });
+  }
+
+  return [...sections.values()];
 }
 
 export function getNextPinterestAutoSyncEligibleAt(args: {
@@ -319,10 +378,15 @@ export async function syncBoard(
         whereEq(table.householdId, options.householdId),
       columns: {
         pinId: true,
+        recipeId: true,
       },
     });
     const existingRecipePinIds = new Set(existingRecipes.map((row) => row.pinId));
+    const existingRecipeIdsByPinId = new Map(
+      existingRecipes.map((row) => [row.pinId, row.recipeId]),
+    );
     const newRecipeIds: string[] = [];
+    const sections = collectPinterestSections(pinRecords);
 
     if (options.syncEnabled !== undefined || options.boardName !== undefined) {
       await db.insert(boardSyncSubscriptions)
@@ -367,6 +431,85 @@ export async function syncBoard(
         },
       })
       .run();
+
+    const boardFolder = await db.insert(recipeFolders)
+      .values({
+        householdId: options.householdId,
+        parentFolderId: null,
+        source: PINTEREST_FOLDER_SOURCE,
+        sourceType: "board",
+        pinterestBoardId,
+        pinterestSectionId: null,
+        name: options.boardName ?? null,
+        rawJson: JSON.stringify({ id: pinterestBoardId, name: options.boardName ?? null }),
+        lastSyncedAt: syncNow,
+        createdAt: syncNow,
+        updatedAt: syncNow,
+      })
+      .onConflictDoUpdate({
+        target: [
+          recipeFolders.householdId,
+          recipeFolders.source,
+          recipeFolders.sourceType,
+          recipeFolders.pinterestBoardId,
+        ],
+        set: {
+          parentFolderId: null,
+          name: options.boardName ?? recipeFolders.name,
+          rawJson: JSON.stringify({ id: pinterestBoardId, name: options.boardName ?? null }),
+          lastSyncedAt: syncNow,
+          updatedAt: syncNow,
+        },
+      })
+      .returning()
+      .get();
+
+    if (!boardFolder) {
+      throw new Error(`Failed to upsert Pinterest board folder for ${pinterestBoardId}.`);
+    }
+
+    const folderIdsBySectionId = new Map<string, string>();
+
+    for (const section of sections) {
+      const sectionFolder = await db.insert(recipeFolders)
+        .values({
+          householdId: options.householdId,
+          parentFolderId: boardFolder.folderId,
+          source: PINTEREST_FOLDER_SOURCE,
+          sourceType: "section",
+          pinterestBoardId,
+          pinterestSectionId: section.id,
+          name: section.name,
+          rawJson: section.rawJson,
+          lastSyncedAt: syncNow,
+          createdAt: syncNow,
+          updatedAt: syncNow,
+        })
+        .onConflictDoUpdate({
+          target: [
+            recipeFolders.householdId,
+            recipeFolders.source,
+            recipeFolders.sourceType,
+            recipeFolders.pinterestSectionId,
+          ],
+          set: {
+            parentFolderId: boardFolder.folderId,
+            pinterestBoardId,
+            name: section.name,
+            rawJson: section.rawJson,
+            lastSyncedAt: syncNow,
+            updatedAt: syncNow,
+          },
+        })
+        .returning()
+        .get();
+
+      if (!sectionFolder) {
+        throw new Error(`Failed to upsert Pinterest section folder for ${section.id}.`);
+      }
+
+      folderIdsBySectionId.set(section.id, sectionFolder.folderId);
+    }
 
     for (const pin of pinRecords) {
       const pinKey = toPinKey(options.householdId, pin.id);
@@ -423,6 +566,7 @@ export async function syncBoard(
         if (insertedRecipe?.recipeId) {
           newRecipeIds.push(insertedRecipe.recipeId);
           existingRecipePinIds.add(pinKey);
+          existingRecipeIdsByPinId.set(pinKey, insertedRecipe.recipeId);
         }
       } else {
         const recipeSeed = {
@@ -448,6 +592,37 @@ export async function syncBoard(
           })
           .run();
       }
+
+      const recipeId = existingRecipeIdsByPinId.get(pinKey);
+      if (!recipeId) {
+        continue;
+      }
+
+      const targetFolderId = pin.board_section_id
+        ? folderIdsBySectionId.get(pin.board_section_id) ?? boardFolder.folderId
+        : boardFolder.folderId;
+
+      await db.insert(recipeFolderMemberships)
+        .values({
+          householdId: options.householdId,
+          recipeId,
+          folderId: targetFolderId,
+          source: PINTEREST_FOLDER_SOURCE,
+          createdAt: syncNow,
+          updatedAt: syncNow,
+        })
+        .onConflictDoUpdate({
+          target: [
+            recipeFolderMemberships.householdId,
+            recipeFolderMemberships.recipeId,
+            recipeFolderMemberships.source,
+          ],
+          set: {
+            folderId: targetFolderId,
+            updatedAt: syncNow,
+          },
+        })
+        .run();
 
     }
 

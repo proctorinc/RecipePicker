@@ -5,7 +5,8 @@ import { requireHouseholdContext } from "@/lib/server/auth";
 import { getRecipeParseJobSummaries } from "@/lib/server/queries";
 import {
   createRecipeParseJob,
-  runRecipeParseJobWorker,
+  resolveRecipeParseJobWorkerOrigin,
+  scheduleRecipeParseJobWorker,
 } from "@/lib/server/recipe-parse-jobs";
 import {
   runBackgroundJob,
@@ -57,6 +58,10 @@ export const POST = withRouteLogging(
     }
 
     after(async () => {
+      const origin = resolveRecipeParseJobWorkerOrigin({
+        requestUrl: request.url,
+      });
+
       await runBackgroundJob({
         name: "background.recipe_parse_job",
         target: {
@@ -64,9 +69,10 @@ export const POST = withRouteLogging(
           jobId: result.jobId,
         },
         fn: async () =>
-          runRecipeParseJobWorker({
+          scheduleRecipeParseJobWorker({
             jobId: result.jobId,
             workerToken: result.workerToken,
+            origin,
           }),
       });
     });

@@ -18,6 +18,10 @@ export type PinterestPin = {
   id: string;
   board_id?: string | null;
   board_section_id?: string | null;
+  board_section?: { id?: string | null; name?: string | null } | null;
+  board_section_name?: string | null;
+  board_section_title?: string | null;
+  section_name?: string | null;
   title?: string | null;
   description?: string | null;
   link?: string | null;

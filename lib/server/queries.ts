@@ -1,5 +1,5 @@
 import { clerkClient } from "@clerk/nextjs/server";
-import { and, asc, count, desc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt } from "drizzle-orm";
 
 import { getCurrentUserAccess, resolveFeedCardHref } from "@/lib/server/access";
 import {
@@ -17,6 +17,8 @@ import {
   householdRecipeEvents,
   householdRecipeInstructions,
   householdRecipeReviews,
+  recipeFolderMemberships,
+  recipeFolders,
 } from "@/lib/server/db";
 import {
   getCanonicalIngredientOptionsForHousehold,
@@ -48,6 +50,7 @@ import type {
   IngredientReviewQueuePageView,
   IngredientReviewSuggestionView,
   RecipeDetailView,
+  RecipeFolderTreeNode,
   RecipeHistoryDayView,
   RecipeHistoryEventView,
   RecipeHistoryPageView,
@@ -69,6 +72,7 @@ type FeedCardRow = FeedPinCard & {
 
 const DEFAULT_FEED_PAGE_SIZE = 50;
 const MAX_FEED_PAGE_SIZE = 100;
+const PINTEREST_FOLDER_SOURCE = "pinterest";
 
 export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
   const [context, appAccess] = await Promise.all([
@@ -172,6 +176,16 @@ export async function getRecipeDetail(
               },
             },
           },
+          folderMemberships: {
+            where: (table, { eq }) => eq(table.source, PINTEREST_FOLDER_SOURCE),
+            with: {
+              folder: {
+                with: {
+                  parentFolder: true,
+                },
+              },
+            },
+          },
           recipeInstructions: {
             with: {
               ingredients: {
@@ -204,9 +218,11 @@ export async function getRecipeDetail(
       .map((review) => toRecipeReviewView(review, row, reviewerNames, context))
       .sort(compareReviewsByDate);
     const aggregate = getRecipeReviewAggregate(row.reviews);
+    const folderPath = buildRecipeFolderPath(row.folderMemberships[0]?.folder ?? null);
 
     return {
       recipeId: row.recipeId,
+      folderPath,
       pin: row.pin,
       title:
         row.title ??
@@ -266,6 +282,114 @@ export async function getRecipeDetail(
         ? `${latestExtraction.status.replaceAll("_", " ")}${latestExtraction.method ? ` via ${latestExtraction.method}` : ""}`
         : null,
     };
+  } finally {
+    await sqlite.close();
+  }
+}
+
+type FolderPathRecord = {
+  folderId: string;
+  name: string | null;
+  sourceType: string;
+  parentFolder: {
+    folderId: string;
+    name: string | null;
+    sourceType: string;
+  } | null;
+};
+
+function buildRecipeFolderPath(folder: FolderPathRecord | null) {
+  if (!folder) {
+    return [];
+  }
+
+  const path: RecipeDetailView["folderPath"] = [
+    {
+      folderId: folder.folderId,
+      name: folder.name,
+      sourceType: folder.sourceType === "section" ? "section" : "board",
+    },
+  ];
+
+  if (folder.parentFolder) {
+    path.unshift({
+      folderId: folder.parentFolder.folderId,
+      name: folder.parentFolder.name,
+      sourceType: folder.parentFolder.sourceType === "section" ? "section" : "board",
+    });
+  }
+
+  return path;
+}
+
+export async function getPinterestRecipeFolderTree(): Promise<RecipeFolderTreeNode[]> {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const [folders, membershipCounts] = await Promise.all([
+      db.query.recipeFolders.findMany({
+        where: (table, { and, eq }) =>
+          and(
+            eq(table.householdId, context.householdId),
+            eq(table.source, PINTEREST_FOLDER_SOURCE),
+        ),
+        orderBy: (table, { asc }) => [asc(table.sourceType), asc(table.name)],
+      }),
+      db.query.recipeFolderMemberships.findMany({
+        where: (table, { and, eq }) =>
+          and(
+            eq(table.householdId, context.householdId),
+            eq(table.source, PINTEREST_FOLDER_SOURCE),
+          ),
+        columns: {
+          folderId: true,
+        },
+      }),
+    ]);
+
+    const recipeCountByFolderId = new Map<string, number>();
+    for (const membership of membershipCounts) {
+      recipeCountByFolderId.set(
+        membership.folderId,
+        (recipeCountByFolderId.get(membership.folderId) ?? 0) + 1,
+      );
+    }
+    const nodesById = new Map<string, RecipeFolderTreeNode>();
+
+    for (const folder of folders) {
+      nodesById.set(folder.folderId, {
+        folderId: folder.folderId,
+        name: folder.name,
+        parentFolderId: folder.parentFolderId,
+        sourceType: folder.sourceType === "section" ? "section" : "board",
+        pinterestBoardId: folder.pinterestBoardId,
+        pinterestSectionId: folder.pinterestSectionId,
+        recipeCount: recipeCountByFolderId.get(folder.folderId) ?? 0,
+        children: [],
+      });
+    }
+
+    const roots: RecipeFolderTreeNode[] = [];
+
+    for (const node of nodesById.values()) {
+      if (node.parentFolderId) {
+        const parent = nodesById.get(node.parentFolderId);
+        if (parent) {
+          parent.children.push(node);
+          continue;
+        }
+      }
+
+      roots.push(node);
+    }
+
+    for (const node of nodesById.values()) {
+      node.children.sort((left, right) => (left.name ?? "").localeCompare(right.name ?? ""));
+    }
+
+    roots.sort((left, right) => (left.name ?? "").localeCompare(right.name ?? ""));
+    return roots;
   } finally {
     await sqlite.close();
   }
@@ -1661,6 +1785,7 @@ function toRecipeHistoryEventView(
     eventId: string;
     recipeId: string;
     date: string;
+    createdByClerkUserId: string | null;
     recipe: {
       recipeId: string;
       title: string | null;
@@ -1733,6 +1858,11 @@ function toRecipeHistoryEventView(
     detailText,
     review,
     canAddReview: event.date <= today && !review,
+    canDelete: canManageRecipeEvent(
+      event.createdByClerkUserId,
+      event.review,
+      context,
+    ),
   };
 }
 
@@ -1762,6 +1892,28 @@ function canManageReview(
   return Boolean(
     reviewedByClerkUserId && reviewedByClerkUserId === context.clerkUserId,
   );
+}
+
+function canManageRecipeEvent(
+  createdByClerkUserId: string | null,
+  review: {
+    reviewedByClerkUserId: string | null;
+  } | null,
+  context: Awaited<ReturnType<typeof requireHouseholdContext>>,
+) {
+  if (context.role === "owner") {
+    return true;
+  }
+
+  if (!createdByClerkUserId || createdByClerkUserId !== context.clerkUserId) {
+    return false;
+  }
+
+  if (!review) {
+    return true;
+  }
+
+  return review.reviewedByClerkUserId === context.clerkUserId;
 }
 
 function getReviewerName(

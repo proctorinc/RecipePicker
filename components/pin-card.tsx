@@ -60,11 +60,11 @@ export function PinCard({
               />
             </>
           ) : null}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
+          <p className="absolute pr-2 line-clamp-2 font-bold text-sm font-serif z-50 bottom-3 left-2 text-primary-foreground/90">
+            {card.title}
+          </p>
+          <div className="absolute inset-0 bg-gradient-to-t from-primary/80 via-primary/10 to-transparent" />
           {card.reviewCount > 0 ? (
-            // <div className="absolute bottom-3 right-3 flex justify-end">
-            //   <FeedCardStars value={card.averageRating ?? 0} />
-            // </div>
             <div className="absolute top-3 right-3 justify-end gap-1 px-2 py-1 text-sm flex items-center rounded-full bg-primary/90 text-primary-foreground">
               {card.averageRating} <Star className="size-3" />
             </div>
@@ -72,30 +72,5 @@ export function PinCard({
         </div>
       </Card>
     </AppTransitionLink>
-  );
-}
-
-function FeedCardStars({ value }: { value: number }) {
-  const normalizedValue = Math.max(0, Math.min(5, Math.round(value * 2) / 2));
-  const visibleStarCount = Math.ceil(normalizedValue);
-
-  return (
-    <div className="flex items-center justify-end gap-1">
-      {Array.from({ length: visibleStarCount }, (_, index) => {
-        const fillPercent =
-          Math.max(0, Math.min(1, normalizedValue - index)) * 100;
-
-        return (
-          <div key={index} className="relative h-[18px] w-[18px]">
-            <span
-              className="absolute inset-y-0 left-0 overflow-hidden text-lg leading-none text-white/70"
-              style={{ width: `${fillPercent}%` }}
-            >
-              ★
-            </span>
-          </div>
-        );
-      })}
-    </div>
   );
 }

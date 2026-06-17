@@ -11,6 +11,8 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
+  Check,
+  CookingPot,
   Plus,
   Search,
 } from "lucide-react";
@@ -18,6 +20,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
+import { HistoryEventDeleteButton } from "@/components/history-event-delete-button";
 import { useAppRouteTransition } from "@/components/app-route-transition";
 import { RecipeReviewDialog } from "@/components/recipe-review-dialog";
 import { ReviewDeleteButton } from "@/components/review-delete-button";
@@ -31,7 +34,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { createRecipeEventAction } from "@/lib/actions/operations";
+import { createRecipeEventsAction } from "@/lib/actions/operations";
 import {
   cn,
   formatDay,
@@ -64,7 +67,7 @@ export function RecipeHistoryCalendar({
   fromRecipe?: boolean;
 }) {
   const [dayDialogDate, setDayDialogDate] = useState<string | null>(null);
-  const [pickerDate, setPickerDate] = useState<string | null>(null);
+  const [recipePickerOpen, setRecipePickerOpen] = useState(false);
   const [reviewTarget, setReviewTarget] =
     useState<ReviewDialogTarget | null>(null);
   const [editingReview, setEditingReview] =
@@ -74,15 +77,16 @@ export function RecipeHistoryCalendar({
   const [searchedRecipeOptions, setSearchedRecipeOptions] = useState<
     RecipeHistoryRecipeOption[] | null
   >(null);
+  const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
   const { startNavigation } = useAppRouteTransition();
   const today = getTodayDayString();
-  const historyBaseHref = history.selectedRecipe
+  const isSelectionMode = Boolean(history.selectedRecipe);
+  const postCreateHistoryHref = history.selectedRecipe
     ? `/history?month=${encodeURIComponent(history.month)}&recipeId=${encodeURIComponent(history.selectedRecipe.recipeId)}${fromRecipe ? "&from=recipe" : ""}`
     : `/history?month=${encodeURIComponent(history.month)}`;
-  const postCreateHistoryHref = `/history?month=${encodeURIComponent(history.month)}`;
   const recipeOptionsById = useMemo(
     () =>
       new Map(
@@ -91,12 +95,27 @@ export function RecipeHistoryCalendar({
     [history.recipeOptions],
   );
   const selectedDay = useMemo(
-    () =>
-      history.days.find((day) => day.date === dayDialogDate) ??
-      history.days.find((day) => day.date === pickerDate) ??
-      null,
-    [dayDialogDate, history.days, pickerDate],
+    () => history.days.find((day) => day.date === dayDialogDate) ?? null,
+    [dayDialogDate, history.days],
   );
+  const selectedDatesSorted = useMemo(
+    () => [...selectedDates].sort((left, right) => left.localeCompare(right)),
+    [selectedDates],
+  );
+  const selectedDateSet = useMemo(() => new Set(selectedDates), [selectedDates]);
+  const selectedRecipe = history.selectedRecipe;
+
+  useEffect(() => {
+    setSelectedDates([]);
+  }, [history.month, history.selectedRecipe?.recipeId]);
+
+  useEffect(() => {
+    if (!isSelectionMode) {
+      return;
+    }
+
+    setDayDialogDate(null);
+  }, [isSelectionMode]);
 
   useEffect(() => {
     const normalized = deferredSearchValue.trim();
@@ -178,26 +197,37 @@ export function RecipeHistoryCalendar({
   }, [deferredSearchValue, history.recipeOptions, searchedRecipeOptions]);
 
   function openDay(day: RecipeHistoryDayView) {
+    if (isSelectionMode) {
+      toggleSelectedDate(day.date);
+      return;
+    }
+
     if (day.events.length > 0) {
       setDayDialogDate(day.date);
-      return;
     }
-
-    if (history.selectedRecipe) {
-      createEvent(history.selectedRecipe, day.date);
-      return;
-    }
-
-    setPickerDate(day.date);
   }
 
-  function openAddRecipe(date: string) {
-    setDayDialogDate(null);
-    setPickerDate(date);
+  function toggleSelectedDate(date: string) {
+    setSelectedDates((current) =>
+      current.includes(date)
+        ? current.filter((entry) => entry !== date)
+        : [...current, date],
+    );
+  }
+
+  function openRecipePicker() {
     setSearchValue("");
+    setRecipePickerOpen(true);
   }
 
   function handleReviewSuccess() {
+    router.refresh();
+  }
+
+  function handleEventDeleteSuccess() {
+    setReviewTarget(null);
+    setEditingReview(null);
+    setDayDialogDate(null);
     router.refresh();
   }
 
@@ -215,39 +245,51 @@ export function RecipeHistoryCalendar({
     return `/recipe/${encodeURIComponent(recipeId)}?reviewRecipeId=${encodeURIComponent(recipeId)}&historyMonth=${encodeURIComponent(history.month)}`;
   }
 
-  function createEvent(recipe: RecipeHistoryRecipeOption, date: string) {
+  function createEventsForSelectedDates(recipe: RecipeHistoryRecipeOption) {
+    if (selectedDatesSorted.length === 0) {
+      return;
+    }
+
     startTransition(async () => {
       const formData = new FormData();
       formData.set("recipeId", recipe.recipeId);
-      formData.set("date", date);
+      formData.set("dates", JSON.stringify(selectedDatesSorted));
 
-      const result = await createRecipeEventAction(
+      const result = await createRecipeEventsAction(
         { status: "idle", message: "" },
         formData,
       );
 
       if (result.status === "success") {
         toast.success(result.message);
-        setPickerDate(null);
+        setSelectedDates([]);
         setSearchValue("");
         startNavigation(postCreateHistoryHref);
         router.replace(postCreateHistoryHref);
         router.refresh();
 
-        if (date <= today && typeof result.data?.eventId === "string") {
+        const firstEventId =
+          typeof result.data?.firstEventId === "string"
+            ? result.data.firstEventId
+            : null;
+        const firstEventDate =
+          typeof result.data?.firstEventDate === "string"
+            ? result.data.firstEventDate
+            : null;
+
+        if (firstEventId && firstEventDate && firstEventDate <= today) {
           setDayDialogDate(null);
           setReviewTarget({
-            eventId: result.data.eventId,
+            eventId: firstEventId,
             recipeId: recipe.recipeId,
             recipeTitle: recipe.recipeTitle,
-            date,
+            date: firstEventDate,
             dismissLabel: "Skip review",
           });
           return;
         }
 
         setReviewTarget(null);
-        setDayDialogDate(date);
         return;
       }
 
@@ -255,18 +297,75 @@ export function RecipeHistoryCalendar({
     });
   }
 
+  function buildRecipeSelectionHref(recipeId: string) {
+    return `/history?month=${encodeURIComponent(history.month)}&recipeId=${encodeURIComponent(recipeId)}${fromRecipe ? "&from=recipe" : ""}`;
+  }
+
+  function selectRecipe(recipe: RecipeHistoryRecipeOption) {
+    setSelectedDates([]);
+    setSearchValue("");
+    setRecipePickerOpen(false);
+    const href = buildRecipeSelectionHref(recipe.recipeId);
+    startNavigation(href);
+    router.replace(href);
+    router.refresh();
+  }
+
   return (
     <>
+      {isSelectionMode && selectedDatesSorted.length > 0 ? (
+        <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur">
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
+              onClick={() => setSelectedDates([])}
+              disabled={isPending}
+            >
+              Clear
+            </Button>
+            <Button
+              type="button"
+              className="flex-1"
+              disabled={isPending}
+              onClick={() => {
+                if (history.selectedRecipe) {
+                  createEventsForSelectedDates(history.selectedRecipe);
+                }
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              Add meal to {selectedDatesSorted.length}{" "}
+              {selectedDatesSorted.length === 1 ? "day" : "days"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <section className="rounded-[24px] border border-white/70 bg-white/90 p-2 shadow-soft sm:rounded-[32px] sm:p-6">
-        {history.selectedRecipe ? (
+        <div className="mb-4 flex items-center justify-end sm:mb-6">
+          <Button
+            type="button"
+            variant={isSelectionMode ? "outline" : "default"}
+            size="sm"
+            onClick={openRecipePicker}
+          >
+            <CookingPot className="h-4 w-4" />
+            {isSelectionMode ? "Change recipe" : "Find recipe"}
+          </Button>
+        </div>
+
+        {isSelectionMode && selectedRecipe ? (
           <div className="mb-4 rounded-[28px] border border-border/70 bg-secondary/20 p-4 sm:mb-6 sm:p-5">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-4">
                 <div className="relative h-16 w-16 overflow-hidden rounded-[20px] bg-secondary/40 sm:h-20 sm:w-20">
-                  {history.selectedRecipe.recipeImageUrl ? (
+                  {selectedRecipe.recipeImageUrl ? (
                     <Image
-                      src={history.selectedRecipe.recipeImageUrl}
-                      alt={history.selectedRecipe.recipeTitle}
+                      src={selectedRecipe.recipeImageUrl}
+                      alt={selectedRecipe.recipeTitle}
                       fill
                       className="object-cover"
                       sizes="80px"
@@ -278,17 +377,33 @@ export function RecipeHistoryCalendar({
                     Selected recipe
                   </p>
                   <h3 className="font-[family-name:var(--font-serif)] text-lg font-semibold sm:text-xl">
-                    {history.selectedRecipe.recipeTitle}
+                    {selectedRecipe.recipeTitle}
                   </h3>
                   <p className="text-sm text-muted-foreground">
-                    Click a day on the calendar to add this recipe to meal history.
+                    Tap one or more days on the calendar, then add this recipe in one step.
                   </p>
+                  {selectedDatesSorted.length > 0 ? (
+                    <p className="text-xs font-medium text-foreground/80">
+                      {selectedDatesSorted.length}{" "}
+                      {selectedDatesSorted.length === 1 ? "day selected" : "days selected"}
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
+                {selectedDatesSorted.length > 0 ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSelectedDates([])}
+                  >
+                    Clear selected days
+                  </Button>
+                ) : null}
                 <Button asChild type="button" variant="outline" size="sm">
                   <AppTransitionLink
-                    href={buildRecipeHref(history.selectedRecipe.recipeId)}
+                    href={buildRecipeHref(selectedRecipe.recipeId)}
                   >
                     {fromRecipe ? "Back to recipe" : "View recipe"}
                   </AppTransitionLink>
@@ -375,6 +490,9 @@ export function RecipeHistoryCalendar({
                 day.inCurrentMonth
                   ? "sm:border-border/70 bg-white/75"
                   : "sm:border-border/35 bg-muted/95 text-muted-foreground",
+                isSelectionMode &&
+                  selectedDateSet.has(day.date) &&
+                  "border-primary bg-primary/10 ring-2 ring-primary/35 sm:border-primary/70",
                 day.isToday && "border-primary/40 ring-1 ring-primary/25",
               )}
             >
@@ -398,6 +516,11 @@ export function RecipeHistoryCalendar({
                     {day.events.length}
                   </span>
                 ) : null}
+                {isSelectionMode && selectedDateSet.has(day.date) ? (
+                  <span className="absolute right-1 top-1 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm sm:right-2 sm:top-2">
+                    <Check className="h-3.5 w-3.5" />
+                  </span>
+                ) : null}
               </div>
 
               {day.events.length === 0 ? (
@@ -411,7 +534,7 @@ export function RecipeHistoryCalendar({
       </section>
 
       <Dialog
-        open={Boolean(dayDialogDate && selectedDay)}
+        open={Boolean(!isSelectionMode && dayDialogDate && selectedDay)}
         onOpenChange={(open) => {
           if (!open) {
             setDayDialogDate(null);
@@ -431,7 +554,7 @@ export function RecipeHistoryCalendar({
           </DialogHeader>
 
           <div className="space-y-4 pt-4">
-            {selectedDay?.events.map((event) => (
+          {selectedDay?.events.map((event) => (
               <article
                 key={event.eventId}
                 className="border border-border/70 bg-secondary/15 p-3 sm:p-4 rounded-2xl"
@@ -498,6 +621,12 @@ export function RecipeHistoryCalendar({
                               onSuccess={handleReviewSuccess}
                             />
                           ) : null}
+                          {event.canDelete ? (
+                            <HistoryEventDeleteButton
+                              eventId={event.eventId}
+                              onSuccess={handleEventDeleteSuccess}
+                            />
+                          ) : null}
                         </div>
                       </div>
                     ) : (
@@ -525,6 +654,12 @@ export function RecipeHistoryCalendar({
                               : "No review yet."}
                           </p>
                         )}
+                        {event.canDelete ? (
+                          <HistoryEventDeleteButton
+                            eventId={event.eventId}
+                            onSuccess={handleEventDeleteSuccess}
+                          />
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -532,60 +667,25 @@ export function RecipeHistoryCalendar({
               </article>
             ))}
           </div>
-
-          {selectedDay ? (
-            <div className="mt-4 flex justify-end sm:mt-6">
-              {history.selectedRecipe ? (
-                <Button
-                  type="button"
-                  className="h-11 w-full sm:w-auto"
-                  disabled={isPending}
-                  onClick={() => {
-                    if (history.selectedRecipe) {
-                      createEvent(history.selectedRecipe, selectedDay.date);
-                    }
-                  }}
-                >
-                  <Plus className="h-4 w-4" />
-                  {selectedDay.isFuture
-                    ? "Add planned recipe to this day"
-                    : "Add this recipe to this day"}
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  className="h-11 w-full sm:w-auto"
-                  onClick={() => openAddRecipe(selectedDay.date)}
-                >
-                  <Plus className="h-4 w-4" />
-                  {selectedDay.isFuture
-                    ? "Add planned recipe"
-                    : "Add eaten recipe"}
-                </Button>
-              )}
-            </div>
-          ) : null}
         </DialogContent>
       </Dialog>
 
       <Dialog
-        open={Boolean(pickerDate)}
+        open={recipePickerOpen}
         onOpenChange={(open) => {
           if (!open) {
-            setPickerDate(null);
             setSearchValue("");
           }
+          setRecipePickerOpen(open);
         }}
       >
         <DialogContent className="w-[min(96vw,42rem)] max-h-[92vh] overflow-y-auto p-4 sm:w-[min(92vw,42rem)] sm:p-6">
           <DialogHeader>
             <DialogTitle className="text-xl sm:text-2xl">
-              {pickerDate && pickerDate > today
-                ? "Plan recipe"
-                : "Add eaten recipe"}
+              Choose a recipe
             </DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              {pickerDate ? formatDay(pickerDate) : "Choose a date"}
+              Pick a recipe to place on one or more days in this month.
             </DialogDescription>
           </DialogHeader>
 
@@ -604,12 +704,8 @@ export function RecipeHistoryCalendar({
               <button
                 key={recipe.recipeId}
                 type="button"
-                disabled={!pickerDate || isPending}
-                onClick={() => {
-                  if (pickerDate) {
-                    createEvent(recipe, pickerDate);
-                  }
-                }}
+                disabled={isPending}
+                onClick={() => selectRecipe(recipe)}
                 className="group relative aspect-square overflow-hidden rounded-[24px] border border-border/70 bg-secondary/25 text-left"
               >
                 {recipe.recipeImageUrl ? (

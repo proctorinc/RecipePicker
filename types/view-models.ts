@@ -63,6 +63,7 @@ export type RecipeHistoryEventView = {
   detailText: string | null;
   review: RecipeReviewView | null;
   canAddReview: boolean;
+  canDelete: boolean;
 };
 
 export type RecipeHistoryDayView = {
@@ -76,6 +77,11 @@ export type RecipeHistoryDayView = {
 
 export type RecipeDetailView = {
   recipeId: string;
+  folderPath: Array<{
+    folderId: string;
+    name: string | null;
+    sourceType: "board" | "section";
+  }>;
   pin: {
     link: string | null;
     householdId: string;
@@ -131,6 +137,17 @@ export type RecipeDetailView = {
     text: string;
   }>;
   extractionSummary: string | null;
+};
+
+export type RecipeFolderTreeNode = {
+  folderId: string;
+  name: string | null;
+  parentFolderId: string | null;
+  sourceType: "board" | "section";
+  pinterestBoardId: string;
+  pinterestSectionId: string | null;
+  recipeCount: number;
+  children: RecipeFolderTreeNode[];
 };
 
 export type CanonicalIngredientOption = {

@@ -28,6 +28,7 @@ Starter templates live in:
 
 Shared app settings include:
 
+- `APP_URL`
 - `CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
 - `PINTEREST_APP_ID`
@@ -38,6 +39,8 @@ Shared app settings include:
 - `LOG_INCLUDE_DEBUG_SQLITE_TARGETS`
 
 The default Pinterest callback route is `http://localhost:3000/api/pinterest/callback`.
+
+`APP_URL` should be the full origin for the deployed app, for example `http://localhost:3000` in development or `https://your-app.example.com` in production. It is used by server actions to re-enqueue background recipe parse chunks through the internal worker route.
 
 Database settings depend on the environment:
 

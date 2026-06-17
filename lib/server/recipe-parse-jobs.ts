@@ -15,6 +15,9 @@ const RECIPE_PARSE_CHUNK_SIZE = 20;
 const RECIPE_PARSE_CONCURRENCY = 3;
 const RECIPE_PARSE_LEASE_MS = 90 * 1000;
 const RECIPE_PARSE_STALE_HEARTBEAT_MS = 2 * 60 * 1000;
+const RECIPE_PARSE_JOB_WORKER_PATH = "/api/recipe-parse-jobs/worker";
+const RECIPE_PARSE_JOB_SCHEDULING_ERROR =
+  "The worker finished a chunk but could not schedule the next one. Resume to continue parsing.";
 
 export type RecipeParseJobStatus =
   | "queued"
@@ -275,6 +278,90 @@ export async function resumeRecipeParseJob(input: {
     };
   } finally {
     await sqlite.close();
+  }
+}
+
+export function resolveRecipeParseJobWorkerOrigin(input: {
+  requestUrl?: string | null;
+  appUrl?: string | null;
+}) {
+  const candidate = input.requestUrl?.trim() || input.appUrl?.trim();
+
+  if (!candidate) {
+    throw new Error("APP_URL is required to schedule recipe parse jobs from server actions.");
+  }
+
+  try {
+    return new URL(candidate).origin;
+  } catch {
+    throw new Error(`Invalid recipe parse job origin: ${candidate}`);
+  }
+}
+
+export async function enqueueRecipeParseJobWorker(input: {
+  jobId: string;
+  workerToken: string;
+  origin: string;
+}) {
+  const response = await fetch(new URL(RECIPE_PARSE_JOB_WORKER_PATH, input.origin), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-recipe-parse-job-token": input.workerToken,
+    },
+    body: JSON.stringify({
+      jobId: input.jobId,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    const detail = body.trim().slice(0, 200);
+    throw new Error(
+      detail
+        ? `Worker enqueue failed with HTTP ${response.status}: ${detail}`
+        : `Worker enqueue failed with HTTP ${response.status}.`,
+    );
+  }
+}
+
+export async function markRecipeParseJobSchedulingFailure(input: {
+  jobId: string;
+  error: unknown;
+}) {
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const now = new Date().toISOString();
+    const detail = input.error instanceof Error ? input.error.message : String(input.error);
+    const nextError = `${RECIPE_PARSE_JOB_SCHEDULING_ERROR} ${detail}`.trim();
+
+    await db.update(householdRecipeParseJobs)
+      .set({
+        status: "queued",
+        lastError: nextError,
+        updatedAt: now,
+      })
+      .where(eq(householdRecipeParseJobs.jobId, input.jobId))
+      .run();
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function scheduleRecipeParseJobWorker(input: {
+  jobId: string;
+  workerToken: string;
+  origin: string;
+}) {
+  try {
+    await enqueueRecipeParseJobWorker(input);
+  } catch (error) {
+    await markRecipeParseJobSchedulingFailure({
+      jobId: input.jobId,
+      error,
+    });
+    throw error;
   }
 }
 

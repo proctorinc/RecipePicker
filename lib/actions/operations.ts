@@ -51,8 +51,9 @@ import {
 import {
   cancelRecipeParseJob,
   createRecipeParseJob,
+  resolveRecipeParseJobWorkerOrigin,
   resumeRecipeParseJob,
-  runRecipeParseJobWorker,
+  scheduleRecipeParseJobWorker,
 } from "@/lib/server/recipe-parse-jobs";
 import { getRecipeHouseholdPinId } from "@/lib/server/queries";
 import { extractRecipes } from "@/lib/server/extract";
@@ -124,6 +125,10 @@ export const rerunRecipesAction = withActionLogging(
     }
 
     after(async () => {
+      const origin = resolveRecipeParseJobWorkerOrigin({
+        appUrl: process.env.APP_URL,
+      });
+
       await runBackgroundJob({
         name: "background.recipe_parse_job",
         target: {
@@ -131,9 +136,10 @@ export const rerunRecipesAction = withActionLogging(
           jobId: result.jobId,
         },
         fn: async () =>
-          runRecipeParseJobWorker({
+          scheduleRecipeParseJobWorker({
             jobId: result.jobId,
             workerToken: result.workerToken,
+            origin,
           }),
       });
     });
@@ -215,6 +221,10 @@ export const resumeRecipeParseJobAction = withActionLogging(
       }
 
       after(async () => {
+        const origin = resolveRecipeParseJobWorkerOrigin({
+          appUrl: process.env.APP_URL,
+        });
+
         await runBackgroundJob({
           name: "background.recipe_parse_job",
           target: {
@@ -222,9 +232,10 @@ export const resumeRecipeParseJobAction = withActionLogging(
             jobId,
           },
           fn: async () =>
-            runRecipeParseJobWorker({
+            scheduleRecipeParseJobWorker({
               jobId,
               workerToken: result.workerToken,
+              origin,
             }),
         });
       });
@@ -1145,6 +1156,25 @@ export const createRecipeEventAction = withActionLogging(
         return { status: "error", message: "Recipe was not found." };
       }
 
+      const existingEvent = await db.query.householdRecipeEvents.findFirst({
+        where: (table, { and, eq }) =>
+          and(
+            eq(table.householdId, context.householdId),
+            eq(table.recipeId, recipe.recipeId),
+            eq(table.date, date),
+          ),
+        columns: {
+          eventId: true,
+        },
+      });
+
+      if (existingEvent) {
+        return {
+          status: "error",
+          message: "This recipe is already on that day.",
+        };
+      }
+
       eventId = await insertRecipeEvent(db, {
         householdId: context.householdId,
         recipeId: recipe.recipeId,
@@ -1175,6 +1205,137 @@ export const createRecipeEventAction = withActionLogging(
       },
       result: {
         date: String(formData.get("date") ?? "").trim() || null,
+      },
+    }),
+  },
+);
+
+export const createRecipeEventsAction = withActionLogging(
+  "action.create_recipe_events",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const recipeId = String(formData.get("recipeId") ?? "").trim();
+    const rawDates = String(formData.get("dates") ?? "").trim();
+
+    if (!recipeId) {
+      return { status: "error", message: "Recipe ID is required." };
+    }
+
+    let dates: string[] = [];
+
+    try {
+      const parsed = JSON.parse(rawDates);
+      dates = Array.isArray(parsed)
+        ? parsed.filter(
+            (value): value is string =>
+              typeof value === "string" && isValidDayString(value),
+          )
+        : [];
+    } catch {
+      return { status: "error", message: "Choose valid dates for this meal." };
+    }
+
+    dates = Array.from(new Set(dates)).sort((left, right) =>
+      left.localeCompare(right),
+    );
+    let datesToCreate: string[] = [];
+
+    if (dates.length === 0) {
+      return { status: "error", message: "Choose at least one day." };
+    }
+
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+      const now = new Date().toISOString();
+      let firstReviewEventId: string | null = null;
+      let firstReviewDate: string | null = null;
+
+      try {
+        const recipe = await db.query.householdRecipes.findFirst({
+          where: (table, { and, eq }) =>
+            and(
+              eq(table.recipeId, recipeId),
+              eq(table.householdId, context.householdId),
+            ),
+          columns: {
+            recipeId: true,
+            pinId: true,
+          },
+        });
+
+        if (!recipe) {
+          return { status: "error", message: "Recipe was not found." };
+        }
+
+        const existingEvents = await db.query.householdRecipeEvents.findMany({
+          where: (table, { and, eq, inArray }) =>
+            and(
+              eq(table.householdId, context.householdId),
+              eq(table.recipeId, recipe.recipeId),
+              inArray(table.date, dates),
+            ),
+          columns: {
+            date: true,
+          },
+        });
+        const existingDates = new Set(existingEvents.map((event) => event.date));
+        datesToCreate = dates.filter((date) => !existingDates.has(date));
+
+        if (datesToCreate.length === 0) {
+          return {
+            status: "error",
+            message:
+              dates.length === 1
+                ? "This recipe is already on that day."
+                : "This recipe is already on all of those days.",
+          };
+        }
+
+        for (const date of datesToCreate) {
+          const eventId = await insertRecipeEvent(db, {
+            householdId: context.householdId,
+            recipeId: recipe.recipeId,
+            date,
+            clerkUserId: context.clerkUserId,
+            now,
+          });
+
+          if (!firstReviewEventId && date <= getTodayDayString()) {
+            firstReviewEventId = eventId;
+            firstReviewDate = date;
+          }
+        }
+      } finally {
+        await sqlite.close();
+      }
+
+      revalidateAll(recipeScopedPaths(undefined, recipeId));
+
+      return {
+        status: "success",
+        message:
+          datesToCreate.length === 1
+            ? datesToCreate[0]! > getTodayDayString()
+              ? "Planned recipe added to the calendar."
+              : "Meal added to history."
+            : `Recipe added to ${datesToCreate.length} days.`,
+        data: {
+          firstEventId: firstReviewEventId,
+          firstEventDate: firstReviewDate,
+          dayCount: datesToCreate.length,
+        },
+      };
+    } catch (error) {
+      return toErrorState(error, "Unable to save these recipe events.");
+    }
+  },
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+      },
+      result: {
+        dayCount: parseJsonStringArrayCount(formData.get("dates")),
       },
     }),
   },
@@ -1460,6 +1621,73 @@ export const deleteRecipeReviewAction = withActionLogging(
   },
 );
 
+export const deleteRecipeEventAction = withActionLogging(
+  "action.delete_recipe_event",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const eventId = String(formData.get("eventId") ?? "").trim();
+
+    if (!eventId) {
+      return { status: "error", message: "Event ID is required." };
+    }
+
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+
+      try {
+        const event = await db.query.householdRecipeEvents.findFirst({
+          where: (table, { and, eq }) =>
+            and(
+              eq(table.eventId, eventId),
+              eq(table.householdId, context.householdId),
+            ),
+          with: {
+            review: true,
+          },
+        });
+
+        if (!event) {
+          return { status: "error", message: "Meal history entry was not found." };
+        }
+
+        if (!canManageRecipeEvent(context, event.createdByClerkUserId, event.review)) {
+          return {
+            status: "error",
+            message: "You do not have permission to remove this meal history entry.",
+          };
+        }
+
+        if (event.review) {
+          await db.delete(householdRecipeReviews)
+            .where(eq(householdRecipeReviews.reviewId, event.review.reviewId))
+            .run();
+        }
+
+        await db.delete(householdRecipeEvents)
+          .where(eq(householdRecipeEvents.eventId, eventId))
+          .run();
+
+        revalidateAll(recipeScopedPaths(undefined, event.recipeId));
+        return {
+          status: "success",
+          message: "Meal history entry removed.",
+        };
+      } finally {
+        await sqlite.close();
+      }
+    } catch (error) {
+      return toErrorState(error, "Unable to remove this meal history entry.");
+    }
+  },
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        eventId: String(formData.get("eventId") ?? "").trim() || null,
+      },
+    }),
+  },
+);
+
 type ReviewMode = "match_existing" | "create_new";
 type RecipeIngredientInput = { id: string; originalText: string; notes: string | null };
 type RecipeStepInput = { id: string; section: string | null; text: string };
@@ -1723,6 +1951,28 @@ function canManageRecipeReview(
   reviewedByClerkUserId: string | null,
 ) {
   return context.role === "owner" || reviewedByClerkUserId === context.clerkUserId;
+}
+
+function canManageRecipeEvent(
+  context: Awaited<ReturnType<typeof requireHouseholdContext>>,
+  createdByClerkUserId: string | null,
+  review: {
+    reviewedByClerkUserId: string | null;
+  } | null,
+) {
+  if (context.role === "owner") {
+    return true;
+  }
+
+  if (!createdByClerkUserId || createdByClerkUserId !== context.clerkUserId) {
+    return false;
+  }
+
+  if (!review) {
+    return true;
+  }
+
+  return review.reviewedByClerkUserId === context.clerkUserId;
 }
 
 function isAiProvider(value: string): value is AiProvider {

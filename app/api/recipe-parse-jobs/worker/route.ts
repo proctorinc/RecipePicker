@@ -1,7 +1,11 @@
 import { after } from "next/server";
 import { NextResponse } from "next/server";
 
-import { runRecipeParseJobWorker } from "@/lib/server/recipe-parse-jobs";
+import {
+  resolveRecipeParseJobWorkerOrigin,
+  runRecipeParseJobWorker,
+  scheduleRecipeParseJobWorker,
+} from "@/lib/server/recipe-parse-jobs";
 import { runBackgroundJob, toErrorResponse, withRouteLogging } from "@/lib/server/logger";
 
 export const maxDuration = 60;
@@ -28,15 +32,20 @@ export const POST = withRouteLogging(
 
     if (result.status === "continued") {
       after(async () => {
+        const origin = resolveRecipeParseJobWorkerOrigin({
+          requestUrl: request.url,
+        });
+
         await runBackgroundJob({
           name: "background.recipe_parse_job",
           target: {
             jobId,
           },
           fn: async () =>
-            runRecipeParseJobWorker({
+            scheduleRecipeParseJobWorker({
               jobId,
               workerToken,
+              origin,
             }),
         });
       });

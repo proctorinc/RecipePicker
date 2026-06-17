@@ -352,6 +352,69 @@ export const householdRecipes = sqliteTable(
   }),
 );
 
+export const recipeFolders = sqliteTable(
+  "recipe_folders",
+  {
+    folderId: generatedId("folder_id"),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.householdId),
+    parentFolderId: text("parent_folder_id").references((): AnySQLiteColumn => recipeFolders.folderId),
+    source: text("source").notNull(),
+    sourceType: text("source_type").notNull(),
+    pinterestBoardId: text("pinterest_board_id").notNull(),
+    pinterestSectionId: text("pinterest_section_id"),
+    name: text("name"),
+    rawJson: text("raw_json").notNull(),
+    lastSyncedAt: text("last_synced_at").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    householdIdx: index("idx_recipe_folders_household_id").on(table.householdId),
+    parentFolderIdx: index("idx_recipe_folders_parent_folder_id").on(table.parentFolderId),
+    householdBoardUniqueIdx: uniqueIndex("idx_recipe_folders_household_source_board_unique").on(
+      table.householdId,
+      table.source,
+      table.sourceType,
+      table.pinterestBoardId,
+    ),
+    householdSectionUniqueIdx: uniqueIndex("idx_recipe_folders_household_source_section_unique").on(
+      table.householdId,
+      table.source,
+      table.sourceType,
+      table.pinterestSectionId,
+    ),
+  }),
+);
+
+export const recipeFolderMemberships = sqliteTable(
+  "recipe_folder_memberships",
+  {
+    membershipId: generatedId("membership_id"),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.householdId),
+    recipeId: text("recipe_id")
+      .notNull()
+      .references(() => householdRecipes.recipeId),
+    folderId: text("folder_id")
+      .notNull()
+      .references(() => recipeFolders.folderId),
+    source: text("source").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    folderIdIdx: index("idx_recipe_folder_memberships_folder_id").on(table.folderId),
+    householdRecipeSourceUniqueIdx: uniqueIndex("idx_recipe_folder_memberships_household_recipe_source_unique").on(
+      table.householdId,
+      table.recipeId,
+      table.source,
+    ),
+  }),
+);
+
 export const householdRecipeSources = sqliteTable(
   "household_recipe_sources",
   {
@@ -789,6 +852,38 @@ export const householdRecipesRelations = relations(householdRecipes, ({ one, man
     references: [householdRecipeFeedback.recipeId],
   }),
   extractionFeedback: many(householdRecipeExtractionFeedback),
+  folderMemberships: many(recipeFolderMemberships),
+}));
+
+export const recipeFoldersRelations = relations(recipeFolders, ({ one, many }) => ({
+  household: one(households, {
+    fields: [recipeFolders.householdId],
+    references: [households.householdId],
+  }),
+  parentFolder: one(recipeFolders, {
+    fields: [recipeFolders.parentFolderId],
+    references: [recipeFolders.folderId],
+    relationName: "recipe_folder_parent",
+  }),
+  childFolders: many(recipeFolders, {
+    relationName: "recipe_folder_parent",
+  }),
+  memberships: many(recipeFolderMemberships),
+}));
+
+export const recipeFolderMembershipsRelations = relations(recipeFolderMemberships, ({ one }) => ({
+  household: one(households, {
+    fields: [recipeFolderMemberships.householdId],
+    references: [households.householdId],
+  }),
+  recipe: one(householdRecipes, {
+    fields: [recipeFolderMemberships.recipeId],
+    references: [householdRecipes.recipeId],
+  }),
+  folder: one(recipeFolders, {
+    fields: [recipeFolderMemberships.folderId],
+    references: [recipeFolders.folderId],
+  }),
 }));
 
 export const householdRecipeEventsRelations = relations(householdRecipeEvents, ({ one }) => ({
