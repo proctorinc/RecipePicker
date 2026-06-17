@@ -1,3 +1,5 @@
+import type { GetStepTools } from "inngest";
+
 import { inngest } from "@/src/inngest/client";
 import { RECIPE_PARSE_JOB_REQUESTED_EVENT } from "@/src/inngest/events";
 import { logInfo, runBackgroundJob } from "@/lib/server/logger";
@@ -6,9 +8,7 @@ import {
   processRecipeParseJobChunk,
 } from "@/lib/server/recipe-parse-jobs";
 
-type WorkflowStep = {
-  run<TResult>(id: string, fn: () => Promise<TResult>): Promise<TResult>;
-};
+type WorkflowStep = Pick<GetStepTools<typeof inngest>, "run">;
 
 export async function runRecipeParseJobWorkflow(input: {
   jobId: string;

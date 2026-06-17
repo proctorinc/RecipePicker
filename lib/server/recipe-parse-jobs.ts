@@ -37,12 +37,15 @@ function logRecipeParseJobEvent(
     error?: unknown;
   },
 ) {
+  const sanitizedData = sanitizeForLogging(input.data ?? {});
   const payload = {
     target: {
       householdId: input.householdId ?? null,
       jobId: input.jobId ?? null,
     },
-    ...sanitizeForLogging(input.data ?? {}),
+    ...(sanitizedData && typeof sanitizedData === "object" && !Array.isArray(sanitizedData)
+      ? sanitizedData
+      : {}),
   };
 
   if (level === "audit") {
