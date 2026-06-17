@@ -28,6 +28,7 @@ import { getPinImageSources, getPinImageUrl } from "@/lib/server/media";
 import { listRemotePinterestBoards } from "@/lib/server/pinterest";
 import { summarizeRecipeOps } from "@/lib/server/recipe-ops-summary";
 import { derivePinStatus } from "@/lib/server/status";
+import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
 import {
   buildCalendarDays,
   formatDay,
@@ -219,6 +220,12 @@ export async function getRecipeDetail(
       .sort(compareReviewsByDate);
     const aggregate = getRecipeReviewAggregate(row.reviews);
     const folderPath = buildRecipeFolderPath(row.folderMemberships[0]?.folder ?? null);
+    const imageSources = resolveRecipeImageSources(
+      row.imageUrl,
+      row.recipeInstructions?.imageUrl,
+      row.pin.mediaJson,
+      row.pin.rawJson,
+    );
 
     return {
       recipeId: row.recipeId,
@@ -229,10 +236,8 @@ export async function getRecipeDetail(
         row.pin.title ??
         row.recipeInstructions?.title ??
         "Untitled recipe",
-      imageUrl:
-        row.imageUrl ??
-        row.recipeInstructions?.imageUrl ??
-        getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
+      imageUrl: imageSources.imageUrl,
+      previewImageUrl: imageSources.previewImageUrl,
       description:
         row.description ??
         row.pin.description ??
@@ -434,6 +439,7 @@ export async function getRecipeHistoryPage(
         with: {
           pin: true,
           recipeInstructions: true,
+          reviews: true,
         },
         orderBy: (table, { asc: orderAsc }) => [orderAsc(table.updatedAt)],
       }),
@@ -441,21 +447,29 @@ export async function getRecipeHistoryPage(
     ]);
 
     const recipeOptions = recipeRows
-      .map(
-        (recipe) =>
-          ({
-            recipeId: recipe.recipeId,
-            recipeTitle:
-              recipe.title ??
-              recipe.pin.title ??
-              recipe.recipeInstructions?.title ??
-              "Untitled recipe",
-            recipeImageUrl:
-              recipe.imageUrl ??
-              recipe.recipeInstructions?.imageUrl ??
-              getPinImageUrl(recipe.pin.mediaJson, recipe.pin.rawJson),
-          }) satisfies RecipeHistoryRecipeOption,
-      )
+      .map((recipe) => {
+        const imageSources = resolveRecipeImageSources(
+          recipe.imageUrl,
+          recipe.recipeInstructions?.imageUrl,
+          recipe.pin.mediaJson,
+          recipe.pin.rawJson,
+        );
+        const aggregate = getRecipeReviewAggregate(recipe.reviews);
+
+        return {
+          recipeId: recipe.recipeId,
+          recipeTitle:
+            recipe.title ??
+            recipe.pin.title ??
+            recipe.recipeInstructions?.title ??
+            "Untitled recipe",
+          recipeImageUrl: imageSources.imageUrl,
+          recipePreviewImageUrl: imageSources.previewImageUrl,
+          dominantColor: recipe.pin.dominantColor,
+          averageRating: aggregate.averageRating,
+          reviewCount: aggregate.reviewCount,
+        } satisfies RecipeHistoryRecipeOption;
+      })
       .sort((left, right) => left.recipeTitle.localeCompare(right.recipeTitle));
     const selectedRecipe =
       recipeOptions.find((recipe) => recipe.recipeId === selectedRecipeId) ??
@@ -1395,6 +1409,16 @@ function compareFeedRows(left: FeedCardRow, right: FeedCardRow) {
     return right.ingredientMatchScore - left.ingredientMatchScore;
   }
 
+  const leftHasAverageRating = left.averageRating !== null;
+  const rightHasAverageRating = right.averageRating !== null;
+  if (leftHasAverageRating !== rightHasAverageRating) {
+    return Number(rightHasAverageRating) - Number(leftHasAverageRating);
+  }
+
+  if ((right.averageRating ?? 0) !== (left.averageRating ?? 0)) {
+    return (right.averageRating ?? 0) - (left.averageRating ?? 0);
+  }
+
   const updatedAtCompare = right.updatedAt.localeCompare(left.updatedAt);
   if (updatedAtCompare !== 0) {
     return updatedAtCompare;
@@ -1406,6 +1430,8 @@ function compareFeedRows(left: FeedCardRow, right: FeedCardRow) {
 function encodeFeedCursor(row: FeedCardRow) {
   return Buffer.from(
     JSON.stringify({
+      ingredientMatchScore: row.ingredientMatchScore,
+      averageRating: row.averageRating,
       updatedAt: row.updatedAt,
       recipeId: row.recipeId,
     }),
@@ -1539,16 +1565,25 @@ function decodeFeedCursor(cursor: string | null | undefined) {
   try {
     const parsed = JSON.parse(
       Buffer.from(cursor, "base64url").toString("utf8"),
-    ) as { updatedAt?: unknown; recipeId?: unknown };
+    ) as {
+      ingredientMatchScore?: unknown;
+      averageRating?: unknown;
+      updatedAt?: unknown;
+      recipeId?: unknown;
+    };
 
     if (
-      typeof parsed.updatedAt !== "string"
+      typeof parsed.ingredientMatchScore !== "number"
+      || (parsed.averageRating !== null && typeof parsed.averageRating !== "number")
+      || typeof parsed.updatedAt !== "string"
       || typeof parsed.recipeId !== "string"
     ) {
       return null;
     }
 
     return {
+      ingredientMatchScore: parsed.ingredientMatchScore,
+      averageRating: parsed.averageRating,
       updatedAt: parsed.updatedAt,
       recipeId: parsed.recipeId,
     };
@@ -1559,8 +1594,27 @@ function decodeFeedCursor(cursor: string | null | undefined) {
 
 function isAfterCursor(
   row: FeedCardRow,
-  cursor: { updatedAt: string; recipeId: string },
+  cursor: {
+    ingredientMatchScore: number;
+    averageRating: number | null;
+    updatedAt: string;
+    recipeId: string;
+  },
 ) {
+  if (row.ingredientMatchScore !== cursor.ingredientMatchScore) {
+    return row.ingredientMatchScore < cursor.ingredientMatchScore;
+  }
+
+  const rowHasAverageRating = row.averageRating !== null;
+  const cursorHasAverageRating = cursor.averageRating !== null;
+  if (rowHasAverageRating !== cursorHasAverageRating) {
+    return Number(rowHasAverageRating) < Number(cursorHasAverageRating);
+  }
+
+  if ((row.averageRating ?? 0) !== (cursor.averageRating ?? 0)) {
+    return (row.averageRating ?? 0) < (cursor.averageRating ?? 0);
+  }
+
   if (row.updatedAt !== cursor.updatedAt) {
     return row.updatedAt.localeCompare(cursor.updatedAt) < 0;
   }
@@ -1570,9 +1624,19 @@ function isAfterCursor(
 
 function matchesCursor(
   row: FeedCardRow,
-  cursor: { updatedAt: string; recipeId: string },
+  cursor: {
+    ingredientMatchScore: number;
+    averageRating: number | null;
+    updatedAt: string;
+    recipeId: string;
+  },
 ) {
-  return row.updatedAt === cursor.updatedAt && row.recipeId === cursor.recipeId;
+  return (
+    row.ingredientMatchScore === cursor.ingredientMatchScore
+    && row.averageRating === cursor.averageRating
+    && row.updatedAt === cursor.updatedAt
+    && row.recipeId === cursor.recipeId
+  );
 }
 
 async function getFeedRecipeRows(db: DatabaseHandle, householdId: string) {
@@ -1758,10 +1822,12 @@ function toRecipeReviewView(
     recipe.pin.title ??
     recipe.recipeInstructions?.title ??
     "Untitled recipe";
-  const recipeImageUrl =
-    recipe.imageUrl ??
-    recipe.recipeInstructions?.imageUrl ??
-    getPinImageUrl(recipe.pin.mediaJson, recipe.pin.rawJson);
+  const recipeImageSources = resolveRecipeImageSources(
+    recipe.imageUrl,
+    recipe.recipeInstructions?.imageUrl,
+    recipe.pin.mediaJson,
+    recipe.pin.rawJson,
+  );
   const canManage = canManageReview(review.reviewedByClerkUserId, context);
 
   return {
@@ -1769,7 +1835,8 @@ function toRecipeReviewView(
     recipeId: recipe.recipeId,
     eventId: review.eventId,
     recipeTitle,
-    recipeImageUrl,
+    recipeImageUrl: recipeImageSources.imageUrl,
+    recipePreviewImageUrl: recipeImageSources.previewImageUrl,
     ratingValue: review.ratingValue,
     eatenOn: review.event?.date ?? review.eatenOn,
     note: review.note,
@@ -1822,10 +1889,12 @@ function toRecipeHistoryEventView(
     event.recipe.pin.title ??
     event.recipe.recipeInstructions?.title ??
     "Untitled recipe";
-  const recipeImageUrl =
-    event.recipe.imageUrl ??
-    event.recipe.recipeInstructions?.imageUrl ??
-    getPinImageUrl(event.recipe.pin.mediaJson, event.recipe.pin.rawJson);
+  const recipeImageSources = resolveRecipeImageSources(
+    event.recipe.imageUrl,
+    event.recipe.recipeInstructions?.imageUrl,
+    event.recipe.pin.mediaJson,
+    event.recipe.pin.rawJson,
+  );
   const detailText =
     event.recipe.recipeInstructions?.siteName ??
     event.recipe.description ??
@@ -1852,7 +1921,8 @@ function toRecipeHistoryEventView(
     eventId: event.eventId,
     recipeId: event.recipeId,
     recipeTitle,
-    recipeImageUrl,
+    recipeImageUrl: recipeImageSources.imageUrl,
+    recipePreviewImageUrl: recipeImageSources.previewImageUrl,
     date: event.date,
     isPlanned: event.date > today,
     detailText,

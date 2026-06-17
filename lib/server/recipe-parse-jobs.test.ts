@@ -14,6 +14,7 @@ import {
   households,
 } from "@/lib/server/db";
 import {
+  resolveRecipeParseJobWorkerOrigin,
   runRecipeParseJobWorker,
   scheduleRecipeParseJobWorker,
 } from "@/lib/server/recipe-parse-jobs";
@@ -200,6 +201,17 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   mockExtractSingleRecipe.mockReset();
+  delete process.env.NEXT_PUBLIC_APP_URL;
+  delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  delete process.env.VERCEL_URL;
+});
+
+describe("resolveRecipeParseJobWorkerOrigin", () => {
+  it("falls back to the Vercel production URL when APP_URL is absent", () => {
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = "food-picker.vercel.app";
+
+    expect(resolveRecipeParseJobWorkerOrigin({})).toBe("https://food-picker.vercel.app");
+  });
 });
 
 describe("runRecipeParseJobWorker", () => {

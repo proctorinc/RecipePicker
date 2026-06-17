@@ -15,7 +15,7 @@ import {
   householdRecipePickerConversations,
   householdRecipePickerMessages,
 } from "@/lib/server/db";
-import { getPinImageUrl } from "@/lib/server/media";
+import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
 import { parseJsonArray } from "@/lib/utils";
 import type {
   RecipePickerCard,
@@ -65,6 +65,7 @@ type RecipeCandidate = {
   recipeId: string;
   title: string;
   imageUrl: string | null;
+  previewImageUrl: string | null;
   siteName: string | null;
   shortDescription: string | null;
   averageRating: number | null;
@@ -765,10 +766,12 @@ function buildRecipeCandidates(rows: RecipePickerRow[]): RecipeCandidate[] {
       row.recipeInstructions?.description ??
       row.pin.description ??
       null;
-    const imageUrl =
-      row.imageUrl ??
-      row.recipeInstructions?.imageUrl ??
-      getPinImageUrl(row.pin.mediaJson, row.pin.rawJson);
+    const imageSources = resolveRecipeImageSources(
+      row.imageUrl,
+      row.recipeInstructions?.imageUrl,
+      row.pin.mediaJson,
+      row.pin.rawJson,
+    );
     const aggregate = getRecipeReviewAggregate(row.reviews);
     const reviewNotes = row.reviews
       .map((review) => review.note?.trim() ?? "")
@@ -801,7 +804,8 @@ function buildRecipeCandidates(rows: RecipePickerRow[]): RecipeCandidate[] {
     return {
       recipeId: row.recipeId,
       title,
-      imageUrl,
+      imageUrl: imageSources.imageUrl,
+      previewImageUrl: imageSources.previewImageUrl,
       siteName: row.recipeInstructions?.siteName ?? null,
       shortDescription,
       averageRating: aggregate.averageRating,
@@ -1351,6 +1355,7 @@ function toRecipePickerCard(
     recipeId: recipe.recipeId,
     title: recipe.title,
     imageUrl: recipe.imageUrl,
+    previewImageUrl: recipe.previewImageUrl,
     siteName: recipe.siteName,
     shortDescription: recipe.shortDescription,
     matchedReasons:

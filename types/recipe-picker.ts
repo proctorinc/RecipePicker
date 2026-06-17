@@ -6,6 +6,7 @@ export type RecipePickerCard = {
   recipeId: string;
   title: string;
   imageUrl: string | null;
+  previewImageUrl: string | null;
   siteName: string | null;
   shortDescription: string | null;
   matchedReasons: string[];

@@ -285,10 +285,20 @@ export function resolveRecipeParseJobWorkerOrigin(input: {
   requestUrl?: string | null;
   appUrl?: string | null;
 }) {
-  const candidate = input.requestUrl?.trim() || input.appUrl?.trim();
+  const vercelProductionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  const vercelDeploymentUrl = process.env.VERCEL_URL?.trim();
+  const publicAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const candidate =
+    input.requestUrl?.trim()
+    || input.appUrl?.trim()
+    || publicAppUrl
+    || (vercelProductionUrl ? `https://${vercelProductionUrl}` : "")
+    || (vercelDeploymentUrl ? `https://${vercelDeploymentUrl}` : "");
 
   if (!candidate) {
-    throw new Error("APP_URL is required to schedule recipe parse jobs from server actions.");
+    throw new Error(
+      "APP_URL is required to schedule recipe parse jobs from server actions when no request URL or Vercel deployment URL is available.",
+    );
   }
 
   try {

@@ -12,6 +12,7 @@ import {
   householdBoards,
   householdPins,
   householdRecipes,
+  householdRecipeReviews,
   households,
 } from "@/lib/server/db";
 
@@ -199,6 +200,61 @@ describe("getFeedPinsPage", () => {
     expect(nextPage.items.map((item) => item.recipeId)).toEqual(["recipe_a"]);
     expect(nextPage.hasMore).toBe(false);
   });
+
+  it("prefers rated recipes first, then higher average ratings, then unrated recipes", async () => {
+    await seedRecipeReviews([
+      createReview({
+        reviewId: "review_1",
+        recipeId: "recipe_a",
+        ratingValue: 4,
+        createdAt: "2026-06-12T10:00:00.000Z",
+      }),
+      createReview({
+        reviewId: "review_2",
+        recipeId: "recipe_b",
+        ratingValue: 5,
+        createdAt: "2026-06-12T11:00:00.000Z",
+      }),
+    ]);
+
+    const page = await getFeedPinsPage({ pageSize: 3 });
+
+    expect(page.items.map((item) => item.recipeId)).toEqual([
+      "recipe_b",
+      "recipe_a",
+      "recipe_c",
+    ]);
+  });
+
+  it("keeps pagination stable when rating-based ordering is applied", async () => {
+    await seedRecipeReviews([
+      createReview({
+        reviewId: "review_1",
+        recipeId: "recipe_a",
+        ratingValue: 4,
+        createdAt: "2026-06-12T10:00:00.000Z",
+      }),
+      createReview({
+        reviewId: "review_2",
+        recipeId: "recipe_b",
+        ratingValue: 5,
+        createdAt: "2026-06-12T11:00:00.000Z",
+      }),
+    ]);
+
+    const firstPage = await getFeedPinsPage({ pageSize: 1 });
+    const secondPage = await getFeedPinsPage({
+      cursor: firstPage.nextCursor,
+      pageSize: 2,
+    });
+
+    expect(firstPage.items.map((item) => item.recipeId)).toEqual(["recipe_b"]);
+    expect(secondPage.items.map((item) => item.recipeId)).toEqual([
+      "recipe_a",
+      "recipe_c",
+    ]);
+    expect(secondPage.hasMore).toBe(false);
+  });
 });
 
 async function seedFeedRecipe({
@@ -248,6 +304,54 @@ async function seedFeedRecipe({
       updatedAt,
     })
     .run();
+}
+
+async function seedRecipeReviews(
+  reviews: Array<{
+    reviewId: string;
+    householdId: string;
+    recipeId: string;
+    eventId: null;
+    reviewedByClerkUserId: string;
+    ratingValue: number;
+    eatenOn: null;
+    note: null;
+    createdAt: string;
+    updatedAt: string;
+  }>,
+) {
+  const { db, sqlite } = await createTestDatabaseHandle(sqlitePath);
+
+  try {
+    await db.insert(householdRecipeReviews).values(reviews).run();
+  } finally {
+    await sqlite.close();
+  }
+}
+
+function createReview({
+  reviewId,
+  recipeId,
+  ratingValue,
+  createdAt,
+}: {
+  reviewId: string;
+  recipeId: string;
+  ratingValue: number;
+  createdAt: string;
+}) {
+  return {
+    reviewId,
+    householdId: "household_1",
+    recipeId,
+    eventId: null,
+    reviewedByClerkUserId: "user_123",
+    ratingValue,
+    eatenOn: null,
+    note: null,
+    createdAt,
+    updatedAt: createdAt,
+  };
 }
 
 function createTestDatabaseHandle(targetPath: string) {

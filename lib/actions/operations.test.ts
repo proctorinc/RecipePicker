@@ -13,6 +13,9 @@ const {
   mockResolveRecipeParseJobWorkerOrigin,
   mockScheduleRecipeParseJobWorker,
   originalAppUrl,
+  originalNextPublicAppUrl,
+  originalVercelProjectProductionUrl,
+  originalVercelUrl,
 } = vi.hoisted(() => ({
   mockGetCurrentUserAccess: vi.fn(),
   mockRequireHouseholdContext: vi.fn(),
@@ -26,6 +29,9 @@ const {
   mockResolveRecipeParseJobWorkerOrigin: vi.fn(),
   mockScheduleRecipeParseJobWorker: vi.fn(),
   originalAppUrl: process.env.APP_URL,
+  originalNextPublicAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+  originalVercelProjectProductionUrl: process.env.VERCEL_PROJECT_PRODUCTION_URL,
+  originalVercelUrl: process.env.VERCEL_URL,
 }));
 
 vi.mock("@/lib/server/access", () => ({
@@ -107,6 +113,9 @@ import { resumeRecipeParseJob } from "@/lib/server/recipe-parse-jobs";
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.APP_URL = "https://food-picker.example.com";
+  delete process.env.NEXT_PUBLIC_APP_URL;
+  delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  delete process.env.VERCEL_URL;
   mockResolveRecipeParseJobWorkerOrigin.mockReturnValue("https://food-picker.example.com");
   mockScheduleRecipeParseJobWorker.mockResolvedValue(undefined);
 });
@@ -118,6 +127,24 @@ afterEach(() => {
   }
 
   process.env.APP_URL = originalAppUrl;
+
+  if (originalNextPublicAppUrl == null) {
+    delete process.env.NEXT_PUBLIC_APP_URL;
+  } else {
+    process.env.NEXT_PUBLIC_APP_URL = originalNextPublicAppUrl;
+  }
+
+  if (originalVercelProjectProductionUrl == null) {
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  } else {
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = originalVercelProjectProductionUrl;
+  }
+
+  if (originalVercelUrl == null) {
+    delete process.env.VERCEL_URL;
+  } else {
+    process.env.VERCEL_URL = originalVercelUrl;
+  }
 });
 
 describe("saveAiConnectionAction", () => {

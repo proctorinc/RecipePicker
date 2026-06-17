@@ -38,6 +38,7 @@ export type RecipeReviewView = {
   eventId: string | null;
   recipeTitle: string;
   recipeImageUrl: string | null;
+  recipePreviewImageUrl: string | null;
   ratingValue: number;
   eatenOn: string | null;
   note: string | null;
@@ -51,6 +52,10 @@ export type RecipeHistoryRecipeOption = {
   recipeId: string;
   recipeTitle: string;
   recipeImageUrl: string | null;
+  recipePreviewImageUrl: string | null;
+  dominantColor: string | null;
+  averageRating: number | null;
+  reviewCount: number;
 };
 
 export type RecipeHistoryEventView = {
@@ -58,6 +63,7 @@ export type RecipeHistoryEventView = {
   recipeId: string;
   recipeTitle: string;
   recipeImageUrl: string | null;
+  recipePreviewImageUrl: string | null;
   date: string;
   isPlanned: boolean;
   detailText: string | null;
@@ -106,6 +112,7 @@ export type RecipeDetailView = {
   };
   title: string;
   imageUrl: string | null;
+  previewImageUrl: string | null;
   description: string | null;
   siteName: string | null;
   sourceUrl: string | null;

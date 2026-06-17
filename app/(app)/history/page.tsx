@@ -14,10 +14,6 @@ export default async function HistoryPage({
 
   return (
     <PageShell>
-      <PageIntro
-        title="Meal History"
-        description="Track and review your recipes when you want to revisit what you tried."
-      />
       <RecipeHistoryCalendar history={history} fromRecipe={from === "recipe"} />
     </PageShell>
   );

@@ -13,6 +13,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 
+import { RecipeImage } from "@/components/recipe-image";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -26,7 +27,6 @@ import type {
   RecipePickerRequest,
   RecipePickerResponse,
 } from "@/types/recipe-picker";
-import Image from "next/image";
 
 type RecipePickerProps = {
   initialState: RecipePickerResponse;
@@ -407,14 +407,17 @@ export function RecipePicker({ initialState }: RecipePickerProps) {
                         )}
                       >
                         <div className="relative h-full">
-                          <div
-                            className="h-44 bg-stone-200 bg-cover bg-center"
-                            style={
-                              recipe.imageUrl
-                                ? { backgroundImage: `url(${recipe.imageUrl})` }
-                                : undefined
-                            }
-                          >
+                          <div className="relative h-44 overflow-hidden bg-stone-200">
+                            {recipe.imageUrl ? (
+                              <RecipeImage
+                                src={recipe.imageUrl}
+                                previewSrc={recipe.previewImageUrl}
+                                alt={recipe.title}
+                                fill
+                                className="object-cover"
+                                sizes="(max-width: 768px) 84vw, 28rem"
+                              />
+                            ) : null}
                             {!recipe.imageUrl ? (
                               <div className="flex h-full items-end bg-[linear-gradient(135deg,#d7c6b0,#f2ebe1)] p-5">
                                 <p className="font-[family-name:var(--font-serif)] text-2xl font-semibold text-stone-800">
@@ -610,8 +613,9 @@ export function RecipePicker({ initialState }: RecipePickerProps) {
                                     key={recipe.recipeId}
                                     className="relative w-20 h-32 flex-shrink-0 overflow-hidden rounded-md"
                                   >
-                                    <Image
+                                    <RecipeImage
                                       src={recipe.imageUrl}
+                                      previewSrc={recipe.previewImageUrl}
                                       alt={recipe.title}
                                       fill
                                       className="object-cover"

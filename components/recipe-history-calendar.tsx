@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import {
   useDeferredValue,
   useEffect,
@@ -21,7 +20,10 @@ import { toast } from "sonner";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { HistoryEventDeleteButton } from "@/components/history-event-delete-button";
+import { FeedCardSkeleton } from "@/components/loading-skeletons";
 import { useAppRouteTransition } from "@/components/app-route-transition";
+import { RecipeImage } from "@/components/recipe-image";
+import { RecipeImageCard } from "@/components/recipe-image-card";
 import { RecipeReviewDialog } from "@/components/recipe-review-dialog";
 import { ReviewDeleteButton } from "@/components/review-delete-button";
 import { StarRating } from "@/components/star-rating";
@@ -35,6 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { createRecipeEventsAction } from "@/lib/actions/operations";
+import { buildFeedLoadingSkeletons } from "@/lib/feed-layout";
 import {
   cn,
   formatDay,
@@ -68,8 +71,9 @@ export function RecipeHistoryCalendar({
 }) {
   const [dayDialogDate, setDayDialogDate] = useState<string | null>(null);
   const [recipePickerOpen, setRecipePickerOpen] = useState(false);
-  const [reviewTarget, setReviewTarget] =
-    useState<ReviewDialogTarget | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<ReviewDialogTarget | null>(
+    null,
+  );
   const [editingReview, setEditingReview] =
     useState<RecipeHistoryEventView | null>(null);
   const [searchValue, setSearchValue] = useState("");
@@ -90,7 +94,9 @@ export function RecipeHistoryCalendar({
   const recipeOptionsById = useMemo(
     () =>
       new Map(
-        history.recipeOptions.map((recipe) => [recipe.recipeId, recipe] as const),
+        history.recipeOptions.map(
+          (recipe) => [recipe.recipeId, recipe] as const,
+        ),
       ),
     [history.recipeOptions],
   );
@@ -102,8 +108,19 @@ export function RecipeHistoryCalendar({
     () => [...selectedDates].sort((left, right) => left.localeCompare(right)),
     [selectedDates],
   );
-  const selectedDateSet = useMemo(() => new Set(selectedDates), [selectedDates]);
+  const selectedDateSet = useMemo(
+    () => new Set(selectedDates),
+    [selectedDates],
+  );
   const selectedRecipe = history.selectedRecipe;
+  const loadingSkeletonColumns = useMemo(
+    () => buildFeedLoadingSkeletons(3),
+    [],
+  );
+  const loadingSkeletonColumnsMobile = useMemo(
+    () => buildFeedLoadingSkeletons(2),
+    [],
+  );
 
   useEffect(() => {
     setSelectedDates([]);
@@ -146,11 +163,15 @@ export function RecipeHistoryCalendar({
           .filter((item) => item.hasRecipe)
           .map(
             (item) =>
-              recipeOptionsById.get(item.recipeId) ?? {
-                recipeId: item.recipeId,
-                recipeTitle: item.title,
-                recipeImageUrl: item.imageUrl,
-              },
+                recipeOptionsById.get(item.recipeId) ?? {
+                  recipeId: item.recipeId,
+                  recipeTitle: item.title,
+                  recipeImageUrl: item.imageUrl,
+                  recipePreviewImageUrl: item.previewImageUrl,
+                  dominantColor: item.dominantColor,
+                  averageRating: item.averageRating,
+                  reviewCount: item.reviewCount,
+                },
           )
           .filter((recipe) => {
             if (seenRecipeIds.has(recipe.recipeId)) {
@@ -190,7 +211,7 @@ export function RecipeHistoryCalendar({
   const visibleRecipeOptions = useMemo(() => {
     const normalized = deferredSearchValue.trim();
     const base = normalized
-      ? searchedRecipeOptions ?? []
+      ? (searchedRecipeOptions ?? [])
       : history.recipeOptions;
 
     return base.slice(0, 12);
@@ -324,7 +345,7 @@ export function RecipeHistoryCalendar({
               onClick={() => setSelectedDates([])}
               disabled={isPending}
             >
-              Clear
+              Cancel
             </Button>
             <Button
               type="button"
@@ -345,7 +366,16 @@ export function RecipeHistoryCalendar({
       ) : null}
 
       <section className="rounded-[24px] border border-white/70 bg-white/90 p-2 shadow-soft sm:rounded-[32px] sm:p-6">
-        <div className="mb-4 flex items-center justify-end sm:mb-6">
+        <div className="gap-2 mb-4 flex items-center justify-end sm:mb-6">
+          {selectedRecipe && (
+            <Button asChild type="button" variant="ghost" size="sm">
+              <AppTransitionLink
+                href={`/history?month=${encodeURIComponent(history.month)}`}
+              >
+                Clear
+              </AppTransitionLink>
+            </Button>
+          )}
           <Button
             type="button"
             variant={isSelectionMode ? "outline" : "default"}
@@ -360,61 +390,43 @@ export function RecipeHistoryCalendar({
         {isSelectionMode && selectedRecipe ? (
           <div className="mb-4 rounded-[28px] border border-border/70 bg-secondary/20 p-4 sm:mb-6 sm:p-5">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-4">
-                <div className="relative h-16 w-16 overflow-hidden rounded-[20px] bg-secondary/40 sm:h-20 sm:w-20">
+              <div className="flex gap-2">
+                <div className="relative h-32 w-20 shrink-0 overflow-hidden rounded-[20px] bg-secondary/40 sm:h-20 sm:w-20">
                   {selectedRecipe.recipeImageUrl ? (
-                    <Image
-                      src={selectedRecipe.recipeImageUrl}
-                      alt={selectedRecipe.recipeTitle}
-                      fill
-                      className="object-cover"
-                      sizes="80px"
-                    />
+                    <AppTransitionLink
+                      href={buildRecipeHref(selectedRecipe.recipeId)}
+                    >
+                      <RecipeImage
+                        src={selectedRecipe.recipeImageUrl}
+                        previewSrc={selectedRecipe.recipePreviewImageUrl}
+                        alt={selectedRecipe.recipeTitle}
+                        fill
+                        className="object-cover"
+                        sizes="80px"
+                      />
+                    </AppTransitionLink>
                   ) : null}
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-1 w-3/4">
                   <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
                     Selected recipe
                   </p>
-                  <h3 className="font-[family-name:var(--font-serif)] text-lg font-semibold sm:text-xl">
+                  <h3 className="line-clamp-2 font-[family-name:var(--font-serif)] text-lg font-semibold sm:text-xl">
                     {selectedRecipe.recipeTitle}
                   </h3>
                   <p className="text-sm text-muted-foreground">
-                    Tap one or more days on the calendar, then add this recipe in one step.
+                    Tap one or more days on the calendar, then add this recipe
+                    in one step.
                   </p>
                   {selectedDatesSorted.length > 0 ? (
                     <p className="text-xs font-medium text-foreground/80">
                       {selectedDatesSorted.length}{" "}
-                      {selectedDatesSorted.length === 1 ? "day selected" : "days selected"}
+                      {selectedDatesSorted.length === 1
+                        ? "day selected"
+                        : "days selected"}
                     </p>
                   ) : null}
                 </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {selectedDatesSorted.length > 0 ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSelectedDates([])}
-                  >
-                    Clear selected days
-                  </Button>
-                ) : null}
-                <Button asChild type="button" variant="outline" size="sm">
-                  <AppTransitionLink
-                    href={buildRecipeHref(selectedRecipe.recipeId)}
-                  >
-                    {fromRecipe ? "Back to recipe" : "View recipe"}
-                  </AppTransitionLink>
-                </Button>
-                <Button asChild type="button" variant="ghost" size="sm">
-                  <AppTransitionLink
-                    href={`/history?month=${encodeURIComponent(history.month)}`}
-                  >
-                    Clear
-                  </AppTransitionLink>
-                </Button>
               </div>
             </div>
           </div>
@@ -461,9 +473,7 @@ export function RecipeHistoryCalendar({
                 className="h-11 w-11 justify-center px-3 sm:w-auto"
                 size="sm"
               >
-                <AppTransitionLink
-                  href={buildHistoryHref(history.nextMonth)}
-                >
+                <AppTransitionLink href={buildHistoryHref(history.nextMonth)}>
                   <ChevronRight className="h-4 w-4" />
                 </AppTransitionLink>
               </Button>
@@ -554,7 +564,7 @@ export function RecipeHistoryCalendar({
           </DialogHeader>
 
           <div className="space-y-4 pt-4">
-          {selectedDay?.events.map((event) => (
+            {selectedDay?.events.map((event) => (
               <article
                 key={event.eventId}
                 className="border border-border/70 bg-secondary/15 p-3 sm:p-4 rounded-2xl"
@@ -566,8 +576,9 @@ export function RecipeHistoryCalendar({
                     className="relative w-20 h-20 shrink-0 aspect-2/3 rounded-[14px] overflow-hidden bg-secondary/40 sm:h-24 sm:w-24 sm:rounded-[18px]"
                   >
                     {event.recipeImageUrl ? (
-                      <Image
+                      <RecipeImage
                         src={event.recipeImageUrl}
+                        previewSrc={event.recipePreviewImageUrl}
                         alt={event.recipeTitle}
                         fill
                         className="object-cover"
@@ -679,7 +690,7 @@ export function RecipeHistoryCalendar({
           setRecipePickerOpen(open);
         }}
       >
-        <DialogContent className="w-[min(96vw,42rem)] max-h-[92vh] overflow-y-auto p-4 sm:w-[min(92vw,42rem)] sm:p-6">
+        <DialogContent className="flex h-[82vh] w-[min(96vw,42rem)] max-h-[82vh] flex-col overflow-hidden p-4 sm:w-[min(92vw,42rem)] sm:p-6">
           <DialogHeader>
             <DialogTitle className="text-xl sm:text-2xl">
               Choose a recipe
@@ -689,53 +700,76 @@ export function RecipeHistoryCalendar({
             </DialogDescription>
           </DialogHeader>
 
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchValue}
-              onChange={(event) => setSearchValue(event.target.value)}
-              placeholder="Search your recipes"
-              className="h-11 pl-11 text-sm"
-            />
-          </label>
+          <div className="flex min-h-0 flex-1 flex-col gap-5 pt-4">
+            <label className="relative block px-1">
+              <Search className="pointer-events-none absolute left-5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchValue}
+                onChange={(event) => setSearchValue(event.target.value)}
+                placeholder="Search your recipes"
+                className="h-12 rounded-2xl border-white/80 bg-white/90 pl-12 pr-4 text-sm shadow-sm"
+              />
+            </label>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {visibleRecipeOptions.map((recipe) => (
-              <button
-                key={recipe.recipeId}
-                type="button"
-                disabled={isPending}
-                onClick={() => selectRecipe(recipe)}
-                className="group relative aspect-square overflow-hidden rounded-[24px] border border-border/70 bg-secondary/25 text-left"
-              >
-                {recipe.recipeImageUrl ? (
-                  <Image
-                    src={recipe.recipeImageUrl}
-                    alt={recipe.recipeTitle}
-                    fill
-                    className="object-cover transition duration-200 group-hover:scale-[1.03]"
-                    sizes="(max-width: 640px) 50vw, 192px"
-                  />
-                ) : (
-                  <div className="absolute inset-0 bg-secondary/70" />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
-                <div className="absolute inset-x-0 bottom-0 p-3">
-                  <p className="text-sm font-medium text-white">
-                    {recipe.recipeTitle}
-                  </p>
+            <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-1">
+              {isSearchLoading ? (
+                <>
+                  <div className="grid grid-cols-2 items-start gap-3 sm:hidden">
+                    {loadingSkeletonColumnsMobile.map((column, columnIndex) => (
+                      <div key={columnIndex} className="flex flex-col gap-3">
+                        {column.map((skeleton) => (
+                          <FeedCardSkeleton
+                            key={skeleton.id}
+                            aspectVariant={skeleton.aspectVariant}
+                          />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="hidden grid-cols-3 items-start gap-4 sm:grid">
+                    {loadingSkeletonColumns.map((column, columnIndex) => (
+                      <div key={columnIndex} className="flex flex-col gap-4">
+                        {column.map((skeleton) => (
+                          <FeedCardSkeleton
+                            key={skeleton.id}
+                            aspectVariant={skeleton.aspectVariant}
+                          />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : visibleRecipeOptions.length > 0 ? (
+                <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-3 sm:gap-4">
+                  {visibleRecipeOptions.map((recipe) => (
+                    <button
+                      key={recipe.recipeId}
+                      type="button"
+                      disabled={isPending}
+                      onClick={() => selectRecipe(recipe)}
+                      className="group relative overflow-hidden rounded-[24px] border border-border/70 bg-secondary/25 text-left"
+                    >
+                      <RecipeImageCard
+                        title={recipe.recipeTitle}
+                        imageUrl={recipe.recipeImageUrl}
+                        previewImageUrl={recipe.recipePreviewImageUrl}
+                        dominantColor={recipe.dominantColor}
+                        averageRating={recipe.averageRating}
+                        reviewCount={recipe.reviewCount}
+                        sizes="(max-width: 640px) 50vw, 192px"
+                        className="aspect-[4/5]"
+                        imageClassName="transition duration-200 group-hover:scale-[1.03]"
+                      />
+                    </button>
+                  ))}
                 </div>
-              </button>
-            ))}
-          </div>
-
-          {visibleRecipeOptions.length === 0 ? (
-            <div className="rounded-[24px] border border-dashed border-border/70 px-6 py-10 text-center text-sm text-muted-foreground">
-              {isSearchLoading
-                ? "Searching recipes..."
-                : "No recipes matched that search."}
+              ) : (
+                <div className="rounded-[24px] border border-dashed border-border/70 px-6 py-10 text-center text-sm text-muted-foreground">
+                  No recipes matched that search.
+                </div>
+              )}
             </div>
-          ) : null}
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -778,8 +812,9 @@ function DayPreviewImage({ event }: { event: RecipeHistoryEventView }) {
   return (
     <div className="absolute inset-0 overflow-hidden">
       {event.recipeImageUrl ? (
-        <Image
+        <RecipeImage
           src={event.recipeImageUrl}
+          previewSrc={event.recipePreviewImageUrl}
           alt={event.recipeTitle}
           fill
           className="object-cover"

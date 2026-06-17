@@ -53,6 +53,7 @@ describe("getRecipeHistoryPage", () => {
       recipeId: "recipe_b",
       recipeTitle: "Basil Soup",
       recipeImageUrl: "https://images.example.com/pin_b-564.jpg",
+      recipePreviewImageUrl: "https://images.example.com/pin_b-236.jpg",
     });
     expect(page.recipeOptions.map((recipe) => recipe.recipeId)).toEqual([
       "recipe_a",

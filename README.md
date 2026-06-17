@@ -40,7 +40,7 @@ Shared app settings include:
 
 The default Pinterest callback route is `http://localhost:3000/api/pinterest/callback`.
 
-`APP_URL` should be the full origin for the deployed app, for example `http://localhost:3000` in development or `https://your-app.example.com` in production. It is used by server actions to re-enqueue background recipe parse chunks through the internal worker route.
+`APP_URL` should be the full origin for the deployed app, for example `http://localhost:3000` in development or `https://your-app.example.com` in production. It is the preferred explicit setting used by server actions to re-enqueue background recipe parse chunks through the internal worker route. On Vercel, the app will also fall back to `VERCEL_PROJECT_PRODUCTION_URL` or `VERCEL_URL` automatically if `APP_URL` is not set.
 
 Database settings depend on the environment:
 
