@@ -4,14 +4,14 @@ const {
   mockRequireHouseholdContext,
   mockGetRecipeParseJobSummaries,
   mockCreateRecipeParseJob,
-  mockResolveRecipeParseJobWorkerOrigin,
-  mockScheduleRecipeParseJobWorker,
+  mockMarkRecipeParseJobQueueingFailure,
+  mockSendRecipeParseJobRequestedEvent,
 } = vi.hoisted(() => ({
   mockRequireHouseholdContext: vi.fn(),
   mockGetRecipeParseJobSummaries: vi.fn(),
   mockCreateRecipeParseJob: vi.fn(),
-  mockResolveRecipeParseJobWorkerOrigin: vi.fn(),
-  mockScheduleRecipeParseJobWorker: vi.fn(),
+  mockMarkRecipeParseJobQueueingFailure: vi.fn(),
+  mockSendRecipeParseJobRequestedEvent: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -24,28 +24,19 @@ vi.mock("@/lib/server/queries", () => ({
 
 vi.mock("@/lib/server/recipe-parse-jobs", () => ({
   createRecipeParseJob: mockCreateRecipeParseJob,
-  resolveRecipeParseJobWorkerOrigin: mockResolveRecipeParseJobWorkerOrigin,
-  scheduleRecipeParseJobWorker: mockScheduleRecipeParseJobWorker,
+  markRecipeParseJobQueueingFailure: mockMarkRecipeParseJobQueueingFailure,
 }));
 
-vi.mock("next/server", async () => {
-  const actual = await vi.importActual<typeof import("next/server")>("next/server");
-
-  return {
-    ...actual,
-    after: (fn: () => void | Promise<void>) => {
-      void fn();
-    },
-  };
-});
+vi.mock("@/src/inngest/events", () => ({
+  sendRecipeParseJobRequestedEvent: mockSendRecipeParseJobRequestedEvent,
+}));
 
 import { GET, POST } from "@/app/api/recipe-parse-jobs/route";
 
 describe("/api/recipe-parse-jobs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResolveRecipeParseJobWorkerOrigin.mockReturnValue("http://localhost");
-    mockScheduleRecipeParseJobWorker.mockResolvedValue(undefined);
+    mockSendRecipeParseJobRequestedEvent.mockResolvedValue(undefined);
   });
 
   it("lists recent jobs", async () => {
@@ -124,13 +115,10 @@ describe("/api/recipe-parse-jobs", () => {
       status: "queued",
       createdAt: "2026-06-16T00:00:00.000Z",
     });
-    expect(mockResolveRecipeParseJobWorkerOrigin).toHaveBeenCalledWith({
-      requestUrl: "http://localhost/api/recipe-parse-jobs",
-    });
-    expect(mockScheduleRecipeParseJobWorker).toHaveBeenCalledWith({
+    expect(mockSendRecipeParseJobRequestedEvent).toHaveBeenCalledWith({
       jobId: "job_123",
-      workerToken: "worker_token",
-      origin: "http://localhost",
+      householdId: "household_123",
+      trigger: "create",
     });
   });
 });

@@ -14,10 +14,10 @@ import {
   households,
 } from "@/lib/server/db";
 import {
-  resolveRecipeParseJobWorkerOrigin,
-  runRecipeParseJobWorker,
-  scheduleRecipeParseJobWorker,
+  markRecipeParseJobQueueingFailure,
+  processRecipeParseJobChunk,
 } from "@/lib/server/recipe-parse-jobs";
+import { runRecipeParseJobWorkflow } from "@/src/inngest/functions/recipe-parse";
 
 const { mockExtractSingleRecipe } = vi.hoisted(() => ({
   mockExtractSingleRecipe: vi.fn(),
@@ -201,23 +201,12 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   mockExtractSingleRecipe.mockReset();
-  delete process.env.NEXT_PUBLIC_APP_URL;
-  delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  delete process.env.VERCEL_URL;
 });
 
-describe("resolveRecipeParseJobWorkerOrigin", () => {
-  it("falls back to the Vercel production URL when APP_URL is absent", () => {
-    process.env.VERCEL_PROJECT_PRODUCTION_URL = "food-picker.vercel.app";
-
-    expect(resolveRecipeParseJobWorkerOrigin({})).toBe("https://food-picker.vercel.app");
-  });
-});
-
-describe("runRecipeParseJobWorker", () => {
+describe("processRecipeParseJobChunk", () => {
   it("processes a 45-recipe job across three chunks", async () => {
     await withTestDatabase(async ({ sqlitePath }) => {
-      const { jobId, workerToken } = await seedRecipeParseJob(sqlitePath, 45);
+      const { jobId } = await seedRecipeParseJob(sqlitePath, 45);
       let extractionCount = 0;
 
       mockExtractSingleRecipe.mockImplementation(async ({ recipeId }: { recipeId: string }) => {
@@ -228,17 +217,14 @@ describe("runRecipeParseJobWorker", () => {
         };
       });
 
-      const first = await runRecipeParseJobWorker({
+      const first = await processRecipeParseJobChunk({
         jobId,
-        workerToken,
       });
-      const second = await runRecipeParseJobWorker({
+      const second = await processRecipeParseJobChunk({
         jobId,
-        workerToken,
       });
-      const third = await runRecipeParseJobWorker({
+      const third = await processRecipeParseJobChunk({
         jobId,
-        workerToken,
       });
 
       expect(first).toEqual({
@@ -276,27 +262,15 @@ describe("runRecipeParseJobWorker", () => {
   });
 });
 
-describe("scheduleRecipeParseJobWorker", () => {
-  it("records a resumable scheduling error when the worker route cannot be enqueued", async () => {
+describe("markRecipeParseJobQueueingFailure", () => {
+  it("records a resumable queueing error when dispatch to Inngest fails", async () => {
     await withTestDatabase(async ({ sqlitePath }) => {
-      const { jobId, workerToken } = await seedRecipeParseJob(sqlitePath, 1);
+      const { jobId } = await seedRecipeParseJob(sqlitePath, 1);
 
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ message: "upstream unavailable" }), {
-          status: 503,
-          headers: {
-            "content-type": "application/json",
-          },
-        }),
-      ));
-
-      await expect(
-        scheduleRecipeParseJobWorker({
-          jobId,
-          workerToken,
-          origin: "https://food-picker.example.com",
-        }),
-      ).rejects.toThrow(/HTTP 503/i);
+      await markRecipeParseJobQueueingFailure({
+        jobId,
+        error: new Error("Inngest dispatch failed"),
+      });
 
       const { db, sqlite } = await openDatabase(sqlitePath);
 
@@ -306,11 +280,33 @@ describe("scheduleRecipeParseJobWorker", () => {
         });
 
         expect(job?.status).toBe("queued");
-        expect(job?.lastError).toMatch(/could not schedule the next one/i);
-        expect(job?.lastError).toMatch(/HTTP 503/i);
+        expect(job?.lastError).toMatch(/could not be queued in inngest/i);
+        expect(job?.lastError).toMatch(/dispatch failed/i);
       } finally {
         await sqlite.close();
       }
     });
+  });
+});
+
+describe("runRecipeParseJobWorkflow", () => {
+  it("loops chunks through step.run until the job completes", async () => {
+    const step = {
+      run: vi.fn()
+        .mockResolvedValueOnce({ status: "continued", remaining: 25 })
+        .mockResolvedValueOnce({ status: "continued", remaining: 5 })
+        .mockResolvedValueOnce({ status: "completed" }),
+    };
+
+    const result = await runRecipeParseJobWorkflow({
+      jobId: "job_123",
+      householdId: "household_123",
+      step,
+    });
+
+    expect(result).toEqual({ status: "completed" });
+    expect(step.run).toHaveBeenNthCalledWith(1, "chunk-1", expect.any(Function));
+    expect(step.run).toHaveBeenNthCalledWith(2, "chunk-2", expect.any(Function));
+    expect(step.run).toHaveBeenNthCalledWith(3, "chunk-3", expect.any(Function));
   });
 });

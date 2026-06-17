@@ -10,12 +10,8 @@ const {
   mockUpsertHouseholdAiConnection,
   mockCreateRecipeParseJob,
   mockCancelRecipeParseJob,
-  mockResolveRecipeParseJobWorkerOrigin,
-  mockScheduleRecipeParseJobWorker,
-  originalAppUrl,
-  originalNextPublicAppUrl,
-  originalVercelProjectProductionUrl,
-  originalVercelUrl,
+  mockMarkRecipeParseJobQueueingFailure,
+  mockSendRecipeParseJobRequestedEvent,
 } = vi.hoisted(() => ({
   mockGetCurrentUserAccess: vi.fn(),
   mockRequireHouseholdContext: vi.fn(),
@@ -26,12 +22,8 @@ const {
   mockUpsertHouseholdAiConnection: vi.fn(),
   mockCreateRecipeParseJob: vi.fn(),
   mockCancelRecipeParseJob: vi.fn(),
-  mockResolveRecipeParseJobWorkerOrigin: vi.fn(),
-  mockScheduleRecipeParseJobWorker: vi.fn(),
-  originalAppUrl: process.env.APP_URL,
-  originalNextPublicAppUrl: process.env.NEXT_PUBLIC_APP_URL,
-  originalVercelProjectProductionUrl: process.env.VERCEL_PROJECT_PRODUCTION_URL,
-  originalVercelUrl: process.env.VERCEL_URL,
+  mockMarkRecipeParseJobQueueingFailure: vi.fn(),
+  mockSendRecipeParseJobRequestedEvent: vi.fn(),
 }));
 
 vi.mock("@/lib/server/access", () => ({
@@ -76,9 +68,12 @@ vi.mock("@/lib/server/extract", () => ({
 vi.mock("@/lib/server/recipe-parse-jobs", () => ({
   createRecipeParseJob: mockCreateRecipeParseJob,
   cancelRecipeParseJob: mockCancelRecipeParseJob,
-  resolveRecipeParseJobWorkerOrigin: mockResolveRecipeParseJobWorkerOrigin,
+  markRecipeParseJobQueueingFailure: mockMarkRecipeParseJobQueueingFailure,
   resumeRecipeParseJob: vi.fn(),
-  scheduleRecipeParseJobWorker: mockScheduleRecipeParseJobWorker,
+}));
+
+vi.mock("@/src/inngest/events", () => ({
+  sendRecipeParseJobRequestedEvent: mockSendRecipeParseJobRequestedEvent,
 }));
 
 vi.mock("@/lib/server/database", () => ({
@@ -112,39 +107,11 @@ import { resumeRecipeParseJob } from "@/lib/server/recipe-parse-jobs";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.APP_URL = "https://food-picker.example.com";
-  delete process.env.NEXT_PUBLIC_APP_URL;
-  delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  delete process.env.VERCEL_URL;
-  mockResolveRecipeParseJobWorkerOrigin.mockReturnValue("https://food-picker.example.com");
-  mockScheduleRecipeParseJobWorker.mockResolvedValue(undefined);
+  mockSendRecipeParseJobRequestedEvent.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
-  if (originalAppUrl == null) {
-    delete process.env.APP_URL;
-    return;
-  }
-
-  process.env.APP_URL = originalAppUrl;
-
-  if (originalNextPublicAppUrl == null) {
-    delete process.env.NEXT_PUBLIC_APP_URL;
-  } else {
-    process.env.NEXT_PUBLIC_APP_URL = originalNextPublicAppUrl;
-  }
-
-  if (originalVercelProjectProductionUrl == null) {
-    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  } else {
-    process.env.VERCEL_PROJECT_PRODUCTION_URL = originalVercelProjectProductionUrl;
-  }
-
-  if (originalVercelUrl == null) {
-    delete process.env.VERCEL_URL;
-  } else {
-    process.env.VERCEL_URL = originalVercelUrl;
-  }
+  vi.clearAllMocks();
 });
 
 describe("saveAiConnectionAction", () => {
@@ -222,13 +189,10 @@ describe("rerunRecipesAction", () => {
       rerun: true,
       mode: "bulk_rerun_selection",
     });
-    expect(mockResolveRecipeParseJobWorkerOrigin).toHaveBeenCalledWith({
-      appUrl: "https://food-picker.example.com",
-    });
-    expect(mockScheduleRecipeParseJobWorker).toHaveBeenCalledWith({
+    expect(mockSendRecipeParseJobRequestedEvent).toHaveBeenCalledWith({
       jobId: "job_123",
-      workerToken: "worker_token",
-      origin: "https://food-picker.example.com",
+      householdId: "household_123",
+      trigger: "create",
     });
   });
 
@@ -257,12 +221,12 @@ describe("rerunRecipesAction", () => {
       status: "error",
       message: "A bulk parse job is already running for this household.",
     });
-    expect(mockScheduleRecipeParseJobWorker).not.toHaveBeenCalled();
+    expect(mockSendRecipeParseJobRequestedEvent).not.toHaveBeenCalled();
   });
 });
 
 describe("resumeRecipeParseJobAction", () => {
-  it("re-enqueues the worker route when a job is resumed", async () => {
+  it("sends a new Inngest event when a job is resumed", async () => {
     mockRequireHouseholdContext.mockResolvedValue({
       householdId: "household_123",
       householdName: "Test kitchen",
@@ -287,13 +251,10 @@ describe("resumeRecipeParseJobAction", () => {
       status: "success",
       message: "Resume requested. The next parse chunk is starting.",
     });
-    expect(mockResolveRecipeParseJobWorkerOrigin).toHaveBeenCalledWith({
-      appUrl: "https://food-picker.example.com",
-    });
-    expect(mockScheduleRecipeParseJobWorker).toHaveBeenCalledWith({
+    expect(mockSendRecipeParseJobRequestedEvent).toHaveBeenCalledWith({
       jobId: "job_123",
-      workerToken: "worker_token",
-      origin: "https://food-picker.example.com",
+      householdId: "household_123",
+      trigger: "resume",
     });
   });
 });

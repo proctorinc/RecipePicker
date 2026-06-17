@@ -1511,7 +1511,7 @@ function describeRecipeParseJobPhase(input: {
 }) {
   if (input.needsResume) {
     return input.lastError
-      ? "Needs resume after a worker scheduling error"
+      ? "Needs resume after a background job error"
       : "May be stalled. Resume to continue parsing";
   }
 

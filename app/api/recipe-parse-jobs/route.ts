@@ -1,15 +1,14 @@
-import { after } from "next/server";
 import { NextResponse } from "next/server";
 
 import { requireHouseholdContext } from "@/lib/server/auth";
 import { getRecipeParseJobSummaries } from "@/lib/server/queries";
 import {
   createRecipeParseJob,
-  resolveRecipeParseJobWorkerOrigin,
-  scheduleRecipeParseJobWorker,
+  markRecipeParseJobQueueingFailure,
 } from "@/lib/server/recipe-parse-jobs";
+import { sendRecipeParseJobRequestedEvent } from "@/src/inngest/events";
 import {
-  runBackgroundJob,
+  logInfo,
   toErrorResponse,
   withRouteLogging,
 } from "@/lib/server/logger";
@@ -57,24 +56,29 @@ export const POST = withRouteLogging(
       );
     }
 
-    after(async () => {
-      const origin = resolveRecipeParseJobWorkerOrigin({
-        requestUrl: request.url,
+    try {
+      await sendRecipeParseJobRequestedEvent({
+        jobId: result.jobId,
+        householdId: context.householdId,
+        trigger: "create",
       });
+    } catch (error) {
+      await markRecipeParseJobQueueingFailure({
+        jobId: result.jobId,
+        error,
+      });
+      throw error;
+    }
 
-      await runBackgroundJob({
-        name: "background.recipe_parse_job",
-        target: {
-          householdId: context.householdId,
-          jobId: result.jobId,
-        },
-        fn: async () =>
-          scheduleRecipeParseJobWorker({
-            jobId: result.jobId,
-            workerToken: result.workerToken,
-            origin,
-          }),
-      });
+    logInfo("recipe_parse_job.create_request_accepted", {
+      target: {
+        householdId: context.householdId,
+        jobId: result.jobId,
+      },
+      totalRecipes: result.totalRecipes,
+      result: {
+        status: "accepted",
+      },
     });
 
     return NextResponse.json(

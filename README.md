@@ -29,6 +29,7 @@ Starter templates live in:
 Shared app settings include:
 
 - `APP_URL`
+- `INNGEST_DEV` for local Inngest development
 - `CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
 - `PINTEREST_APP_ID`
@@ -40,7 +41,9 @@ Shared app settings include:
 
 The default Pinterest callback route is `http://localhost:3000/api/pinterest/callback`.
 
-`APP_URL` should be the full origin for the deployed app, for example `http://localhost:3000` in development or `https://your-app.example.com` in production. It is the preferred explicit setting used by server actions to re-enqueue background recipe parse chunks through the internal worker route. On Vercel, the app will also fall back to `VERCEL_PROJECT_PRODUCTION_URL` or `VERCEL_URL` automatically if `APP_URL` is not set.
+`APP_URL` should be the full origin for the deployed app, for example `http://localhost:3000` in development or `https://your-app.example.com` in production.
+
+Bulk recipe parsing now runs through Inngest. For local development, set `INNGEST_DEV=1`, run your Next.js app normally, and start the Inngest Dev Server with `inngest dev`. In production on Vercel, install the official Inngest integration so `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` are provisioned and your `/api/inngest` functions are synced automatically on deploy.
 
 Database settings depend on the environment:
 

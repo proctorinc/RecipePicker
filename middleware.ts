@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
-  "/api/recipe-parse-jobs/worker",
+  "/api/inngest(.*)",
 ]);
 const REQUEST_ID_HEADER = "x-request-id";
 

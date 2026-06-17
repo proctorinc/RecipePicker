@@ -3,7 +3,6 @@
 import crypto from "node:crypto";
 
 import { auth } from "@clerk/nextjs/server";
-import { after } from "next/server";
 import { cookies } from "next/headers";
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -43,7 +42,7 @@ import {
   type AiProvider,
   upsertHouseholdAiConnection,
 } from "@/lib/server/ai-provider";
-import { logAudit, runBackgroundJob, withActionLogging } from "@/lib/server/logger";
+import { logAudit, withActionLogging } from "@/lib/server/logger";
 import {
   disconnectPinterestConnection,
   setPinterestConnectionAutoSyncEnabled,
@@ -51,10 +50,10 @@ import {
 import {
   cancelRecipeParseJob,
   createRecipeParseJob,
-  resolveRecipeParseJobWorkerOrigin,
+  markRecipeParseJobQueueingFailure,
   resumeRecipeParseJob,
-  scheduleRecipeParseJobWorker,
 } from "@/lib/server/recipe-parse-jobs";
+import { sendRecipeParseJobRequestedEvent } from "@/src/inngest/events";
 import { getRecipeHouseholdPinId } from "@/lib/server/queries";
 import { extractRecipes } from "@/lib/server/extract";
 import { revalidateAll, recipeScopedPaths, toErrorState, toOptionalString } from "@/lib/actions/helpers";
@@ -124,25 +123,19 @@ export const rerunRecipesAction = withActionLogging(
       return { status: "error", message: result.message };
     }
 
-    after(async () => {
-      const origin = resolveRecipeParseJobWorkerOrigin({
-        appUrl: process.env.APP_URL,
+    try {
+      await sendRecipeParseJobRequestedEvent({
+        jobId: result.jobId,
+        householdId: context.householdId,
+        trigger: "create",
       });
-
-      await runBackgroundJob({
-        name: "background.recipe_parse_job",
-        target: {
-          householdId: context.householdId,
-          jobId: result.jobId,
-        },
-        fn: async () =>
-          scheduleRecipeParseJobWorker({
-            jobId: result.jobId,
-            workerToken: result.workerToken,
-            origin,
-          }),
+    } catch (error) {
+      await markRecipeParseJobQueueingFailure({
+        jobId: result.jobId,
+        error,
       });
-    });
+      throw error;
+    }
 
     revalidateAll(recipeScopedPaths());
     return {
@@ -158,6 +151,12 @@ export const rerunRecipesAction = withActionLogging(
       result: {
         recipeCount: parseJsonStringArrayCount(formData.get("recipeIds")),
       },
+    }),
+    getResultData: (result, _state, formData) => ({
+      result: {
+        status: result.status,
+      },
+      recipeCount: parseJsonStringArrayCount(formData.get("recipeIds")),
     }),
   },
 );
@@ -197,6 +196,14 @@ export const cancelRecipeParseJobAction = withActionLogging(
         jobId: String(formData.get("jobId") ?? "").trim() || null,
       },
     }),
+    getResultData: (result, _state, formData) => ({
+      result: {
+        status: result.status,
+      },
+      target: {
+        jobId: String(formData.get("jobId") ?? "").trim() || null,
+      },
+    }),
   },
 );
 
@@ -220,25 +227,19 @@ export const resumeRecipeParseJobAction = withActionLogging(
         return { status: "error", message: result.message };
       }
 
-      after(async () => {
-        const origin = resolveRecipeParseJobWorkerOrigin({
-          appUrl: process.env.APP_URL,
+      try {
+        await sendRecipeParseJobRequestedEvent({
+          jobId,
+          householdId: context.householdId,
+          trigger: "resume",
         });
-
-        await runBackgroundJob({
-          name: "background.recipe_parse_job",
-          target: {
-            householdId: context.householdId,
-            jobId,
-          },
-          fn: async () =>
-            scheduleRecipeParseJobWorker({
-              jobId,
-              workerToken: result.workerToken,
-              origin,
-            }),
+      } catch (error) {
+        await markRecipeParseJobQueueingFailure({
+          jobId,
+          error,
         });
-      });
+        throw error;
+      }
 
       revalidateAll(recipeScopedPaths());
       return {
@@ -251,6 +252,14 @@ export const resumeRecipeParseJobAction = withActionLogging(
   },
   {
     getStartData: (_state, formData) => ({
+      target: {
+        jobId: String(formData.get("jobId") ?? "").trim() || null,
+      },
+    }),
+    getResultData: (result, _state, formData) => ({
+      result: {
+        status: result.status,
+      },
       target: {
         jobId: String(formData.get("jobId") ?? "").trim() || null,
       },
