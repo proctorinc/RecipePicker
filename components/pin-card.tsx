@@ -26,7 +26,7 @@ export function PinCard({
     <AppTransitionLink
       href={card.destinationHref}
       prefetch
-      className="mb-2 md:mb-5 block break-inside-avoid"
+      className="block break-inside-avoid"
       pendingClassName="opacity-85"
     >
       <Card className="group overflow-hidden border-white/70 bg-white transition duration-300 hover:-translate-y-1 hover:shadow-[0_18px_48px_rgba(57,45,34,0.14)]">

@@ -25,6 +25,13 @@ const AppRouteTransitionContext =
   createContext<AppRouteTransitionContextValue | null>(null);
 
 const INDICATOR_DELAY_MS = 120;
+const FALLBACK_CONTEXT: AppRouteTransitionContextValue = {
+  isNavigating: false,
+  pendingHref: null,
+  shouldShowIndicator: false,
+  startNavigation() {},
+  clearNavigation() {},
+};
 
 export function AppRouteTransitionProvider({
   children,
@@ -100,14 +107,7 @@ export function AppRouteTransitionProvider({
 
 export function useAppRouteTransition() {
   const context = useContext(AppRouteTransitionContext);
-
-  if (!context) {
-    throw new Error(
-      "useAppRouteTransition must be used within AppRouteTransitionProvider.",
-    );
-  }
-
-  return context;
+  return context ?? FALLBACK_CONTEXT;
 }
 
 export function AppShellProgress() {

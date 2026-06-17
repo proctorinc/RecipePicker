@@ -5,6 +5,7 @@ import {
   buildFeedColumns,
   buildFeedLoadingSkeletons,
   getFeedColumnCount,
+  getFeedPrefetchTriggerIndex,
 } from "@/lib/feed-layout";
 import type { FeedPinCard } from "@/types/view-models";
 
@@ -88,15 +89,34 @@ describe("feed layout helpers", () => {
     expect(threeColumns.map((column) => column.items.length)).toEqual([1, 2, 2]);
   });
 
-  it("builds one loading skeleton per visible column", () => {
+  it("builds three loading skeletons per visible column", () => {
     const skeletons = buildFeedLoadingSkeletons(3);
 
     expect(skeletons).toHaveLength(3);
     expect(skeletons.map((column) => column)).toEqual([
-      [{ id: "feed-skeleton-0", aspectVariant: "taller" }],
-      [{ id: "feed-skeleton-1", aspectVariant: "tall" }],
-      [{ id: "feed-skeleton-2", aspectVariant: "square" }],
+      [
+        { id: "feed-skeleton-0-0", aspectVariant: "taller" },
+        { id: "feed-skeleton-0-1", aspectVariant: "tall" },
+        { id: "feed-skeleton-0-2", aspectVariant: "square" },
+      ],
+      [
+        { id: "feed-skeleton-1-0", aspectVariant: "tall" },
+        { id: "feed-skeleton-1-1", aspectVariant: "square" },
+        { id: "feed-skeleton-1-2", aspectVariant: "taller" },
+      ],
+      [
+        { id: "feed-skeleton-2-0", aspectVariant: "square" },
+        { id: "feed-skeleton-2-1", aspectVariant: "taller" },
+        { id: "feed-skeleton-2-2", aspectVariant: "tall" },
+      ],
     ]);
+  });
+
+  it("starts prefetching when one third of the latest batch remains", () => {
+    expect(getFeedPrefetchTriggerIndex(50, 50)).toBe(33);
+    expect(getFeedPrefetchTriggerIndex(75, 25)).toBe(66);
+    expect(getFeedPrefetchTriggerIndex(2, 50)).toBe(0);
+    expect(getFeedPrefetchTriggerIndex(0, 50)).toBe(-1);
   });
 
   it("maps widths to the current responsive column counts", () => {

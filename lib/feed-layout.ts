@@ -20,6 +20,7 @@ const FEED_CARD_HEIGHT_BY_VARIANT: Record<FeedCardAspectVariant, number> = {
 
 const FEED_CARD_CHROME_HEIGHT = 0.18;
 const SKELETON_VARIANTS: FeedCardAspectVariant[] = ["taller", "tall", "square"];
+const FEED_LOADING_SKELETONS_PER_COLUMN = 3;
 
 export function getFeedCardAspectVariant(pinId: string): FeedCardAspectVariant {
   const value = pinId.charCodeAt(pinId.length - 1) % 3;
@@ -103,12 +104,35 @@ export function appendFeedItems(
 }
 
 export function buildFeedLoadingSkeletons(columnCount: number) {
-  return Array.from({ length: Math.max(1, columnCount) }, (_unused, index) => [
-    {
-      id: `feed-skeleton-${index}`,
-      aspectVariant: SKELETON_VARIANTS[index % SKELETON_VARIANTS.length],
-    } satisfies FeedSkeletonItem,
-  ]);
+  return Array.from({ length: Math.max(1, columnCount) }, (_unused, index) =>
+    Array.from(
+      { length: FEED_LOADING_SKELETONS_PER_COLUMN },
+      (_unusedItem, skeletonIndex) => ({
+        id: `feed-skeleton-${index}-${skeletonIndex}`,
+        aspectVariant:
+          SKELETON_VARIANTS[
+            (index + skeletonIndex) % SKELETON_VARIANTS.length
+          ],
+      }) satisfies FeedSkeletonItem,
+    ),
+  );
+}
+
+export function getFeedPrefetchTriggerIndex(
+  itemCount: number,
+  lastBatchSize: number,
+) {
+  if (itemCount <= 0 || lastBatchSize <= 0) {
+    return -1;
+  }
+
+  const normalizedBatchSize = Math.min(lastBatchSize, itemCount);
+  const remainingItemsInBatch = Math.max(
+    1,
+    Math.floor(normalizedBatchSize / 3),
+  );
+
+  return Math.max(0, itemCount - remainingItemsInBatch - 1);
 }
 
 function getShortestColumn(columns: FeedColumnLayout[]) {

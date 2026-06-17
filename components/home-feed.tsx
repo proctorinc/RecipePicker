@@ -10,8 +10,11 @@ import {
   buildFeedColumns,
   buildFeedLoadingSkeletons,
   getFeedColumnCount,
+  getFeedPrefetchTriggerIndex,
 } from "@/lib/feed-layout";
 import type { FeedPinCard } from "@/types/view-models";
+
+const DEFAULT_FEED_PAGE_SIZE = 50;
 
 type HomeFeedProps = {
   initialItems: FeedPinCard[];
@@ -34,7 +37,9 @@ export function HomeFeed({
   const [cursor, setCursor] = useState(initialCursor);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const [lastBatchSize, setLastBatchSize] = useState(initialItems.length);
+  const prefetchSentinelRef = useRef<HTMLDivElement | null>(null);
+  const endSentinelRef = useRef<HTMLDivElement | null>(null);
   const isFetchingRef = useRef(false);
   const itemsRef = useRef(items);
   const loadingSkeletons = buildFeedLoadingSkeletons(columnCount);
@@ -64,6 +69,7 @@ export function HomeFeed({
     setCursor(initialCursor);
     setHasMore(initialHasMore);
     setIsLoadingMore(false);
+    setLastBatchSize(initialItems.length);
     isFetchingRef.current = false;
   }, [initialCursor, initialHasMore, initialItems, query]);
 
@@ -76,28 +82,33 @@ export function HomeFeed({
       return;
     }
 
-    const sentinel = sentinelRef.current;
-    if (!sentinel) {
+    const sentinels = [
+      prefetchSentinelRef.current,
+      endSentinelRef.current,
+    ].filter((sentinel): sentinel is HTMLDivElement => Boolean(sentinel));
+
+    if (sentinels.length === 0) {
       return;
     }
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const entry = entries[0];
-        if (!entry?.isIntersecting || isFetchingRef.current || !hasMore) {
+        const hasIntersectingEntry = entries.some((entry) => entry.isIntersecting);
+        if (!hasIntersectingEntry || isFetchingRef.current || !hasMore) {
           return;
         }
 
         void loadMore();
       },
-      {
-        rootMargin: "1200px 0px 1200px 0px",
-      },
+      { rootMargin: "0px" },
     );
 
-    observer.observe(sentinel);
+    for (const sentinel of sentinels) {
+      observer.observe(sentinel);
+    }
+
     return () => observer.disconnect();
-  }, [cursor, hasMore, query]);
+  }, [cursor, hasMore, items, lastBatchSize, query]);
 
   async function loadMore() {
     if (isFetchingRef.current || !hasMore) {
@@ -115,6 +126,7 @@ export function HomeFeed({
       if (cursor) {
         params.set("cursor", cursor);
       }
+      params.set("pageSize", String(DEFAULT_FEED_PAGE_SIZE));
 
       const response = await fetch(`/api/feed?${params.toString()}`, {
         method: "GET",
@@ -149,6 +161,7 @@ export function HomeFeed({
       if (appendedItems.length > 0) {
         setColumns((current) => appendFeedItems(current, appendedItems));
       }
+      setLastBatchSize(page.items.length);
       setCursor(page.nextCursor);
       setHasMore(page.hasMore);
     } finally {
@@ -174,11 +187,12 @@ export function HomeFeed({
         {columns.map((column, columnIndex) => (
           <div key={columnIndex} className="flex flex-col gap-2 md:gap-5">
             {column.items.map((card, index) => (
-              <PinCard
-                key={card.recipeId}
-                card={card}
-                priority={columnIndex < 2 && index < 2}
-              />
+              <div key={card.recipeId} ref={getCardPrefetchRef(card.recipeId)}>
+                <PinCard
+                  card={card}
+                  priority={columnIndex < 2 && index < 2}
+                />
+              </div>
             ))}
             {isLoadingMore
               ? loadingSkeletons[columnIndex]?.map((skeleton) => (
@@ -192,7 +206,7 @@ export function HomeFeed({
         ))}
       </section>
 
-      {hasMore ? <div ref={sentinelRef} className="h-px w-full" /> : null}
+      {hasMore ? <div ref={endSentinelRef} className="h-px w-full" /> : null}
 
       {!hasMore ? (
         <p className="pb-10 text-center text-sm text-muted-foreground">
@@ -201,6 +215,17 @@ export function HomeFeed({
       ) : null}
     </>
   );
+
+  function getCardPrefetchRef(recipeId: string) {
+    if (!hasMore) {
+      return undefined;
+    }
+
+    const triggerIndex = getFeedPrefetchTriggerIndex(items.length, lastBatchSize);
+    const triggerRecipeId = items[triggerIndex]?.recipeId;
+
+    return triggerRecipeId === recipeId ? prefetchSentinelRef : undefined;
+  }
 }
 
 function getInitialColumnCount() {

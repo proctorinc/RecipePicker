@@ -1,11 +1,6 @@
 import type { ReactNode } from "react";
 import Image from "next/image";
-import {
-  Clock3,
-  ExternalLink,
-  ListChecks,
-  Sparkles,
-} from "lucide-react";
+import { Clock3, ExternalLink, ListChecks, Sparkles } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { ActionForm } from "@/components/action-form";
@@ -100,7 +95,8 @@ export default async function RecipePage({
                   <MetaChip
                     icon={<Clock3 className="h-4 w-4" />}
                     label={
-                      formatIso8601Duration(recipe.totalTime) ?? recipe.totalTime
+                      formatIso8601Duration(recipe.totalTime) ??
+                      recipe.totalTime
                     }
                   />
                 ) : null}

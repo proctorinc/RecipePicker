@@ -67,8 +67,8 @@ type FeedCardRow = FeedPinCard & {
   updatedAt: string;
 };
 
-const DEFAULT_FEED_PAGE_SIZE = 24;
-const MAX_FEED_PAGE_SIZE = 48;
+const DEFAULT_FEED_PAGE_SIZE = 50;
+const MAX_FEED_PAGE_SIZE = 100;
 
 export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
   const [context, appAccess] = await Promise.all([
