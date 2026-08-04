@@ -96,6 +96,7 @@ vi.mock("next/cache", () => ({
 }));
 
 import {
+  cancelRecipeParseJobAction,
   createRecipeEventAction,
   createRecipeEventsAction,
   rerunRecipesAction,
@@ -255,6 +256,36 @@ describe("resumeRecipeParseJobAction", () => {
       jobId: "job_123",
       householdId: "household_123",
       trigger: "resume",
+    });
+  });
+});
+
+describe("cancelRecipeParseJobAction", () => {
+  it("returns the immediate cancellation message", async () => {
+    mockRequireHouseholdContext.mockResolvedValue({
+      householdId: "household_123",
+      householdName: "Test kitchen",
+      role: "owner",
+      clerkUserId: "user_123",
+    });
+    mockCancelRecipeParseJob.mockResolvedValue({
+      ok: true,
+      message: "Job cancelled immediately.",
+    });
+
+    const formData = new FormData();
+    formData.set("jobId", "job_123");
+
+    await expect(cancelRecipeParseJobAction(
+      { status: "idle", message: "" },
+      formData,
+    )).resolves.toEqual({
+      status: "success",
+      message: "Job cancelled immediately.",
+    });
+    expect(mockCancelRecipeParseJob).toHaveBeenCalledWith({
+      householdId: "household_123",
+      jobId: "job_123",
     });
   });
 });

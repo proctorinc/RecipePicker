@@ -14,6 +14,7 @@ import {
   households,
 } from "@/lib/server/db";
 import {
+  cancelRecipeParseJob,
   markRecipeParseJobQueueingFailure,
   processRecipeParseJobChunk,
 } from "@/lib/server/recipe-parse-jobs";
@@ -260,6 +261,66 @@ describe("processRecipeParseJobChunk", () => {
       }
     });
   });
+
+  it("stops an active chunk immediately when the job is cancelled", async () => {
+    await withTestDatabase(async ({ sqlitePath }) => {
+      const { householdId, jobId } = await seedRecipeParseJob(sqlitePath, 25);
+      let started = 0;
+      let aborted = 0;
+
+      mockExtractSingleRecipe.mockImplementation(({ signal }: { signal?: AbortSignal }) => {
+        started += 1;
+        return new Promise((_, reject) => {
+          signal?.addEventListener("abort", () => {
+            aborted += 1;
+            reject(new DOMException("Cancelled", "AbortError"));
+          }, { once: true });
+        });
+      });
+
+      const chunk = processRecipeParseJobChunk({ jobId });
+      while (started < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+
+      await expect(cancelRecipeParseJob({ householdId, jobId })).resolves.toMatchObject({
+        ok: true,
+        message: "Job cancelled immediately.",
+      });
+      await expect(chunk).resolves.toEqual({ status: "cancelled" });
+      expect(started).toBe(3);
+      expect(aborted).toBe(3);
+
+      const { db, sqlite } = await openDatabase(sqlitePath);
+      try {
+        const job = await db.query.householdRecipeParseJobs.findFirst({
+          where: (table, { eq }) => eq(table.jobId, jobId),
+        });
+        const items = await db.query.householdRecipeParseJobItems.findMany({
+          where: (table, { eq }) => eq(table.jobId, jobId),
+        });
+
+        expect(job?.status).toBe("cancelled");
+        expect(items).toHaveLength(25);
+        expect(items.every((item) => item.status === "cancelled")).toBe(true);
+      } finally {
+        await sqlite.close();
+      }
+    });
+  });
+
+  it("cancels a queued job without starting extraction", async () => {
+    await withTestDatabase(async ({ sqlitePath }) => {
+      const { householdId, jobId } = await seedRecipeParseJob(sqlitePath, 2);
+
+      await expect(cancelRecipeParseJob({ householdId, jobId })).resolves.toMatchObject({
+        ok: true,
+        message: "Job cancelled immediately.",
+      });
+      await expect(processRecipeParseJobChunk({ jobId })).resolves.toEqual({ status: "cancelled" });
+      expect(mockExtractSingleRecipe).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("markRecipeParseJobQueueingFailure", () => {
@@ -308,5 +369,18 @@ describe("runRecipeParseJobWorkflow", () => {
     expect(step.run).toHaveBeenNthCalledWith(1, "chunk-1", expect.any(Function));
     expect(step.run).toHaveBeenNthCalledWith(2, "chunk-2", expect.any(Function));
     expect(step.run).toHaveBeenNthCalledWith(3, "chunk-3", expect.any(Function));
+  });
+
+  it("does not schedule another chunk after cancellation", async () => {
+    const step = {
+      run: vi.fn().mockResolvedValue({ status: "cancelled" }),
+    };
+
+    await expect(runRecipeParseJobWorkflow({
+      jobId: "job_123",
+      householdId: "household_123",
+      step,
+    })).resolves.toEqual({ status: "cancelled" });
+    expect(step.run).toHaveBeenCalledTimes(1);
   });
 });

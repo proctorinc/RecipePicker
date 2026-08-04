@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 
 import { openDatabase } from "@/lib/server/database";
 import {
@@ -297,10 +297,25 @@ export async function cancelRecipeParseJob(input: {
     }
 
     const now = new Date().toISOString();
+    await db.update(householdRecipeParseJobItems)
+      .set({
+        status: "cancelled",
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(and(
+        eq(householdRecipeParseJobItems.jobId, input.jobId),
+        inArray(householdRecipeParseJobItems.status, ["queued", "processing"]),
+      ))
+      .run();
+
+    await rollupJobProgress(db, input.jobId, now);
     await db.update(householdRecipeParseJobs)
       .set({
-        status: "cancelling",
+        status: "cancelled",
         cancelRequestedAt: job.cancelRequestedAt ?? now,
+        completedAt: now,
+        lastHeartbeatAt: now,
         updatedAt: now,
       })
       .where(eq(householdRecipeParseJobs.jobId, input.jobId))
@@ -311,13 +326,13 @@ export async function cancelRecipeParseJob(input: {
       jobId: input.jobId,
       data: {
         previousStatus: job.status,
-        nextStatus: "cancelling",
+        nextStatus: "cancelled",
       },
     });
 
     return {
       ok: true,
-      message: "Cancellation requested. The current chunk will finish before the job stops.",
+      message: "Job cancelled immediately.",
     };
   } finally {
     await sqlite.close();
@@ -437,7 +452,10 @@ export async function markRecipeParseJobQueueingFailure(input: {
         lastError: nextError,
         updatedAt: now,
       })
-      .where(eq(householdRecipeParseJobs.jobId, input.jobId))
+      .where(and(
+        eq(householdRecipeParseJobs.jobId, input.jobId),
+        ne(householdRecipeParseJobs.status, "cancelled"),
+      ))
       .run();
 
     logRecipeParseJobEvent("error", "recipe_parse_job.queue_failed", {
@@ -526,7 +544,7 @@ export async function processRecipeParseJobChunk(input: {
           jobStatus: job.status,
         },
       });
-      return { status: "already_finished" as const };
+      return { status: job.status === "cancelled" ? "cancelled" as const : "already_finished" as const };
     }
 
     const now = new Date();
@@ -566,21 +584,16 @@ export async function processRecipeParseJobChunk(input: {
       return { status: "busy" as const };
     }
 
-    if (job.cancelRequestedAt) {
-      await finalizeCancelledJob(db, job.jobId, now.toISOString());
-      logRecipeParseJobEvent("info", "recipe_parse_job.cancelled", {
-        householdId: job.householdId,
-        jobId: job.jobId,
-        data: {
-          reason: "cancel_requested_before_claim",
-        },
-      });
-      return { status: "cancelled" as const };
-    }
-
     const claimedItems = await claimNextJobItems(db, job.jobId, now.toISOString());
 
     if (claimedItems.length === 0) {
+      const refreshedJob = await db.query.householdRecipeParseJobs.findFirst({
+        where: (table, { eq }) => eq(table.jobId, job.jobId),
+        columns: { status: true },
+      });
+      if (refreshedJob?.status === "cancelled") {
+        return { status: "cancelled" as const };
+      }
       await finalizeCompletedJob(db, job.jobId, now.toISOString());
       logRecipeParseJobEvent("info", "recipe_parse_job.completed", {
         householdId: job.householdId,
@@ -606,13 +619,23 @@ export async function processRecipeParseJobChunk(input: {
       },
     });
 
-    await runWithConcurrency(claimedItems, RECIPE_PARSE_CONCURRENCY, async (item) => {
+    const cancellationMonitor = createJobCancellationMonitor(db, job.jobId);
+    try {
+      await runWithConcurrency(claimedItems, RECIPE_PARSE_CONCURRENCY, async (item) => {
+        if (await cancellationMonitor.isCancelled()) {
+          return;
+        }
+
       try {
         const result = await extractSingleRecipe({
           householdId: job.householdId,
           recipeId: item.recipeId,
           rerun: job.rerun,
+          signal: cancellationMonitor.signal,
         });
+        if (cancellationMonitor.signal.aborted) {
+          return;
+        }
         const itemStatus = result.outcome === "extracted"
           ? "extracted"
           : result.outcome === "review_needed"
@@ -642,6 +665,9 @@ export async function processRecipeParseJobChunk(input: {
           },
         });
       } catch (error) {
+        if (cancellationMonitor.signal.aborted || isAbortError(error)) {
+          return;
+        }
         await completeJobItem(db, {
           jobItemId: item.jobItemId,
           status: "failed",
@@ -661,9 +687,14 @@ export async function processRecipeParseJobChunk(input: {
           },
         });
       } finally {
-        await markJobHeartbeat(db, job.jobId, job.cancelRequestedAt ? "cancelling" : "running", new Date().toISOString());
+        if (!cancellationMonitor.signal.aborted) {
+          await markJobHeartbeat(db, job.jobId, "running", new Date().toISOString());
+        }
       }
-    });
+      });
+    } finally {
+      cancellationMonitor.stop();
+    }
 
     const counts = await rollupJobProgress(db, job.jobId, new Date().toISOString());
 
@@ -682,19 +713,13 @@ export async function processRecipeParseJobChunk(input: {
     });
 
     if (counts.queued === 0 && counts.processing === 0) {
-      if (job.cancelRequestedAt) {
-        await finalizeCancelledJob(db, job.jobId, new Date().toISOString());
-        logRecipeParseJobEvent("info", "recipe_parse_job.cancelled", {
-          householdId: job.householdId,
-          jobId: job.jobId,
-          data: {
-            reason: "cancel_requested_after_chunk",
-            ...counts,
-          },
-        });
+      const refreshedJob = await db.query.householdRecipeParseJobs.findFirst({
+        where: (table, { eq }) => eq(table.jobId, job.jobId),
+        columns: { status: true },
+      });
+      if (refreshedJob?.status === "cancelled") {
         return { status: "cancelled" as const };
       }
-
       await finalizeCompletedJob(db, job.jobId, new Date().toISOString());
       logRecipeParseJobEvent("info", "recipe_parse_job.completed", {
         householdId: job.householdId,
@@ -706,21 +731,10 @@ export async function processRecipeParseJobChunk(input: {
 
     const refreshedJob = await db.query.householdRecipeParseJobs.findFirst({
       where: (table, { eq }) => eq(table.jobId, job.jobId),
-      columns: {
-        cancelRequestedAt: true,
-      },
+      columns: { status: true },
     });
 
-    if (refreshedJob?.cancelRequestedAt) {
-      await finalizeCancelledJob(db, job.jobId, new Date().toISOString());
-      logRecipeParseJobEvent("info", "recipe_parse_job.cancelled", {
-        householdId: job.householdId,
-        jobId: job.jobId,
-        data: {
-          reason: "cancel_requested_between_chunks",
-          ...counts,
-        },
-      });
+    if (refreshedJob?.status === "cancelled") {
       return { status: "cancelled" as const };
     }
 
@@ -789,7 +803,10 @@ async function completeJobItem(
       completedAt: now,
       updatedAt: now,
     })
-    .where(eq(householdRecipeParseJobItems.jobItemId, input.jobItemId))
+    .where(and(
+      eq(householdRecipeParseJobItems.jobItemId, input.jobItemId),
+      eq(householdRecipeParseJobItems.status, "processing"),
+    ))
     .run();
 }
 
@@ -806,7 +823,10 @@ async function markJobHeartbeat(
       lastHeartbeatAt: now,
       updatedAt: now,
     })
-    .where(eq(householdRecipeParseJobs.jobId, jobId))
+    .where(and(
+      eq(householdRecipeParseJobs.jobId, jobId),
+      ne(householdRecipeParseJobs.status, "cancelled"),
+    ))
     .run();
 }
 
@@ -823,33 +843,10 @@ async function finalizeCompletedJob(
       lastHeartbeatAt: now,
       updatedAt: now,
     })
-    .where(eq(householdRecipeParseJobs.jobId, jobId))
-    .run();
-}
-
-async function finalizeCancelledJob(
-  db: Awaited<ReturnType<typeof openDatabase>>["db"],
-  jobId: string,
-  now: string,
-) {
-  await db.update(householdRecipeParseJobItems)
-    .set({
-      status: "cancelled",
-      completedAt: now,
-      updatedAt: now,
-    })
-    .where(and(eq(householdRecipeParseJobItems.jobId, jobId), eq(householdRecipeParseJobItems.status, "queued")))
-    .run();
-
-  await rollupJobProgress(db, jobId, now);
-  await db.update(householdRecipeParseJobs)
-    .set({
-      status: "cancelled",
-      completedAt: now,
-      lastHeartbeatAt: now,
-      updatedAt: now,
-    })
-    .where(eq(householdRecipeParseJobs.jobId, jobId))
+    .where(and(
+      eq(householdRecipeParseJobs.jobId, jobId),
+      ne(householdRecipeParseJobs.status, "cancelled"),
+    ))
     .run();
 }
 
@@ -955,6 +952,49 @@ function isJobHeartbeatStale(lastHeartbeatAt: string | null, now: Date) {
   }
 
   return now.getTime() - heartbeatMs >= RECIPE_PARSE_STALE_HEARTBEAT_MS;
+}
+
+function createJobCancellationMonitor(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  jobId: string,
+) {
+  const controller = new AbortController();
+  let checking: Promise<boolean> | null = null;
+
+  const isCancelled = async () => {
+    if (controller.signal.aborted) {
+      return true;
+    }
+    if (!checking) {
+      checking = db.query.householdRecipeParseJobs.findFirst({
+        where: (table, { eq }) => eq(table.jobId, jobId),
+        columns: { status: true },
+      }).then((job) => {
+        const cancelled = !job || job.status === "cancelled";
+        if (cancelled) {
+          controller.abort();
+        }
+        return cancelled;
+      }).finally(() => {
+        checking = null;
+      });
+    }
+    return checking;
+  };
+
+  const interval = setInterval(() => {
+    void isCancelled();
+  }, 250);
+
+  return {
+    signal: controller.signal,
+    isCancelled,
+    stop: () => clearInterval(interval),
+  };
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 async function runWithConcurrency<T>(

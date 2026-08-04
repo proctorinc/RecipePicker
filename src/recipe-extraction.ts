@@ -72,6 +72,12 @@ const UNICODE_FRACTIONS: Record<string, string> = {
   "⅞": "7/8",
 };
 
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException("Recipe extraction cancelled.", "AbortError");
+  }
+}
+
 export type RecipeFetchStatus = "fetched" | "fetch_failed" | "not_html";
 
 export type ExtractionStatus =
@@ -206,8 +212,8 @@ type BrowserFetchResult = FetchResult & {
   readerText: string | null;
 };
 
-export async function fetchRecipePage(url: string): Promise<FetchResult> {
-  return fetchRecipePageWithStrategy(url, "direct_http_html");
+export async function fetchRecipePage(url: string, signal?: AbortSignal): Promise<FetchResult> {
+  return fetchRecipePageWithStrategy(url, "direct_http_html", signal);
 }
 
 export function extractRecipeFromHtml(html: string, pageUrl: string): ExtractionResult {
@@ -217,24 +223,27 @@ export function extractRecipeFromHtml(html: string, pageUrl: string): Extraction
 
 export async function extractRecipeWithFallbacks(
   url: string,
-  options?: { householdId?: string },
+  options?: { householdId?: string; signal?: AbortSignal },
 ): Promise<ExtractionResult> {
+  throwIfAborted(options?.signal);
   const attempts: ExtractionAttempt[] = [];
 
-  const directFetch = await fetchRecipePageWithStrategy(url, "direct_http_html");
+  const directFetch = await fetchRecipePageWithStrategy(url, "direct_http_html", options?.signal);
+  throwIfAborted(options?.signal);
   attempts.push(...buildAttemptsFromFetch(directFetch, "direct_http_html"));
 
   let best = chooseBestExtraction(attempts);
   if (shouldStopAfter(best)) {
-    return await ensureResultHasPreview(best, url);
+    return await ensureResultHasPreview(best, url, options?.signal);
   }
 
-  const browserFetch = await fetchRecipePageWithBrowser(url);
+  const browserFetch = await fetchRecipePageWithBrowser(url, options?.signal);
+  throwIfAborted(options?.signal);
   attempts.push(...buildAttemptsFromFetch(browserFetch, "browser_rendered_html", browserFetch.readerText));
 
   best = chooseBestExtraction(attempts);
   if (shouldStopAfter(best)) {
-    return await ensureResultHasPreview(best, url);
+    return await ensureResultHasPreview(best, url, options?.signal);
   }
 
   const aiAttempt = await extractRecipeWithAi(
@@ -242,15 +251,16 @@ export async function extractRecipeWithFallbacks(
     directFetch,
     browserFetch,
     options?.householdId ?? null,
+    options?.signal,
   );
   if (aiAttempt) {
     attempts.push(aiAttempt);
   }
 
-  return await ensureResultHasPreview(chooseBestExtraction(attempts), url);
+  return await ensureResultHasPreview(chooseBestExtraction(attempts), url, options?.signal);
 }
 
-async function fetchRecipePageWithStrategy(url: string, fetchStrategy: FetchStrategy): Promise<FetchResult> {
+async function fetchRecipePageWithStrategy(url: string, fetchStrategy: FetchStrategy, signal?: AbortSignal): Promise<FetchResult> {
   const fetchedAt = new Date().toISOString();
   const headers = {
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -266,7 +276,7 @@ async function fetchRecipePageWithStrategy(url: string, fetchStrategy: FetchStra
       const response = await fetch(url, {
         redirect: "follow",
         headers,
-        signal: AbortSignal.timeout(15000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       });
 
       const contentType = response.headers.get("content-type");
@@ -310,6 +320,7 @@ async function fetchRecipePageWithStrategy(url: string, fetchStrategy: FetchStra
         fetchStrategy,
       };
     } catch (error: unknown) {
+      throwIfAborted(signal);
       if (attempt === 0) {
         continue;
       }
@@ -339,12 +350,15 @@ async function fetchRecipePageWithStrategy(url: string, fetchStrategy: FetchStra
   };
 }
 
-async function fetchRecipePageWithBrowser(url: string): Promise<BrowserFetchResult> {
+async function fetchRecipePageWithBrowser(url: string, signal?: AbortSignal): Promise<BrowserFetchResult> {
   const fetchedAt = new Date().toISOString();
+  throwIfAborted(signal);
 
   try {
     const { chromium } = await import("playwright");
     const browser = await chromium.launch({ headless: true });
+    const closeOnAbort = () => void browser.close();
+    signal?.addEventListener("abort", closeOnAbort, { once: true });
     const page = await browser.newPage({ userAgent: DEFAULT_USER_AGENT });
 
     try {
@@ -374,9 +388,11 @@ async function fetchRecipePageWithBrowser(url: string): Promise<BrowserFetchResu
         fetchStrategy: "browser_rendered_html",
       };
     } finally {
+      signal?.removeEventListener("abort", closeOnAbort);
       await browser.close();
     }
   } catch (error: unknown) {
+    throwIfAborted(signal);
     return {
       originalUrl: url,
       finalUrl: null,
@@ -391,10 +407,13 @@ async function fetchRecipePageWithBrowser(url: string): Promise<BrowserFetchResu
   }
 }
 
-async function capturePagePreviewWithBrowser(url: string): Promise<string | null> {
+async function capturePagePreviewWithBrowser(url: string, signal?: AbortSignal): Promise<string | null> {
+  throwIfAborted(signal);
   try {
     const { chromium } = await import("playwright");
     const browser = await chromium.launch({ headless: true });
+    const closeOnAbort = () => void browser.close();
+    signal?.addEventListener("abort", closeOnAbort, { once: true });
     const page = await browser.newPage({ userAgent: DEFAULT_USER_AGENT });
 
     try {
@@ -410,14 +429,17 @@ async function capturePagePreviewWithBrowser(url: string): Promise<string | null
       });
       return `data:image/jpeg;base64,${screenshot.toString("base64")}`;
     } finally {
+      signal?.removeEventListener("abort", closeOnAbort);
       await browser.close();
     }
   } catch {
+    throwIfAborted(signal);
     return null;
   }
 }
 
-async function ensureResultHasPreview(result: ExtractionResult, url: string): Promise<ExtractionResult> {
+async function ensureResultHasPreview(result: ExtractionResult, url: string, signal?: AbortSignal): Promise<ExtractionResult> {
+  throwIfAborted(signal);
   if (result.status !== "recipe_extracted") {
     return result;
   }
@@ -428,7 +450,8 @@ async function ensureResultHasPreview(result: ExtractionResult, url: string): Pr
     return result;
   }
 
-  const pagePreviewDataUrl = await capturePagePreviewWithBrowser(url);
+  const pagePreviewDataUrl = await capturePagePreviewWithBrowser(url, signal);
+  throwIfAborted(signal);
   if (!pagePreviewDataUrl) {
     return result;
   }
@@ -843,6 +866,7 @@ async function extractRecipeWithAi(
   directFetch: FetchResult,
   browserFetch: BrowserFetchResult,
   householdId: string | null,
+  signal?: AbortSignal,
 ): Promise<ExtractionAttempt | null> {
   if (!householdId) {
     return null;
@@ -875,7 +899,9 @@ async function extractRecipeWithAi(
       householdId,
       prompt,
       schema: aiRecipeSchema,
+      signal,
     });
+    throwIfAborted(signal);
     if (!parsed) {
       return null;
     }
@@ -923,6 +949,7 @@ async function extractRecipeWithAi(
       pagePreviewDataUrl: browserFetch.pagePreviewDataUrl ?? null,
     };
   } catch (error: unknown) {
+    throwIfAborted(signal);
     return {
       status: "extraction_failed",
       method: null,

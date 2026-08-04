@@ -1524,7 +1524,7 @@ function describeRecipeParseJobPhase(input: {
   }
 
   if (input.status === "cancelling") {
-    return "Finishing current chunk before cancelling";
+    return "Cancelling immediately";
   }
 
   if (input.status === "cancelled") {

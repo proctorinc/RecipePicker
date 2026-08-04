@@ -84,6 +84,7 @@ export async function extractSingleRecipe(args: {
   recipeId: string;
   sqlitePath?: string;
   rerun?: boolean;
+  signal?: AbortSignal;
 }): Promise<ExtractSingleRecipeResult> {
   const { db, sqlite } = await openDatabase(args.sqlitePath);
 
@@ -107,7 +108,8 @@ export async function extractSingleRecipe(args: {
       };
     }
 
-    return extractRecipeRow(db, args.householdId, row, args.rerun ?? false);
+    throwIfAborted(args.signal);
+    return extractRecipeRow(db, args.householdId, row, args.rerun ?? false, args.signal);
   } finally {
     await sqlite.close();
   }
@@ -131,7 +133,9 @@ async function extractRecipeRow(
   householdId: string,
   row: RecipeExtractionRow,
   rerun: boolean,
+  signal?: AbortSignal,
 ): Promise<ExtractSingleRecipeResult> {
+  throwIfAborted(signal);
   if (!row.pin.link) {
     return {
       outcome: "skipped",
@@ -156,7 +160,9 @@ async function extractRecipeRow(
 
   const extractionResult = await extractRecipeWithFallbacks(row.pin.link, {
     householdId,
+    signal,
   });
+  throwIfAborted(signal);
   const sourceIdsByKey = await persistSourcesForAttempts(
     db,
     householdId,
@@ -167,6 +173,7 @@ async function extractRecipeRow(
   const selectedSourceId =
     getAttemptSourceId(sourceIdsByKey, extractionResult.fetchStrategy, extractionResult.sourceUrl ?? row.pin.link) ?? null;
   const extractionId = await persistExtractionRow(db, householdId, row.pinId, extractionResult, selectedSourceId);
+  throwIfAborted(signal);
 
   if (extractionId) {
     await persistAttemptRows(
@@ -177,6 +184,7 @@ async function extractRecipeRow(
       extractionResult,
       sourceIdsByKey,
     );
+    throwIfAborted(signal);
   }
 
   if (extractionResult.status === "recipe_extracted" && extractionResult.recipe && selectedSourceId) {
@@ -187,6 +195,7 @@ async function extractRecipeRow(
       selectedSourceId,
       extractionResult,
     );
+    throwIfAborted(signal);
     await touchRecipeUpdatedAt(db, row.recipeId);
     return {
       outcome: reviewCount > 0 || extractionResult.lowConfidence ? "review_needed" : "extracted",
@@ -218,6 +227,12 @@ async function extractRecipeRow(
     skipped: 0,
     extractionId,
   };
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException("Recipe extraction cancelled.", "AbortError");
+  }
 }
 
 async function persistExtractionRow(

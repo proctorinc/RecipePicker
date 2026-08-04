@@ -318,7 +318,7 @@ function RecipeParseJobsPanel({
         <div>
           <h3 className="font-medium">Bulk parse jobs</h3>
           <p className="text-sm text-muted-foreground">
-            Refresh to check progress or cancel an in-flight parse after the current chunk.
+            Refresh to check progress or cancel an in-flight parse immediately.
           </p>
         </div>
         <Button type="button" variant="outline" onClick={onRefresh} disabled={refreshing}>
@@ -372,7 +372,7 @@ function RecipeParseJobsPanel({
                   <form action={cancelFormAction}>
                     <input type="hidden" name="jobId" value={job.jobId} />
                     <Button type="submit" variant="outline">
-                      {job.status === "cancelling" ? "Cancelling..." : "Cancel job"}
+                      {job.status === "cancelling" ? "Cancelling..." : "Cancel job now"}
                     </Button>
                   </form>
                 ) : null}

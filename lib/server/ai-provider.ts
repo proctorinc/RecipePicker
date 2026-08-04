@@ -53,6 +53,7 @@ type StructuredGenerationArgs<TSchema extends ZodTypeAny> = {
   householdId: string;
   prompt: string;
   schema: TSchema;
+  signal?: AbortSignal;
 };
 
 const AI_MODEL_CATALOG: Record<AiProvider, AiModelOption[]> = {
@@ -372,6 +373,7 @@ async function generateHouseholdAiObject<TSchema extends ZodTypeAny>({
   householdId,
   prompt,
   schema,
+  signal,
 }: StructuredGenerationArgs<TSchema>): Promise<z.infer<TSchema> | null> {
   const config = await getStoredHouseholdAiConfig(householdId);
 
@@ -384,6 +386,7 @@ async function generateHouseholdAiObject<TSchema extends ZodTypeAny>({
       model: getLanguageModel(config.provider, config.model, config.apiKey),
       schema,
       prompt,
+      abortSignal: signal,
     });
 
     return object as z.infer<TSchema>;
