@@ -848,14 +848,11 @@ export async function getRecipeParseJobSummaries(): Promise<RecipeParseJobSummar
 
   try {
     const jobs = await db.query.householdRecipeParseJobs.findMany({
-      // Parse jobs are operational state, not an audit log. Completed and
-      // cancelled jobs intentionally disappear from this view.
-      where: (table, { and, eq, inArray }) => and(
-        eq(table.householdId, context.householdId),
-        inArray(table.status, ["queued", "running", "cancelling"]),
-      ),
+      // Keep a short history alongside any in-flight work so people can see
+      // the outcome of their recent bulk operations.
+      where: (table, { eq }) => eq(table.householdId, context.householdId),
       orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
-      limit: 1,
+      limit: 12,
       with: {
         items: {
           columns: {

@@ -10,6 +10,14 @@ import { cancelRecipeParseJobAction, resumeRecipeParseJobAction } from "@/lib/ac
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -308,30 +316,37 @@ function RecipeParseJobsPanel({
   cancelFormAction: (payload: FormData) => void;
   resumeFormAction: (payload: FormData) => void;
 }) {
-  if (jobs.length === 0) {
-    return null;
-  }
+  const activeJobs = jobs.filter(
+    (job) => job.canCancel || job.canResume || ["queued", "running", "cancelling"].includes(job.status),
+  );
+  const recentJobs = jobs.filter((job) => !activeJobs.some((activeJob) => activeJob.jobId === job.jobId));
 
   return (
-    <div className="space-y-3 rounded-[24px] border border-border/60 bg-background/70 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="font-medium">Current bulk parse job</h3>
-          <p className="text-sm text-muted-foreground">
-            Refresh to check progress or cancel the active parse immediately.
-          </p>
-        </div>
-        <Button type="button" variant="outline" onClick={onRefresh} disabled={refreshing}>
-          {refreshing ? "Refreshing..." : "Refresh jobs"}
-        </Button>
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <RecentJobsDialog jobs={recentJobs} />
       </div>
 
-      <div className="grid gap-3">
-        {jobs.map((job) => (
-          <div
-            key={job.jobId}
-            className="rounded-[20px] border border-border/60 bg-secondary/10 p-4"
-          >
+      {activeJobs.length > 0 ? (
+        <div className="space-y-3 rounded-[24px] border border-border/60 bg-background/70 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-medium">Current bulk parse job</h3>
+              <p className="text-sm text-muted-foreground">
+                Refresh to check progress or cancel the active parse immediately.
+              </p>
+            </div>
+            <Button type="button" variant="outline" onClick={onRefresh} disabled={refreshing}>
+              {refreshing ? "Refreshing..." : "Refresh jobs"}
+            </Button>
+          </div>
+
+          <div className="grid gap-3">
+            {activeJobs.map((job) => (
+              <div
+                key={job.jobId}
+                className="rounded-[20px] border border-border/60 bg-secondary/10 p-4"
+              >
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -378,10 +393,56 @@ function RecipeParseJobsPanel({
                 ) : null}
               </div>
             </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function RecentJobsDialog({ jobs }: { jobs: RecipeParseJobSummary[] }) {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          Recent jobs{jobs.length > 0 ? ` (${jobs.length})` : ""}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="flex max-h-[min(80vh,42rem)] flex-col p-5 sm:w-[min(92vw,38rem)]">
+        <DialogHeader className="shrink-0 pr-8">
+          <DialogTitle>Recent jobs</DialogTitle>
+          <DialogDescription>Latest completed or cancelled bulk re-parse jobs.</DialogDescription>
+        </DialogHeader>
+        <div className="mt-4 min-h-0 space-y-2 overflow-y-auto pr-1">
+          {jobs.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">No completed jobs yet.</p>
+          ) : jobs.map((job) => (
+            <div
+              key={job.jobId}
+              className="rounded-2xl border border-border/60 bg-secondary/10 px-3 py-2.5"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                <div className="flex items-center gap-2">
+                  <StatusPill status={job.status} />
+                  <span className="text-xs text-muted-foreground">
+                    Ran {formatDate(job.startedAt ?? job.createdAt)}
+                  </span>
+                </div>
+                <span className="text-xs text-muted-foreground">{job.totalRecipes} recipes</span>
+              </div>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                Success {job.succeededRecipes} <span aria-hidden="true">•</span> Review {job.reviewNeededRecipes} <span aria-hidden="true">•</span> Failed {job.failedRecipes}
+                {job.cancelledRecipes > 0 ? (
+                  <> <span aria-hidden="true">•</span> Cancelled {job.cancelledRecipes}</>
+                ) : null}
+              </p>
+            </div>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -11,6 +11,7 @@ import {
   householdRecipeSteps,
 } from "@/lib/server/db";
 import { normalizeIngredientForHousehold } from "@/lib/server/ingredient-normalization";
+import { logError, logInfo, logWarn } from "@/lib/server/logger";
 import { extractRecipeWithFallbacks, type ExtractionAttempt, type ExtractionResult } from "@/lib/server/recipe-parser";
 
 type ExtractArgs = {
@@ -36,6 +37,7 @@ export type ExtractSingleRecipeResult = {
 export async function extractRecipes(args: ExtractArgs) {
   const { db, sqlite, targetLabel } = await openDatabase(args.sqlitePath);
   const scopedRecipeIds = args.recipeIds ? new Set(args.recipeIds) : null;
+  const startedAt = Date.now();
 
   try {
     const rows = await loadRecipeExtractionRows(db, args.householdId);
@@ -65,6 +67,15 @@ export async function extractRecipes(args: ExtractArgs) {
       sqlitePath: targetLabel,
     };
 
+    logInfo("recipe_parse.run.started", {
+      target: { householdId: args.householdId },
+      action: "extract_recipes",
+      recipeCount: filteredRows.length,
+      rerun: args.rerun ?? false,
+      hasRecipeFilter: Boolean(args.recipeId || args.recipeIds),
+      hasBoardFilter: Boolean(args.boardId),
+    });
+
     for (const row of filteredRows) {
       const result = await extractRecipeRow(db, args.householdId, row, args.rerun ?? false);
       outcomes.extracted += result.extracted;
@@ -73,7 +84,21 @@ export async function extractRecipes(args: ExtractArgs) {
       outcomes.skipped += result.skipped;
     }
 
+    logInfo("recipe_parse.run.completed", {
+      target: { householdId: args.householdId },
+      action: "extract_recipes",
+      durationMs: Date.now() - startedAt,
+      result: { status: outcomes.failed > 0 ? "completed_with_failures" : "success", ...outcomes },
+    });
     return outcomes;
+  } catch (error) {
+    logError("recipe_parse.run.failed", error, {
+      target: { householdId: args.householdId },
+      action: "extract_recipes",
+      durationMs: Date.now() - startedAt,
+      result: { status: "error" },
+    });
+    throw error;
   } finally {
     await sqlite.close();
   }
@@ -89,6 +114,11 @@ export async function extractSingleRecipe(args: {
   const { db, sqlite } = await openDatabase(args.sqlitePath);
 
   try {
+    logInfo("recipe_parse.recipe.requested", {
+      target: { householdId: args.householdId, recipeId: args.recipeId },
+      action: "load_recipe",
+      rerun: args.rerun ?? false,
+    });
     const row = await db.query.householdRecipes.findFirst({
       where: (table, { and, eq }) => and(eq(table.householdId, args.householdId), eq(table.recipeId, args.recipeId)),
       with: {
@@ -98,6 +128,12 @@ export async function extractSingleRecipe(args: {
     });
 
     if (!row) {
+      logWarn("recipe_parse.recipe.failed", {
+        target: { householdId: args.householdId, recipeId: args.recipeId },
+        action: "load_recipe",
+        reason: "recipe_not_found",
+        result: { status: "failed" },
+      });
       return {
         outcome: "failed",
         extracted: 0,
@@ -110,6 +146,13 @@ export async function extractSingleRecipe(args: {
 
     throwIfAborted(args.signal);
     return extractRecipeRow(db, args.householdId, row, args.rerun ?? false, args.signal);
+  } catch (error) {
+    logError("recipe_parse.recipe.failed", error, {
+      target: { householdId: args.householdId, recipeId: args.recipeId },
+      action: "extract_single_recipe",
+      result: { status: "error" },
+    });
+    throw error;
   } finally {
     await sqlite.close();
   }
@@ -136,97 +179,171 @@ async function extractRecipeRow(
   signal?: AbortSignal,
 ): Promise<ExtractSingleRecipeResult> {
   throwIfAborted(signal);
+  const startedAt = Date.now();
+  const target = { householdId, recipeId: row.recipeId, pinId: row.pinId };
+  logInfo("recipe_parse.recipe.started", { target, action: "extract_recipe", rerun });
   if (!row.pin.link) {
-    return {
+    logWarn("recipe_parse.recipe.skipped", {
+      target,
+      action: "validate_source",
+      reason: "missing_source_url",
+      result: { status: "skipped" },
+    });
+    return completeRecipeResult(target, startedAt, {
       outcome: "skipped",
       extracted: 0,
       reviewNeeded: 0,
       failed: 0,
       skipped: 1,
       extractionId: null,
-    };
+    });
   }
 
   if (row.recipeInstructions !== null && !rerun) {
-    return {
+    logInfo("recipe_parse.recipe.skipped", {
+      target,
+      action: "check_existing_recipe",
+      reason: "already_extracted",
+      result: { status: "skipped" },
+    });
+    return completeRecipeResult(target, startedAt, {
       outcome: "skipped",
       extracted: 0,
       reviewNeeded: 0,
       failed: 0,
       skipped: 1,
       extractionId: null,
-    };
+    });
   }
 
-  const extractionResult = await extractRecipeWithFallbacks(row.pin.link, {
-    householdId,
-    signal,
-  });
-  throwIfAborted(signal);
-  const sourceIdsByKey = await persistSourcesForAttempts(
-    db,
-    householdId,
-    row.pinId,
-    row.pin.link,
-    extractionResult.attempts,
-  );
-  const selectedSourceId =
-    getAttemptSourceId(sourceIdsByKey, extractionResult.fetchStrategy, extractionResult.sourceUrl ?? row.pin.link) ?? null;
-  const extractionId = await persistExtractionRow(db, householdId, row.pinId, extractionResult, selectedSourceId);
-  throwIfAborted(signal);
+  try {
+    logInfo("recipe_parse.recipe.action_started", { target, action: "fetch_and_extract" });
+    const extractionResult = await extractRecipeWithFallbacks(row.pin.link, {
+      householdId,
+      signal,
+    });
+    throwIfAborted(signal);
+    for (const attempt of extractionResult.attempts) {
+      logRecipeAttempt(target, attempt);
+    }
 
-  if (extractionId) {
-    await persistAttemptRows(
+    logInfo("recipe_parse.recipe.action_started", { target, action: "persist_sources" });
+    const sourceIdsByKey = await persistSourcesForAttempts(
       db,
       householdId,
       row.pinId,
-      extractionId,
-      extractionResult,
-      sourceIdsByKey,
+      row.pin.link,
+      extractionResult.attempts,
     );
+    const selectedSourceId =
+      getAttemptSourceId(sourceIdsByKey, extractionResult.fetchStrategy, extractionResult.sourceUrl ?? row.pin.link) ?? null;
+    logInfo("recipe_parse.recipe.action_started", { target, action: "persist_extraction" });
+    const extractionId = await persistExtractionRow(db, householdId, row.pinId, extractionResult, selectedSourceId);
     throwIfAborted(signal);
-  }
 
-  if (extractionResult.status === "recipe_extracted" && extractionResult.recipe && selectedSourceId) {
-    const reviewCount = await persistRecipeInstructions(
-      db,
-      householdId,
-      row.recipeId,
-      selectedSourceId,
-      extractionResult,
-    );
-    throwIfAborted(signal);
+    if (extractionId) {
+      logInfo("recipe_parse.recipe.action_started", { target, action: "persist_attempts" });
+      await persistAttemptRows(
+        db,
+        householdId,
+        row.pinId,
+        extractionId,
+        extractionResult,
+        sourceIdsByKey,
+      );
+      throwIfAborted(signal);
+    }
+
+    if (extractionResult.status === "recipe_extracted" && extractionResult.recipe && selectedSourceId) {
+      logInfo("recipe_parse.recipe.action_started", { target, action: "persist_recipe_instructions" });
+      const reviewCount = await persistRecipeInstructions(
+        db,
+        householdId,
+        row.recipeId,
+        selectedSourceId,
+        extractionResult,
+      );
+      throwIfAborted(signal);
+      await touchRecipeUpdatedAt(db, row.recipeId);
+      return completeRecipeResult(target, startedAt, {
+        outcome: reviewCount > 0 || extractionResult.lowConfidence ? "review_needed" : "extracted",
+        extracted: 1,
+        reviewNeeded: reviewCount > 0 || extractionResult.lowConfidence ? 1 : 0,
+        failed: 0,
+        skipped: 0,
+        extractionId,
+      }, extractionResult);
+    }
+
     await touchRecipeUpdatedAt(db, row.recipeId);
-    return {
-      outcome: reviewCount > 0 || extractionResult.lowConfidence ? "review_needed" : "extracted",
-      extracted: 1,
-      reviewNeeded: reviewCount > 0 || extractionResult.lowConfidence ? 1 : 0,
-      failed: 0,
-      skipped: 0,
-      extractionId,
-    };
+    return completeRecipeResult(target, startedAt,
+      extractionResult.lowConfidence || extractionResult.status === "multiple_recipes_needs_review"
+        ? { outcome: "review_needed", extracted: 0, reviewNeeded: 1, failed: 0, skipped: 0, extractionId }
+        : { outcome: "failed", extracted: 0, reviewNeeded: 0, failed: 1, skipped: 0, extractionId },
+      extractionResult,
+    );
+  } catch (error) {
+    logError("recipe_parse.recipe.failed", error, {
+      target,
+      action: "extract_recipe",
+      durationMs: Date.now() - startedAt,
+      result: { status: "error" },
+    });
+    throw error;
   }
+}
 
-  await touchRecipeUpdatedAt(db, row.recipeId);
-  if (extractionResult.lowConfidence || extractionResult.status === "multiple_recipes_needs_review") {
-    return {
-      outcome: "review_needed",
-      extracted: 0,
-      reviewNeeded: 1,
-      failed: 0,
-      skipped: 0,
-      extractionId,
-    };
-  }
-
-  return {
-    outcome: "failed",
-    extracted: 0,
-    reviewNeeded: 0,
-    failed: 1,
-    skipped: 0,
-    extractionId,
+function logRecipeAttempt(target: Record<string, string>, attempt: ExtractionAttempt) {
+  const data = {
+    target,
+    action: "extract_attempt",
+    result: {
+      status: attempt.status,
+      fetchStrategy: attempt.fetchStrategy,
+      contentVariant: attempt.contentVariant,
+      extractionStrategy: attempt.extractionStrategy,
+      method: attempt.method,
+      confidence: attempt.confidence,
+      qualityScore: attempt.qualityScore,
+      candidateCount: attempt.candidateCount,
+      failureReason: attempt.failureReason,
+      warningCount: attempt.warnings.length,
+    },
   };
+
+  if (attempt.status === "extraction_failed") {
+    logError("recipe_parse.recipe.attempt_failed", new Error(attempt.failureReason ?? "Recipe extraction attempt failed."), data);
+    return;
+  }
+
+  logInfo("recipe_parse.recipe.attempt_completed", data);
+}
+
+function completeRecipeResult(
+  target: Record<string, string>,
+  startedAt: number,
+  result: ExtractSingleRecipeResult,
+  extractionResult?: ExtractionResult,
+) {
+  const data = {
+    target,
+    action: "extract_recipe",
+    durationMs: Date.now() - startedAt,
+    result: {
+      status: result.outcome,
+      extractionStatus: extractionResult?.status ?? null,
+      failureReason: extractionResult?.failureReason ?? null,
+      lowConfidence: extractionResult?.lowConfidence ?? false,
+      attemptCount: extractionResult?.attempts.length ?? 0,
+    },
+  };
+
+  if (result.outcome === "failed") {
+    logError("recipe_parse.recipe.failed", new Error(extractionResult?.failureReason ?? "Recipe parsing did not complete successfully."), data);
+  } else {
+    logInfo("recipe_parse.recipe.completed", data);
+  }
+  return result;
 }
 
 function throwIfAborted(signal?: AbortSignal) {
