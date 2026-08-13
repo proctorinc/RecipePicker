@@ -316,9 +316,9 @@ function RecipeParseJobsPanel({
     <div className="space-y-3 rounded-[24px] border border-border/60 bg-background/70 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="font-medium">Bulk parse jobs</h3>
+          <h3 className="font-medium">Current bulk parse job</h3>
           <p className="text-sm text-muted-foreground">
-            Refresh to check progress or cancel an in-flight parse immediately.
+            Refresh to check progress or cancel the active parse immediately.
           </p>
         </div>
         <Button type="button" variant="outline" onClick={onRefresh} disabled={refreshing}>

@@ -43,7 +43,9 @@ The default Pinterest callback route is `http://localhost:3000/api/pinterest/cal
 
 `APP_URL` should be the full origin for the deployed app, for example `http://localhost:3000` in development or `https://your-app.example.com` in production.
 
-Bulk recipe parsing now runs through Inngest. For local development, set `INNGEST_DEV=1`, run your Next.js app normally, and start the Inngest Dev Server with `inngest dev`. In production on Vercel, install the official Inngest integration so `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` are provisioned and your `/api/inngest` functions are synced automatically on deploy.
+Bulk recipe parsing runs through Inngest. The app only creates the database job; an Inngest worker must receive the event before any recipe can be parsed. For local development, set `INNGEST_DEV=1`, run the Next.js app, and in a second terminal run `npm run dev:inngest`. If the Dev Server is not running, a job will remain queued at 0.
+
+In production on Vercel, install the official Inngest integration and confirm that `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` are available to the deployment. The integration must also sync `/api/inngest` successfully; sending an event alone does not register the worker function.
 
 Database settings depend on the environment:
 

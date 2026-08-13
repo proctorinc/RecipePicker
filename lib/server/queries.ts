@@ -848,9 +848,14 @@ export async function getRecipeParseJobSummaries(): Promise<RecipeParseJobSummar
 
   try {
     const jobs = await db.query.householdRecipeParseJobs.findMany({
-      where: (table, { eq }) => eq(table.householdId, context.householdId),
+      // Parse jobs are operational state, not an audit log. Completed and
+      // cancelled jobs intentionally disappear from this view.
+      where: (table, { and, eq, inArray }) => and(
+        eq(table.householdId, context.householdId),
+        inArray(table.status, ["queued", "running", "cancelling"]),
+      ),
       orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
-      limit: 10,
+      limit: 1,
       with: {
         items: {
           columns: {
@@ -1463,7 +1468,11 @@ function toRecipeParseJobSummary(
   const attemptedRecipes = job.processedRecipes;
   const needsResume = job.status !== "completed"
     && job.status !== "cancelled"
-    && (Boolean(job.lastError) || isRecipeParseJobHeartbeatStale(job.status, job.lastHeartbeatAt));
+    && (Boolean(job.lastError) || isRecipeParseJobHeartbeatStale({
+      status: job.status,
+      createdAt: job.createdAt,
+      lastHeartbeatAt: job.lastHeartbeatAt,
+    }));
   const percentComplete = job.totalRecipes > 0
     ? Math.min(100, Math.round((attemptedRecipes / job.totalRecipes) * 100))
     : 0;
@@ -1540,16 +1549,18 @@ function describeRecipeParseJobPhase(input: {
   return "Completed";
 }
 
-function isRecipeParseJobHeartbeatStale(status: string, lastHeartbeatAt: string | null) {
-  if (status !== "running" && status !== "cancelling") {
+function isRecipeParseJobHeartbeatStale(input: {
+  status: string;
+  createdAt: string;
+  lastHeartbeatAt: string | null;
+}) {
+  if (input.status !== "queued" && input.status !== "running" && input.status !== "cancelling") {
     return false;
   }
 
-  if (!lastHeartbeatAt) {
-    return true;
-  }
+  const timestamp = input.lastHeartbeatAt ?? input.createdAt;
+  const heartbeatMs = new Date(timestamp).getTime();
 
-  const heartbeatMs = new Date(lastHeartbeatAt).getTime();
   if (Number.isNaN(heartbeatMs)) {
     return true;
   }
