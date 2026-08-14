@@ -9,11 +9,12 @@ import { RecipeImage } from "@/components/recipe-image";
 import { RecipeIngredientList } from "@/components/recipe-ingredient-list";
 import { RecipeMetadataEditor } from "@/components/recipe-metadata-editor";
 import { RecipeReviewLauncher } from "@/components/recipe-review-launcher";
+import { PublishPersonalRecipe } from "@/components/publish-personal-recipe";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecipePageScrollToTop } from "@/app/(app)/recipe/[recipeId]/scroll-to-top";
 import { extractRecipeAction } from "@/lib/actions/operations";
-import { getRecipeDetail } from "@/lib/server/queries";
+import { getCustomRecipeBoardOptions, getRecipeDetail } from "@/lib/server/queries";
 import { formatIso8601Duration } from "@/lib/utils";
 import { getCurrentUserAccess } from "@/lib/server/access";
 
@@ -28,8 +29,11 @@ export default async function RecipePage({
 }) {
   const { recipeId } = await params;
   const { reviewRecipeId, historyMonth } = await searchParams;
-  const recipe = await getRecipeDetail(recipeId);
-  const access = await getCurrentUserAccess();
+  const [recipe, access, publishOptions] = await Promise.all([
+    getRecipeDetail(recipeId),
+    getCurrentUserAccess(),
+    getCustomRecipeBoardOptions(),
+  ]);
 
   if (!recipe) {
     notFound();
@@ -136,6 +140,9 @@ export default async function RecipePage({
             </a>
           </Button>
         )}
+        {recipe.pin.pinterestPinId.startsWith("personal:") ? (
+          <PublishPersonalRecipe recipeId={recipe.recipeId} boards={publishOptions.boards} canPublish={publishOptions.canPublish} />
+        ) : null}
       </div>
 
       <RecipeReviewLauncher

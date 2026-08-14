@@ -1,5 +1,6 @@
 import { put } from "@vercel/blob";
 import { createId } from "@paralleldrive/cuid2";
+import { eq } from "drizzle-orm";
 
 import { openDatabase } from "@/lib/server/database";
 import {
@@ -19,7 +20,7 @@ const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export type CustomRecipeInput = {
   householdId: string;
-  boardId: string;
+  boardId: string | null;
   title: string;
   description: string | null;
   sourceUrl: string | null;
@@ -38,53 +39,63 @@ export async function createCustomRecipe(input: CustomRecipeInput) {
   const { db, sqlite } = await openDatabase();
 
   try {
-    const subscription = await db.query.boardSyncSubscriptions.findFirst({
+    const recipeId = createId();
+    const now = new Date().toISOString();
+    const isPublishing = Boolean(input.boardId);
+    const subscription = isPublishing ? await db.query.boardSyncSubscriptions.findFirst({
       where: (table, { and, eq }) => and(
         eq(table.householdId, input.householdId),
-        eq(table.pinterestBoardId, input.boardId),
+        eq(table.pinterestBoardId, input.boardId!),
         eq(table.syncEnabled, true),
       ),
-    });
-    const board = await db.query.householdBoards.findFirst({
+    }) : null;
+    const board = isPublishing ? await db.query.householdBoards.findFirst({
       where: (table, { and, eq }) => and(
         eq(table.householdId, input.householdId),
-        eq(table.pinterestBoardId, input.boardId),
+        eq(table.pinterestBoardId, input.boardId!),
       ),
-    });
-
-    if (!subscription || !board) {
+    }) : null;
+ 
+    if (isPublishing && (!subscription || !board)) {
       throw new Error("Choose a Pinterest board that is enabled for sync.");
     }
-    const connection = await db.query.pinterestAccounts.findFirst({
+    const connection = isPublishing ? await db.query.pinterestAccounts.findFirst({
       where: (table, { and, eq }) => and(
         eq(table.householdId, input.householdId),
         eq(table.provider, "pinterest"),
         eq(table.connectionStatus, "active"),
       ),
       columns: { scope: true },
-    });
+    }) : null;
     const scopes = new Set(connection?.scope?.split(",").map((scope) => scope.trim()) ?? []);
-    if (!scopes.has("pins:write") || !scopes.has("boards:read")) {
+    if (isPublishing && (!scopes.has("pins:write") || !scopes.has("boards:read"))) {
       throw new Error("Pinterest must be reconnected with publishing permission.");
     }
 
-    const accessToken = await getValidPinterestAccessToken(input.householdId);
-    const publishedPin = await createPinterestPin({
-      boardId: input.boardId,
-      title: input.title,
-      description: input.description,
-      link: input.sourceUrl,
-      imageBase64: image.bytes.toString("base64"),
-      contentType: image.contentType,
-    }, accessToken);
+    const publishedPin = isPublishing ? await createPinterestPin({
+      boardId: input.boardId!, title: input.title, description: input.description,
+      link: input.sourceUrl, imageBase64: image.bytes.toString("base64"), contentType: image.contentType,
+    }, await getValidPinterestAccessToken(input.householdId)) : null;
+    if (isPublishing && !publishedPin?.id) throw new Error("Pinterest did not return an ID for the new Pin.");
 
-    if (!publishedPin.id) {
-      throw new Error("Pinterest did not return an ID for the new Pin.");
+    const personalBoardId = `personal:${input.householdId}`;
+    const resolvedBoardId = board?.boardId ?? personalBoardId;
+    const resolvedPinterestBoardId = input.boardId ?? personalBoardId;
+    const pinId = publishedPin ? `pinterest:${input.householdId}:${publishedPin.id}` : `personal:${input.householdId}:${recipeId}`;
+    if (!board) {
+      await db.insert(householdBoards).values({
+        boardId: personalBoardId,
+        householdId: input.householdId,
+        pinterestBoardId: personalBoardId,
+        name: "Personal recipes",
+        description: null,
+        privacy: null,
+        ownerJson: null,
+        rawJson: JSON.stringify({ id: personalBoardId, source: "personal_recipes" }),
+        syncEnabled: false,
+        lastSyncedAt: now,
+      }).onConflictDoNothing().run();
     }
-
-    const now = new Date().toISOString();
-    const pinId = `pinterest:${input.householdId}:${publishedPin.id}`;
-    const recipeId = createId();
     const rawRecipe = {
       source: input.sourceUrl ? "url_import" : "manual",
       createdInApp: true,
@@ -99,23 +110,23 @@ export async function createCustomRecipe(input: CustomRecipeInput) {
       await tx.insert(householdPins).values({
         pinId,
         householdId: input.householdId,
-        pinterestPinId: publishedPin.id!,
-        boardId: board.boardId,
-        pinterestBoardId: input.boardId,
-        boardSectionId: publishedPin.board_section_id ?? null,
+        pinterestPinId: publishedPin?.id ?? `personal:${recipeId}`,
+        boardId: resolvedBoardId,
+        pinterestBoardId: resolvedPinterestBoardId,
+        boardSectionId: publishedPin?.board_section_id ?? null,
         title: input.title,
         description: input.description,
         link: input.sourceUrl,
         altText: input.title,
-        dominantColor: publishedPin.dominant_color ?? null,
+        dominantColor: publishedPin?.dominant_color ?? null,
         note: null,
-        createdAt: publishedPin.created_at ?? now,
+        createdAt: publishedPin?.created_at ?? now,
         parentPinId: null,
-        mediaJson: publishedPin.media ? JSON.stringify(publishedPin.media) : null,
+        mediaJson: publishedPin?.media ? JSON.stringify(publishedPin.media) : null,
         mediaSourceJson: null,
-        creatorJson: publishedPin.creator ? JSON.stringify(publishedPin.creator) : null,
-        boardOwnerJson: publishedPin.board_owner ? JSON.stringify(publishedPin.board_owner) : null,
-        rawJson: JSON.stringify(publishedPin),
+        creatorJson: publishedPin?.creator ? JSON.stringify(publishedPin.creator) : null,
+        boardOwnerJson: publishedPin?.board_owner ? JSON.stringify(publishedPin.board_owner) : null,
+        rawJson: JSON.stringify(publishedPin ?? { id: `personal:${recipeId}`, createdInApp: true }),
         updatedAt: now,
       }).run();
 
@@ -190,6 +201,69 @@ export async function createCustomRecipe(input: CustomRecipeInput) {
       }
     });
     return { recipeId };
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function publishPersonalRecipe(args: {
+  householdId: string;
+  recipeId: string;
+  boardId: string;
+}) {
+  const { db, sqlite } = await openDatabase();
+  try {
+    const recipe = await db.query.householdRecipes.findFirst({
+      where: (table, { and, eq }) => and(eq(table.householdId, args.householdId), eq(table.recipeId, args.recipeId)),
+      with: { pin: true, recipeInstructions: { with: { ingredients: true, steps: true } } },
+    });
+    const board = await db.query.householdBoards.findFirst({
+      where: (table, { and, eq }) => and(eq(table.householdId, args.householdId), eq(table.pinterestBoardId, args.boardId)),
+    });
+    const subscription = await db.query.boardSyncSubscriptions.findFirst({
+      where: (table, { and, eq }) => and(eq(table.householdId, args.householdId), eq(table.pinterestBoardId, args.boardId), eq(table.syncEnabled, true)),
+    });
+    const connection = await db.query.pinterestAccounts.findFirst({
+      where: (table, { and, eq }) => and(
+        eq(table.householdId, args.householdId),
+        eq(table.provider, "pinterest"),
+        eq(table.connectionStatus, "active"),
+      ),
+      columns: { scope: true },
+    });
+    const scopes = new Set(connection?.scope?.split(",").map((scope) => scope.trim()) ?? []);
+    if (!scopes.has("pins:write") || !scopes.has("boards:read")) {
+      throw new Error("Pinterest must be reconnected with publishing permission.");
+    }
+    if (!recipe || !recipe.pin || !recipe.recipeInstructions || !recipe.imageUrl || !board || !subscription) {
+      throw new Error("This recipe or Pinterest board is unavailable for publishing.");
+    }
+    if (!recipe.pin.pinterestPinId.startsWith("personal:")) {
+      throw new Error("This recipe is already published to Pinterest.");
+    }
+    const image = await resolveRecipeImage(null, recipe.imageUrl);
+    const publishedPin = await createPinterestPin({
+      boardId: args.boardId,
+      title: recipe.title || recipe.recipeInstructions.title || "Untitled recipe",
+      description: recipe.description || recipe.recipeInstructions.description,
+      link: recipe.recipeInstructions.canonicalUrl,
+      imageBase64: image.bytes.toString("base64"),
+      contentType: image.contentType,
+    }, await getValidPinterestAccessToken(args.householdId));
+    if (!publishedPin.id) throw new Error("Pinterest did not return an ID for the new Pin.");
+    await db.update(householdPins).set({
+      pinterestPinId: publishedPin.id,
+      boardId: board.boardId,
+      pinterestBoardId: args.boardId,
+      boardSectionId: publishedPin.board_section_id ?? null,
+      createdAt: publishedPin.created_at ?? recipe.pin.createdAt,
+      mediaJson: publishedPin.media ? JSON.stringify(publishedPin.media) : null,
+      creatorJson: publishedPin.creator ? JSON.stringify(publishedPin.creator) : null,
+      boardOwnerJson: publishedPin.board_owner ? JSON.stringify(publishedPin.board_owner) : null,
+      rawJson: JSON.stringify(publishedPin),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(householdPins.pinId, recipe.pinId)).run();
+    return { recipeId: recipe.recipeId };
   } finally {
     await sqlite.close();
   }

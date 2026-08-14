@@ -31,6 +31,7 @@ export function CustomRecipeForm({ boards, canPublish }: { boards: Board[]; canP
   const [file, setFile] = useState<File | null>(null);
   const [importUrl, setImportUrl] = useState("");
   const [isImporting, setIsImporting] = useState(false);
+  const [publishToPinterest, setPublishToPinterest] = useState(false);
   const [state, formAction, pending] = useActionState(createCustomRecipeAction, initialState);
 
   useEffect(() => {
@@ -111,10 +112,10 @@ export function CustomRecipeForm({ boards, canPublish }: { boards: Board[]; canP
         <div className="grid gap-6 lg:grid-cols-2"><Card className="bg-white/85"><CardHeader><CardTitle>Ingredients</CardTitle><CardDescription>One ingredient per line.</CardDescription></CardHeader><CardContent><Textarea value={draft.ingredients} onChange={(event) => update("ingredients", event.target.value)} className="min-h-64" placeholder="2 cups flour\n1 tsp salt" required /><input type="hidden" name="ingredientsJson" value={JSON.stringify(draft.ingredients.split("\n"))} /></CardContent></Card>
           <Card className="bg-white/85"><CardHeader><CardTitle>Instructions</CardTitle><CardDescription>One step per line.</CardDescription></CardHeader><CardContent><Textarea value={draft.steps} onChange={(event) => update("steps", event.target.value)} className="min-h-64" placeholder="Preheat the oven.\nMix the ingredients." required /><input type="hidden" name="stepsJson" value={JSON.stringify(draft.steps.split("\n"))} /></CardContent></Card></div>
 
-        <Card className="bg-white/85"><CardHeader><CardTitle>Publish to Pinterest</CardTitle><CardDescription>Publishing is required to add this recipe to the shared library.</CardDescription></CardHeader><CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <select name="boardId" required disabled={boards.length === 0 || !canPublish} className="h-12 rounded-full border border-border bg-background px-5 text-sm"><option value="">Choose a synced board</option>{boards.map((board) => <option key={board.boardId} value={board.boardId}>{board.name}</option>)}</select>
-          <Button disabled={pending || boards.length === 0 || !canPublish}>{pending ? "Publishing…" : "Publish recipe"}</Button>
-          {!canPublish ? <p className="text-sm text-destructive">Reconnect Pinterest with publishing permission before creating recipes.</p> : boards.length === 0 ? <p className="text-sm text-destructive">Enable a Pinterest board in Settings before creating recipes.</p> : null}
+        <Card className="bg-white/85"><CardHeader><CardTitle>Pinterest</CardTitle><CardDescription>Save this as a personal recipe, or publish it to a synced Pinterest board now.</CardDescription></CardHeader><CardContent className="flex flex-col gap-4">
+          <label className="flex items-center gap-3 text-sm font-medium"><input type="checkbox" checked={publishToPinterest} onChange={(event) => setPublishToPinterest(event.target.checked)} disabled={!canPublish || boards.length === 0} /> Publish to Pinterest</label>
+          {publishToPinterest ? <select name="boardId" required className="h-12 rounded-full border border-border bg-background px-5 text-sm"><option value="">Choose a synced board</option>{boards.map((board) => <option key={board.boardId} value={board.boardId}>{board.name}</option>)}</select> : <input type="hidden" name="boardId" value="" />}
+          <div className="flex flex-wrap items-center gap-3"><Button disabled={pending}>{pending ? (publishToPinterest ? "Publishing…" : "Saving…") : (publishToPinterest ? "Publish recipe" : "Save personal recipe")}</Button>{!canPublish ? <p className="text-sm text-muted-foreground">Reconnect Pinterest with publishing permission to post recipes.</p> : boards.length === 0 ? <p className="text-sm text-muted-foreground">Enable a Pinterest board in Settings to post recipes.</p> : null}</div>
         </CardContent></Card>
       </form>
     </Tabs>

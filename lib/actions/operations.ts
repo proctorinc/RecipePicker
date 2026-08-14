@@ -56,7 +56,7 @@ import {
 import { sendRecipeParseJobRequestedEvent } from "@/src/inngest/events";
 import { getRecipeHouseholdPinId } from "@/lib/server/queries";
 import { extractRecipes } from "@/lib/server/extract";
-import { createCustomRecipe } from "@/lib/server/custom-recipe";
+import { createCustomRecipe, publishPersonalRecipe } from "@/lib/server/custom-recipe";
 import { revalidateAll, recipeScopedPaths, toErrorState, toOptionalString } from "@/lib/actions/helpers";
 import { getTodayDayString, isValidDayString } from "@/lib/utils";
 import type { ActionState } from "@/lib/actions/types";
@@ -76,8 +76,8 @@ export const createCustomRecipeAction = withActionLogging(
     const imageFile = image instanceof File && image.size > 0 ? image : null;
     const imageUrl = toOptionalString(formData.get("imageUrl"));
 
-    if (!title || !boardId || ingredients.length === 0 || steps.length === 0) {
-      return { status: "error", message: "Add a title, synced Pinterest board, ingredient, and instruction." };
+    if (!title || ingredients.length === 0 || steps.length === 0) {
+      return { status: "error", message: "Add a title, ingredient, and instruction." };
     }
     if (!imageFile && !imageUrl) {
       return { status: "error", message: "Add a recipe image before publishing." };
@@ -97,7 +97,7 @@ export const createCustomRecipeAction = withActionLogging(
       const context = await requireHouseholdContext();
       const result = await createCustomRecipe({
         householdId: context.householdId,
-        boardId,
+        boardId: boardId || null,
         title,
         description: toOptionalString(formData.get("description")),
         sourceUrl,
@@ -113,7 +113,7 @@ export const createCustomRecipeAction = withActionLogging(
       revalidateAll(recipeScopedPaths(undefined, result.recipeId));
       return {
         status: "success",
-        message: "Recipe published to Pinterest and added to your library.",
+        message: boardId ? "Recipe published to Pinterest and added to your library." : "Personal recipe saved to your library.",
         data: { recipeId: result.recipeId },
       };
     } catch (error) {
@@ -124,6 +124,23 @@ export const createCustomRecipeAction = withActionLogging(
     getStartData: (_state, formData) => ({
       result: { title: String(formData.get("title") ?? "").trim() || null },
     }),
+  },
+);
+
+export const publishPersonalRecipeAction = withActionLogging(
+  "action.publish_personal_recipe",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const recipeId = String(formData.get("recipeId") ?? "").trim();
+    const boardId = String(formData.get("boardId") ?? "").trim();
+    if (!recipeId || !boardId) return { status: "error", message: "Choose a synced Pinterest board." };
+    try {
+      const context = await requireHouseholdContext();
+      await publishPersonalRecipe({ householdId: context.householdId, recipeId, boardId });
+      revalidateAll(recipeScopedPaths(undefined, recipeId));
+      return { status: "success", message: "Recipe published to Pinterest." };
+    } catch (error) {
+      return toErrorState(error, "Unable to publish this recipe.");
+    }
   },
 );
 
