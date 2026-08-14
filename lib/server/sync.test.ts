@@ -105,8 +105,8 @@ describe("syncBoard", () => {
         {
           id: "pin-section-b",
           title: "Section recipe B",
-          board_section_id: "section-a",
-          board_section_name: "Desserts",
+          board_section_id: "section-b",
+          board_section_name: "Weeknight dinners",
           link: "https://example.com/section-b",
           created_at: now,
         },
@@ -151,13 +151,13 @@ describe("syncBoard", () => {
           orderBy: (table, { asc }) => [asc(table.recipeId)],
         });
 
-        expect(folders).toHaveLength(2);
+        expect(folders).toHaveLength(3);
         const boardFolder = folders.find((folder) => folder.sourceType === "board");
-        const sectionFolder = folders.find((folder) => folder.sourceType === "section");
+        const sectionFolders = folders.filter((folder) => folder.sourceType === "section");
 
         expect(boardFolder?.name).toBe("Weeknight");
-        expect(sectionFolder?.name).toBe("Desserts");
-        expect(sectionFolder?.parentFolderId).toBe(boardFolder?.folderId ?? null);
+        expect(sectionFolders.map((folder) => folder.name).sort()).toEqual(["Desserts", "Weeknight dinners"]);
+        expect(sectionFolders.every((folder) => folder.parentFolderId === boardFolder?.folderId)).toBe(true);
 
         expect(memberships).toHaveLength(3);
         expect(
@@ -181,7 +181,7 @@ describe("syncBoard", () => {
           },
           {
             pinId: "pin-section-b",
-            folderName: "Desserts",
+            folderName: "Weeknight dinners",
             sourceType: "section",
           },
         ]);

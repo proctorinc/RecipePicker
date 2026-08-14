@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUserAccess } from "@/lib/server/access";
 import { getHouseholdMembership } from "@/lib/server/auth";
-import { logAudit, logWarn, withRouteLogging } from "@/lib/server/logger";
+import { logAudit, logError, logWarn, withRouteLogging } from "@/lib/server/logger";
 import { consumePinterestOauthState, exchangePinterestCode, upsertPinterestConnection } from "@/lib/server/pinterest";
 import { updateRequestContext } from "@/lib/server/request-context";
 
@@ -51,6 +51,8 @@ export const GET = withRouteLogging("api.pinterest_callback", async (request: Re
     );
   }
 
+  let callbackStage = "consume_state";
+
   try {
     const oauthState = await consumePinterestOauthState(state);
 
@@ -86,7 +88,9 @@ export const GET = withRouteLogging("api.pinterest_callback", async (request: Re
       );
     }
 
+    callbackStage = "exchange_code";
     const token = await exchangePinterestCode(code);
+    callbackStage = "save_connection";
     await upsertPinterestConnection({
       householdId: oauthState.householdId,
       connectedByClerkUserId: userId,
@@ -100,9 +104,10 @@ export const GET = withRouteLogging("api.pinterest_callback", async (request: Re
 
     return NextResponse.redirect(new URL(oauthState.returnTo ?? "/settings", url.origin));
   } catch (callbackError) {
-    logWarn("pinterest.oauth.callback_failed", {
+    logError("pinterest.oauth.callback_failed", callbackError, {
       result: {
         reason: "callback_error",
+        stage: callbackStage,
       },
     });
     return NextResponse.redirect(

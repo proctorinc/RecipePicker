@@ -450,9 +450,9 @@ export async function syncBoard(
         target: [
           recipeFolders.householdId,
           recipeFolders.source,
-          recipeFolders.sourceType,
           recipeFolders.pinterestBoardId,
         ],
+        targetWhere: sql`${recipeFolders.sourceType} = 'board'`,
         set: {
           parentFolderId: null,
           name: options.boardName ?? recipeFolders.name,
@@ -489,9 +489,9 @@ export async function syncBoard(
           target: [
             recipeFolders.householdId,
             recipeFolders.source,
-            recipeFolders.sourceType,
             recipeFolders.pinterestSectionId,
           ],
+          targetWhere: sql`${recipeFolders.sourceType} = 'section'`,
           set: {
             parentFolderId: boardFolder.folderId,
             pinterestBoardId,

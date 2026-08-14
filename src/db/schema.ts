@@ -1,5 +1,5 @@
 import { createId } from "@paralleldrive/cuid2";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { type AnySQLiteColumn, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 function generatedId(columnName: string) {
@@ -388,15 +388,13 @@ export const recipeFolders = sqliteTable(
     householdBoardUniqueIdx: uniqueIndex("idx_recipe_folders_household_source_board_unique").on(
       table.householdId,
       table.source,
-      table.sourceType,
       table.pinterestBoardId,
-    ),
+    ).where(sql`${table.sourceType} = 'board'`),
     householdSectionUniqueIdx: uniqueIndex("idx_recipe_folders_household_source_section_unique").on(
       table.householdId,
       table.source,
-      table.sourceType,
       table.pinterestSectionId,
-    ),
+    ).where(sql`${table.sourceType} = 'section'`),
   }),
 );
 
