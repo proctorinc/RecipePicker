@@ -5,6 +5,7 @@ import {
   Calendar,
   Settings2,
   LayoutDashboard,
+  Plus,
 } from "lucide-react";
 
 import { AppShellProgress } from "@/components/app-route-transition";
@@ -80,6 +81,12 @@ export async function AppShell({
           </AppTransitionLink>
 
           <nav className="hidden items-center gap-2 md:flex">
+            <Button asChild className="rounded-full">
+              <AppTransitionLink href="/recipe/new" prefetch className="flex items-center gap-2">
+                <Plus className="h-4 w-4" />
+                Create recipe
+              </AppTransitionLink>
+            </Button>
             {links.map((link) => (
               <Button
                 key={link.href}

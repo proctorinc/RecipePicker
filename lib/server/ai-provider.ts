@@ -8,6 +8,7 @@ import { z, type ZodTypeAny } from "zod";
 
 import { requireOwnerOrAdminIntegrationAccess } from "@/lib/server/access";
 import { openDatabase } from "@/lib/server/database";
+import type { DatabaseClient } from "@/src/db/client";
 import {
   householdAiConnections,
   type householdAiConnections as householdAiConnectionsTable,
@@ -54,6 +55,7 @@ type StructuredGenerationArgs<TSchema extends ZodTypeAny> = {
   prompt: string;
   schema: TSchema;
   signal?: AbortSignal;
+  database?: DatabaseClient;
 };
 
 const AI_MODEL_CATALOG: Record<AiProvider, AiModelOption[]> = {
@@ -326,8 +328,10 @@ export async function generateIngredientSuggestionsWithHouseholdAi<
 
 export async function getStoredHouseholdAiConfig(
   householdId: string,
+  database?: DatabaseClient,
 ): Promise<StoredAiConfig | null> {
-  const { db, sqlite } = await openDatabase();
+  const handle = database ? null : await openDatabase();
+  const db = database ?? handle!.db;
 
   try {
     const connection = await db.query.householdAiConnections.findFirst({
@@ -348,7 +352,7 @@ export async function getStoredHouseholdAiConfig(
       apiKey: decryptSecret(connection.apiKeyEncrypted),
     };
   } finally {
-    await sqlite.close();
+    await handle?.sqlite.close();
   }
 }
 
@@ -374,8 +378,9 @@ async function generateHouseholdAiObject<TSchema extends ZodTypeAny>({
   prompt,
   schema,
   signal,
+  database,
 }: StructuredGenerationArgs<TSchema>): Promise<z.infer<TSchema> | null> {
-  const config = await getStoredHouseholdAiConfig(householdId);
+  const config = await getStoredHouseholdAiConfig(householdId, database);
 
   if (!config) {
     return null;

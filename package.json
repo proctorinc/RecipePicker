@@ -32,6 +32,7 @@
     "@radix-ui/react-slot": "^1.2.3",
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "^1.1.12",
+    "@vercel/blob": "^2.8.0",
     "ai": "^6.0.197",
     "better-sqlite3": "^11.10.0",
     "cheerio": "^1.2.0",

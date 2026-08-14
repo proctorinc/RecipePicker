@@ -37,6 +37,16 @@ export type PinterestPin = {
   [key: string]: unknown;
 };
 
+export type CreatePinterestPinInput = {
+  boardId: string;
+  title: string;
+  description?: string | null;
+  link?: string | null;
+  altText?: string | null;
+  imageBase64: string;
+  contentType: string;
+};
+
 type PinterestPage<T> = {
   items?: T[];
   bookmark?: string | null;
@@ -112,4 +122,36 @@ export async function fetchAllPins(boardId: string, accessToken: string): Promis
   } while (bookmark);
 
   return pins;
+}
+
+export async function createPinterestPin(
+  input: CreatePinterestPinInput,
+  accessToken: string,
+): Promise<PinterestPin> {
+  const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/pins`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      board_id: input.boardId,
+      title: input.title,
+      description: input.description || undefined,
+      link: input.link || undefined,
+      alt_text: input.altText || input.title,
+      media_source: {
+        source_type: "image_base64",
+        content_type: input.contentType,
+        data: input.imageBase64,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Pinterest could not publish this recipe (${response.status}): ${body}`);
+  }
+
+  return (await response.json()) as PinterestPin;
 }

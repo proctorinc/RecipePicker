@@ -6,6 +6,7 @@ import { ActionForm } from "@/components/action-form";
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { PageShell } from "@/components/page-shell";
 import { RecipeImage } from "@/components/recipe-image";
+import { RecipeIngredientList } from "@/components/recipe-ingredient-list";
 import { RecipeMetadataEditor } from "@/components/recipe-metadata-editor";
 import { RecipeReviewLauncher } from "@/components/recipe-review-launcher";
 import { Button } from "@/components/ui/button";
@@ -178,15 +179,7 @@ export default async function RecipePage({
             </CardHeader>
             <CardContent className="px-10">
               {recipe.ingredients.length > 0 ? (
-                <ul className="space-y-3">
-                  {recipe.ingredients.map((ingredient) => (
-                    <li key={ingredient.id} className="list-disc">
-                      <p className="font-medium text-foreground">
-                        {ingredient.displayText}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
+                <RecipeIngredientList ingredients={recipe.ingredients} />
               ) : (
                 <EmptyRecipeState
                   recipeId={recipe.recipeId}

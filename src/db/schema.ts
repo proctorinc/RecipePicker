@@ -146,6 +146,11 @@ export const boardSyncSubscriptions = sqliteTable(
   },
   (table) => ({
     householdBoardUniqueIdx: uniqueIndex("idx_board_sync_subscriptions_household_board_unique").on(table.householdId, table.pinterestBoardId),
+    householdEnabledBoardNameIdx: index("idx_board_sync_subscriptions_household_enabled_board_name").on(
+      table.householdId,
+      table.syncEnabled,
+      table.boardName,
+    ),
   }),
 );
 
@@ -225,6 +230,7 @@ export const householdRecipeReviews = sqliteTable(
   },
   (table) => ({
     recipeIdIdx: index("idx_household_recipe_reviews_recipe_id").on(table.recipeId),
+    recipeCreatedIdx: index("idx_household_recipe_reviews_recipe_created").on(table.recipeId, table.createdAt),
     eventIdUniqueIdx: uniqueIndex("idx_household_recipe_reviews_event_unique").on(table.eventId),
     eatenOnIdx: index("idx_household_recipe_reviews_eaten_on").on(table.eatenOn),
     reviewerIdx: index("idx_household_recipe_reviews_reviewer").on(table.reviewedByClerkUserId),
@@ -248,6 +254,11 @@ export const householdRecipeEvents = sqliteTable(
   },
   (table) => ({
     householdDateIdx: index("idx_household_recipe_events_household_date").on(table.householdId, table.date),
+    householdDateCreatedIdx: index("idx_household_recipe_events_household_date_created").on(
+      table.householdId,
+      table.date,
+      table.createdAt,
+    ),
     recipeIdIdx: index("idx_household_recipe_events_recipe_id").on(table.recipeId),
     createdByIdx: index("idx_household_recipe_events_created_by").on(table.createdByClerkUserId),
   }),
@@ -349,6 +360,7 @@ export const householdRecipes = sqliteTable(
   (table) => ({
     pinIdUniqueIdx: uniqueIndex("idx_household_recipes_pin_id_unique").on(table.pinId),
     householdIdx: index("idx_household_recipes_household_id").on(table.householdId),
+    householdUpdatedIdx: index("idx_household_recipes_household_updated").on(table.householdId, table.updatedAt),
   }),
 );
 
@@ -434,6 +446,7 @@ export const householdRecipeSources = sqliteTable(
   },
   (table) => ({
     pinIdIdx: index("idx_household_recipe_sources_pin_id").on(table.pinId),
+    pinFetchedIdx: index("idx_household_recipe_sources_pin_fetched").on(table.pinId, table.fetchedAt),
     fetchedAtIdx: index("idx_household_recipe_sources_fetched_at").on(table.fetchedAt),
   }),
 );
@@ -500,6 +513,7 @@ export const householdRecipeExtractions = sqliteTable(
   },
   (table) => ({
     pinIdIdx: index("idx_household_recipe_extractions_pin_id").on(table.pinId),
+    pinCreatedIdx: index("idx_household_recipe_extractions_pin_created").on(table.pinId, table.createdAt),
     statusIdx: index("idx_household_recipe_extractions_status").on(table.status),
     createdAtIdx: index("idx_household_recipe_extractions_created_at").on(table.createdAt),
   }),
@@ -535,6 +549,11 @@ export const householdRecipeParseJobs = sqliteTable(
   (table) => ({
     householdCreatedIdx: index("idx_household_recipe_parse_jobs_household_created").on(table.householdId, table.createdAt),
     householdStatusIdx: index("idx_household_recipe_parse_jobs_household_status").on(table.householdId, table.status),
+    householdStatusCreatedIdx: index("idx_household_recipe_parse_jobs_household_status_created").on(
+      table.householdId,
+      table.status,
+      table.createdAt,
+    ),
     householdCompletedIdx: index("idx_household_recipe_parse_jobs_household_completed").on(table.householdId, table.completedAt),
   }),
 );
@@ -563,6 +582,16 @@ export const householdRecipeParseJobItems = sqliteTable(
     jobPositionUniqueIdx: uniqueIndex("idx_household_recipe_parse_job_items_job_position_unique").on(table.jobId, table.position),
     jobRecipeUniqueIdx: uniqueIndex("idx_household_recipe_parse_job_items_job_recipe_unique").on(table.jobId, table.recipeId),
     jobStatusIdx: index("idx_household_recipe_parse_job_items_job_status").on(table.jobId, table.status),
+    jobStatusPositionIdx: index("idx_household_recipe_parse_job_items_job_status_position").on(
+      table.jobId,
+      table.status,
+      table.position,
+    ),
+    jobStatusUpdatedIdx: index("idx_household_recipe_parse_job_items_job_status_updated").on(
+      table.jobId,
+      table.status,
+      table.updatedAt,
+    ),
     recipeIdx: index("idx_household_recipe_parse_job_items_recipe_id").on(table.recipeId),
   }),
 );
@@ -677,6 +706,12 @@ export const householdRecipeIngredients = sqliteTable(
     recipeIdIdx: index("idx_household_recipe_ingredients_instruction_id").on(table.recipeId),
     recipePositionIdx: index("idx_household_recipe_ingredients_instruction_position").on(table.recipeId, table.position),
     normalizationStatusIdx: index("idx_household_recipe_ingredients_normalization_status").on(table.normalizationStatus),
+    householdNormalizationRecipePositionIdx: index("idx_household_recipe_ingredients_household_normalization_recipe_position").on(
+      table.householdId,
+      table.normalizationStatus,
+      table.recipeId,
+      table.position,
+    ),
     canonicalIngredientIdx: index("idx_household_recipe_ingredients_canonical_ingredient_id").on(table.canonicalIngredientId),
   }),
 );

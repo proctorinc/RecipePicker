@@ -18,8 +18,8 @@ import {
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancelling"] as const;
 const TERMINAL_JOB_STATUSES = ["completed", "cancelled"] as const;
-const RECIPE_PARSE_CHUNK_SIZE = 20;
-const RECIPE_PARSE_CONCURRENCY = 3;
+const RECIPE_PARSE_CHUNK_SIZE = 4;
+const RECIPE_PARSE_CONCURRENCY = 2;
 const RECIPE_PARSE_LEASE_MS = 90 * 1000;
 const RECIPE_PARSE_STALE_HEARTBEAT_MS = 2 * 60 * 1000;
 const RECIPE_PARSE_JOB_QUEUEING_ERROR =
@@ -632,6 +632,10 @@ export async function processRecipeParseJobChunk(input: {
           recipeId: item.recipeId,
           rerun: job.rerun,
           signal: cancellationMonitor.signal,
+          database: db,
+          databaseOwner: "parse_job_chunk",
+          jobId: job.jobId,
+          queuePosition: item.position,
         });
         if (cancellationMonitor.signal.aborted) {
           return;
@@ -648,7 +652,7 @@ export async function processRecipeParseJobChunk(input: {
           lastError: itemStatus === "failed"
             ? result.outcome === "skipped"
               ? "Recipe could not be processed because no recipe source URL was available."
-              : "Recipe parsing did not complete successfully."
+              : result.failureReason ?? "extract: Recipe parsing did not complete successfully."
             : null,
           lastExtractionId: result.extractionId,
         });
@@ -693,7 +697,7 @@ export async function processRecipeParseJobChunk(input: {
       }
       });
     } finally {
-      cancellationMonitor.stop();
+      await cancellationMonitor.stop();
     }
 
     const counts = await rollupJobProgress(db, job.jobId, new Date().toISOString());
@@ -975,6 +979,12 @@ function createJobCancellationMonitor(
           controller.abort();
         }
         return cancelled;
+      }).catch((error) => {
+        logError("recipe_parse_job.cancellation_check_failed", error, {
+          target: { jobId },
+          action: "cancellation_check",
+        });
+        return false;
       }).finally(() => {
         checking = null;
       });
@@ -983,13 +993,28 @@ function createJobCancellationMonitor(
   };
 
   const interval = setInterval(() => {
-    void isCancelled();
-  }, 250);
+    void isCancelled().catch((error) => {
+      logError("recipe_parse_job.cancellation_check_failed", error, {
+        target: { jobId },
+        action: "cancellation_check",
+      });
+    });
+  }, 1000);
 
   return {
     signal: controller.signal,
     isCancelled,
-    stop: () => clearInterval(interval),
+    stop: async () => {
+      clearInterval(interval);
+      try {
+        await checking;
+      } catch (error) {
+        logError("recipe_parse_job.cancellation_check_failed", error, {
+          target: { jobId },
+          action: "cancellation_check_shutdown",
+        });
+      }
+    },
   };
 }
 

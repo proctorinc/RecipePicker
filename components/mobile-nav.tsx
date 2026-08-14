@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Settings2,
   Sparkles,
+  Plus,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 
@@ -12,6 +13,12 @@ import { AppTransitionLink } from "@/components/app-transition-link";
 import { cn } from "@/lib/utils";
 
 const navItems = [
+  {
+    href: "/recipe/new",
+    label: "Create recipe",
+    icon: Plus,
+    matches: (pathname: string) => pathname === "/recipe/new",
+  },
   {
     href: "/history",
     label: "History",

@@ -68,6 +68,16 @@ describe("recipe extraction", () => {
     expect(anchorAttempt?.status).toBe("recipe_extracted");
   });
 
+  it("ignores a bare hash jump link instead of treating it as a selector", () => {
+    const result = extractRecipeFromHtml(
+      directRecipeHtml.replace('href="#recipe-card"', 'href="#"'),
+      "https://example.com/recipe",
+    );
+
+    expect(result.status).toBe("recipe_extracted");
+    expect(result.attempts.some((attempt) => attempt.fetchStrategy === "recipe_anchor_follow")).toBe(false);
+  });
+
   it("short-circuits after a high-confidence direct fetch", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

@@ -130,6 +130,8 @@ export type RecipeDetailView = {
     originalText: string;
     displayText: string;
     amount: string | null;
+    amountValue: number | null;
+    amountMaxValue: number | null;
     unit: string | null;
     parsedText: string | null;
     notes: string | null;

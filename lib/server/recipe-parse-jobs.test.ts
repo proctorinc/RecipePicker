@@ -205,41 +205,30 @@ afterEach(() => {
 });
 
 describe("processRecipeParseJobChunk", () => {
-  it("processes a 45-recipe job across three chunks", async () => {
+  it("processes a 45-recipe job across twelve chunks", async () => {
     await withTestDatabase(async ({ sqlitePath }) => {
       const { jobId } = await seedRecipeParseJob(sqlitePath, 45);
       let extractionCount = 0;
 
-      mockExtractSingleRecipe.mockImplementation(async ({ recipeId }: { recipeId: string }) => {
+      const databaseContexts = new Set<unknown>();
+      mockExtractSingleRecipe.mockImplementation(async ({ recipeId, database }: { recipeId: string; database?: unknown }) => {
         extractionCount += 1;
+        databaseContexts.add(database);
         return {
           outcome: "extracted",
           extractionId: null,
         };
       });
 
-      const first = await processRecipeParseJobChunk({
-        jobId,
-      });
-      const second = await processRecipeParseJobChunk({
-        jobId,
-      });
-      const third = await processRecipeParseJobChunk({
-        jobId,
-      });
-
-      expect(first).toEqual({
-        status: "continued",
-        remaining: 25,
-      });
-      expect(second).toEqual({
-        status: "continued",
-        remaining: 5,
-      });
-      expect(third).toEqual({
-        status: "completed",
-      });
+      for (let remaining = 41; remaining > 0; remaining -= 4) {
+        await expect(processRecipeParseJobChunk({ jobId })).resolves.toEqual({
+          status: "continued",
+          remaining,
+        });
+      }
+      await expect(processRecipeParseJobChunk({ jobId })).resolves.toEqual({ status: "completed" });
       expect(extractionCount).toBe(45);
+      expect(databaseContexts.size).toBe(12);
 
       const { db, sqlite } = await openDatabase(sqlitePath);
 
@@ -279,7 +268,7 @@ describe("processRecipeParseJobChunk", () => {
       });
 
       const chunk = processRecipeParseJobChunk({ jobId });
-      while (started < 3) {
+      while (started < 2) {
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
 
@@ -288,8 +277,8 @@ describe("processRecipeParseJobChunk", () => {
         message: "Job cancelled immediately.",
       });
       await expect(chunk).resolves.toEqual({ status: "cancelled" });
-      expect(started).toBe(3);
-      expect(aborted).toBe(3);
+      expect(started).toBe(2);
+      expect(aborted).toBe(2);
 
       const { db, sqlite } = await openDatabase(sqlitePath);
       try {

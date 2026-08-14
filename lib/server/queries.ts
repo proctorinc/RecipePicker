@@ -17,6 +17,7 @@ import {
   householdRecipeEvents,
   householdRecipeInstructions,
   householdRecipeReviews,
+  pinterestAccounts,
   recipeFolderMemberships,
   recipeFolders,
 } from "@/lib/server/db";
@@ -93,6 +94,41 @@ export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
     });
 
     return cards.map(({ updatedAt: _updatedAt, ingredientMatchScore: _score, ...card }) => card);
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function getCustomRecipeBoardOptions() {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const [rows, connection] = await Promise.all([
+      db.query.boardSyncSubscriptions.findMany({
+      where: (table, { and, eq }) => and(
+        eq(table.householdId, context.householdId),
+        eq(table.syncEnabled, true),
+      ),
+      orderBy: (table, { asc }) => [asc(table.boardName)],
+      }),
+      db.query.pinterestAccounts.findFirst({
+        where: (table, { and, eq }) => and(
+          eq(table.householdId, context.householdId),
+          eq(table.provider, "pinterest"),
+          eq(table.connectionStatus, "active"),
+        ),
+        columns: { scope: true },
+      }),
+    ]);
+    const scopes = new Set(connection?.scope?.split(",").map((scope) => scope.trim()) ?? []);
+    return {
+      canPublish: scopes.has("pins:write") && scopes.has("boards:read"),
+      boards: rows.map((row) => ({
+      boardId: row.pinterestBoardId,
+      name: row.boardName || "Untitled Pinterest board",
+      })),
+    };
   } finally {
     await sqlite.close();
   }
@@ -267,6 +303,8 @@ export async function getRecipeDetail(
           originalText: ingredient.originalText,
           displayText: ingredient.originalText,
           amount: ingredient.amountText,
+          amountValue: ingredient.amountValue,
+          amountMaxValue: ingredient.amountMaxValue,
           unit: ingredient.unit,
           parsedText: ingredient.ingredientText,
           notes: ingredient.notes,

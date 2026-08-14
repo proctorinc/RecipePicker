@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import { openDatabase } from "@/lib/server/database";
+import type { DatabaseClient } from "@/src/db/client";
 import {
   householdRecipes,
   householdRecipeExtractionAttempts,
@@ -32,7 +33,10 @@ export type ExtractSingleRecipeResult = {
   failed: number;
   skipped: number;
   extractionId: string | null;
+  failureReason?: string | null;
 };
+
+const RECIPE_EXTRACTION_TIMEOUT_MS = 75_000;
 
 export async function extractRecipes(args: ExtractArgs) {
   const { db, sqlite, targetLabel } = await openDatabase(args.sqlitePath);
@@ -110,14 +114,25 @@ export async function extractSingleRecipe(args: {
   sqlitePath?: string;
   rerun?: boolean;
   signal?: AbortSignal;
+  database?: DatabaseClient;
+  databaseOwner?: "single_recipe" | "parse_job_chunk";
+  jobId?: string;
+  queuePosition?: number;
 }): Promise<ExtractSingleRecipeResult> {
-  const { db, sqlite } = await openDatabase(args.sqlitePath);
+  const handle = args.database ? null : await openDatabase(args.sqlitePath);
+  const db = args.database ?? handle!.db;
+  const deadline = AbortSignal.timeout(RECIPE_EXTRACTION_TIMEOUT_MS);
+  const signal = args.signal ? AbortSignal.any([args.signal, deadline]) : deadline;
+  let stage = "load_recipe";
 
   try {
     logInfo("recipe_parse.recipe.requested", {
       target: { householdId: args.householdId, recipeId: args.recipeId },
       action: "load_recipe",
       rerun: args.rerun ?? false,
+      jobId: args.jobId ?? null,
+      queuePosition: args.queuePosition ?? null,
+      databaseOwner: args.databaseOwner ?? "single_recipe",
     });
     const row = await db.query.householdRecipes.findFirst({
       where: (table, { and, eq }) => and(eq(table.householdId, args.householdId), eq(table.recipeId, args.recipeId)),
@@ -144,17 +159,45 @@ export async function extractSingleRecipe(args: {
       };
     }
 
-    throwIfAborted(args.signal);
-    return extractRecipeRow(db, args.householdId, row, args.rerun ?? false, args.signal);
+    throwIfAborted(signal);
+    stage = "extract";
+    return extractRecipeRow(db, args.householdId, row, args.rerun ?? false, signal);
   } catch (error) {
+    if (args.signal?.aborted) {
+      throw error;
+    }
+    if (deadline.aborted) {
+      const failureReason = "extract: Recipe extraction timed out after 75 seconds.";
+      logError("recipe_parse.recipe.failed", error, {
+        target: { householdId: args.householdId, recipeId: args.recipeId },
+        action: stage,
+        jobId: args.jobId ?? null,
+        queuePosition: args.queuePosition ?? null,
+        databaseOwner: args.databaseOwner ?? "single_recipe",
+        result: { status: "timed_out" },
+      });
+      return {
+        outcome: "failed",
+        extracted: 0,
+        reviewNeeded: 0,
+        failed: 1,
+        skipped: 0,
+        extractionId: null,
+        failureReason,
+      };
+    }
     logError("recipe_parse.recipe.failed", error, {
       target: { householdId: args.householdId, recipeId: args.recipeId },
-      action: "extract_single_recipe",
+      action: stage,
+      jobId: args.jobId ?? null,
+      queuePosition: args.queuePosition ?? null,
+      databaseOwner: args.databaseOwner ?? "single_recipe",
       result: { status: "error" },
     });
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${stage}: ${message}`, { cause: error });
   } finally {
-    await sqlite.close();
+    await handle?.sqlite.close();
   }
 }
 
@@ -181,6 +224,7 @@ async function extractRecipeRow(
   throwIfAborted(signal);
   const startedAt = Date.now();
   const target = { householdId, recipeId: row.recipeId, pinId: row.pinId };
+  let stage = "validate_source";
   logInfo("recipe_parse.recipe.started", { target, action: "extract_recipe", rerun });
   if (!row.pin.link) {
     logWarn("recipe_parse.recipe.skipped", {
@@ -217,16 +261,19 @@ async function extractRecipeRow(
   }
 
   try {
+    stage = "fetch";
     logInfo("recipe_parse.recipe.action_started", { target, action: "fetch_and_extract" });
     const extractionResult = await extractRecipeWithFallbacks(row.pin.link, {
       householdId,
       signal,
+      database: db,
     });
     throwIfAborted(signal);
     for (const attempt of extractionResult.attempts) {
       logRecipeAttempt(target, attempt);
     }
 
+    stage = "persist";
     logInfo("recipe_parse.recipe.action_started", { target, action: "persist_sources" });
     const sourceIdsByKey = await persistSourcesForAttempts(
       db,
@@ -285,11 +332,12 @@ async function extractRecipeRow(
   } catch (error) {
     logError("recipe_parse.recipe.failed", error, {
       target,
-      action: "extract_recipe",
+      action: stage,
       durationMs: Date.now() - startedAt,
       result: { status: "error" },
     });
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${stage}: ${message}`, { cause: error });
   }
 }
 

@@ -56,12 +56,76 @@ import {
 import { sendRecipeParseJobRequestedEvent } from "@/src/inngest/events";
 import { getRecipeHouseholdPinId } from "@/lib/server/queries";
 import { extractRecipes } from "@/lib/server/extract";
+import { createCustomRecipe } from "@/lib/server/custom-recipe";
 import { revalidateAll, recipeScopedPaths, toErrorState, toOptionalString } from "@/lib/actions/helpers";
 import { getTodayDayString, isValidDayString } from "@/lib/utils";
 import type { ActionState } from "@/lib/actions/types";
 import type { IngredientReviewSuggestionView, RecipeExtractionFeedbackCategory } from "@/types/view-models";
 
 type DatabaseHandle = Awaited<ReturnType<typeof openDatabase>>["db"];
+
+export const createCustomRecipeAction = withActionLogging(
+  "action.create_custom_recipe",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const title = String(formData.get("title") ?? "").trim();
+    const boardId = String(formData.get("boardId") ?? "").trim();
+    const sourceUrl = toOptionalString(formData.get("sourceUrl"));
+    const ingredients = parseCustomRecipeLines(formData.get("ingredientsJson"));
+    const steps = parseCustomRecipeLines(formData.get("stepsJson"));
+    const image = formData.get("image");
+    const imageFile = image instanceof File && image.size > 0 ? image : null;
+    const imageUrl = toOptionalString(formData.get("imageUrl"));
+
+    if (!title || !boardId || ingredients.length === 0 || steps.length === 0) {
+      return { status: "error", message: "Add a title, synced Pinterest board, ingredient, and instruction." };
+    }
+    if (!imageFile && !imageUrl) {
+      return { status: "error", message: "Add a recipe image before publishing." };
+    }
+    if (sourceUrl) {
+      try {
+        const url = new URL(sourceUrl);
+        if (url.protocol !== "https:" && url.protocol !== "http:") {
+          throw new Error("unsupported protocol");
+        }
+      } catch {
+        return { status: "error", message: "Enter a valid recipe source URL." };
+      }
+    }
+
+    try {
+      const context = await requireHouseholdContext();
+      const result = await createCustomRecipe({
+        householdId: context.householdId,
+        boardId,
+        title,
+        description: toOptionalString(formData.get("description")),
+        sourceUrl,
+        yieldText: toOptionalString(formData.get("yieldText")),
+        prepTime: toOptionalString(formData.get("prepTime")),
+        cookTime: toOptionalString(formData.get("cookTime")),
+        totalTime: toOptionalString(formData.get("totalTime")),
+        ingredients,
+        steps,
+        imageFile,
+        imageUrl,
+      });
+      revalidateAll(recipeScopedPaths(undefined, result.recipeId));
+      return {
+        status: "success",
+        message: "Recipe published to Pinterest and added to your library.",
+        data: { recipeId: result.recipeId },
+      };
+    } catch (error) {
+      return toErrorState(error, "Unable to create and publish this recipe.");
+    }
+  },
+  {
+    getStartData: (_state, formData) => ({
+      result: { title: String(formData.get("title") ?? "").trim() || null },
+    }),
+  },
+);
 
 export const extractRecipeAction = withActionLogging(
   "action.extract_recipe",
@@ -1929,6 +1993,17 @@ function parseRatingValue(value: FormDataEntryValue | null) {
   }
 
   return Math.round(parsed * 2) === parsed * 2 ? parsed : null;
+}
+
+function parseCustomRecipeLines(value: FormDataEntryValue | null) {
+  try {
+    const parsed = JSON.parse(String(value ?? "[]"));
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 async function insertRecipeEvent(

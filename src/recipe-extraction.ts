@@ -3,6 +3,7 @@ import type { Element } from "domhandler";
 import { z } from "zod";
 
 import { generateRecipeExtractionWithHouseholdAi } from "@/lib/server/ai-provider";
+import type { DatabaseClient } from "@/src/db/client";
 
 const RECIPE_TYPE = "recipe";
 const HOW_TO_STEP_TYPE = "howtostep";
@@ -223,7 +224,7 @@ export function extractRecipeFromHtml(html: string, pageUrl: string): Extraction
 
 export async function extractRecipeWithFallbacks(
   url: string,
-  options?: { householdId?: string; signal?: AbortSignal },
+  options?: { householdId?: string; signal?: AbortSignal; database?: DatabaseClient },
 ): Promise<ExtractionResult> {
   throwIfAborted(options?.signal);
   const attempts: ExtractionAttempt[] = [];
@@ -252,6 +253,7 @@ export async function extractRecipeWithFallbacks(
     browserFetch,
     options?.householdId ?? null,
     options?.signal,
+    options?.database,
   );
   if (aiAttempt) {
     attempts.push(aiAttempt);
@@ -867,6 +869,7 @@ async function extractRecipeWithAi(
   browserFetch: BrowserFetchResult,
   householdId: string | null,
   signal?: AbortSignal,
+  database?: DatabaseClient,
 ): Promise<ExtractionAttempt | null> {
   if (!householdId) {
     return null;
@@ -900,6 +903,7 @@ async function extractRecipeWithAi(
       prompt,
       schema: aiRecipeSchema,
       signal,
+      database,
     });
     throwIfAborted(signal);
     if (!parsed) {
@@ -1635,10 +1639,14 @@ function calculateVisibleAgreement(
 function sliceRecipeAnchorHtml(html: string) {
   const $ = load(html);
   const href = findRecipeAnchorHref($);
-  if (!href || !href.startsWith("#")) {
+  if (!href || !href.startsWith("#") || href === "#") {
     return null;
   }
-  const target = $(href).first();
+  const fragment = decodeFragmentIdentifier(href.slice(1));
+  if (!fragment) {
+    return null;
+  }
+  const target = $("[id]").filter((_, element) => $(element).attr("id") === fragment).first();
   if (!target.length) {
     return null;
   }
@@ -1646,6 +1654,14 @@ function sliceRecipeAnchorHtml(html: string) {
   const wrapper = load("<div></div>");
   wrapper("div").append(target.clone());
   return wrapper.html() ?? null;
+}
+
+function decodeFragmentIdentifier(value: string) {
+  try {
+    return decodeURIComponent(value).trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 function findRecipeAnchorHref($: CheerioAPI): string | null {
