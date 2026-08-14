@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ImagePlus, Loader2, WandSparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ const emptyDraft: RecipeDraft = {
   title: "", description: "", sourceUrl: "", imageUrl: "", yieldText: "", prepTime: "", cookTime: "", totalTime: "", ingredients: "", steps: "",
 };
 const initialState: ActionState = { status: "idle", message: "" };
+const DRAFT_STORAGE_KEY = "recipe-picker:create-recipe-draft:v1";
 
 export function CustomRecipeForm({ boards, canPublish }: { boards: Board[]; canPublish: boolean }) {
   const router = useRouter();
@@ -32,11 +33,36 @@ export function CustomRecipeForm({ boards, canPublish }: { boards: Board[]; canP
   const [importUrl, setImportUrl] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [publishToPinterest, setPublishToPinterest] = useState(false);
+  const [boardId, setBoardId] = useState("");
+  const hasLoadedDraft = useRef(false);
   const [state, formAction, pending] = useActionState(createCustomRecipeAction, initialState);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Partial<{ draft: RecipeDraft; importUrl: string; publishToPinterest: boolean; boardId: string }>;
+        if (parsed.draft) setDraft({ ...emptyDraft, ...parsed.draft });
+        if (typeof parsed.importUrl === "string") setImportUrl(parsed.importUrl);
+        if (typeof parsed.publishToPinterest === "boolean") setPublishToPinterest(parsed.publishToPinterest);
+        if (typeof parsed.boardId === "string") setBoardId(parsed.boardId);
+      }
+    } catch {
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } finally {
+      hasLoadedDraft.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedDraft.current) return;
+    window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ draft, importUrl, publishToPinterest, boardId }));
+  }, [boardId, draft, importUrl, publishToPinterest]);
 
   useEffect(() => {
     if (state.status === "error") toast.error(state.message);
     if (state.status === "success" && typeof state.data?.recipeId === "string") {
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
       toast.success(state.message);
       router.push(`/recipe/${state.data.recipeId}`);
     }
@@ -114,7 +140,7 @@ export function CustomRecipeForm({ boards, canPublish }: { boards: Board[]; canP
 
         <Card className="bg-white/85"><CardHeader><CardTitle>Pinterest</CardTitle><CardDescription>Save this as a personal recipe, or publish it to a synced Pinterest board now.</CardDescription></CardHeader><CardContent className="flex flex-col gap-4">
           <label className="flex items-center gap-3 text-sm font-medium"><input type="checkbox" checked={publishToPinterest} onChange={(event) => setPublishToPinterest(event.target.checked)} disabled={!canPublish || boards.length === 0} /> Publish to Pinterest</label>
-          {publishToPinterest ? <select name="boardId" required className="h-12 rounded-full border border-border bg-background px-5 text-sm"><option value="">Choose a synced board</option>{boards.map((board) => <option key={board.boardId} value={board.boardId}>{board.name}</option>)}</select> : <input type="hidden" name="boardId" value="" />}
+          {publishToPinterest ? <select name="boardId" required value={boardId} onChange={(event) => setBoardId(event.target.value)} className="h-12 rounded-full border border-border bg-background px-5 text-sm"><option value="">Choose a synced board</option>{boards.map((board) => <option key={board.boardId} value={board.boardId}>{board.name}</option>)}</select> : <input type="hidden" name="boardId" value="" />}
           <div className="flex flex-wrap items-center gap-3"><Button disabled={pending}>{pending ? (publishToPinterest ? "Publishing…" : "Saving…") : (publishToPinterest ? "Publish recipe" : "Save personal recipe")}</Button>{!canPublish ? <p className="text-sm text-muted-foreground">Reconnect Pinterest with publishing permission to post recipes.</p> : boards.length === 0 ? <p className="text-sm text-muted-foreground">Enable a Pinterest board in Settings to post recipes.</p> : null}</div>
         </CardContent></Card>
       </form>
