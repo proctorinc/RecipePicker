@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCalendarDays,
+  expandDayRange,
   formatIso8601Duration,
   formatRelativeTimeShort,
   getTodayDayString,
@@ -94,5 +95,10 @@ describe("calendar helpers", () => {
       dayNumber: 4,
       inCurrentMonth: false,
     });
+  });
+
+  it("expands an inclusive date range in either selection direction", () => {
+    expect(expandDayRange("2026-06-30", "2026-07-02")).toEqual(["2026-06-30", "2026-07-01", "2026-07-02"]);
+    expect(expandDayRange("2026-07-02", "2026-06-30")).toEqual(["2026-06-30", "2026-07-01", "2026-07-02"]);
   });
 });

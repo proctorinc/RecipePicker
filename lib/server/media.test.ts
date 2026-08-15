@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getPinImageSources } from "@/lib/server/media";
+import { getPinImageSources, getPinVideoSource } from "@/lib/server/media";
 
 describe("getPinImageSources", () => {
   it("extracts full and preview image URLs from Pinterest size variants", () => {
@@ -53,5 +53,18 @@ describe("getPinImageSources", () => {
       imageUrl: null,
       previewImageUrl: null,
     });
+  });
+});
+
+describe("getPinVideoSource", () => {
+  it("finds a direct Pinterest video asset and preserves its media type", () => {
+    expect(getPinVideoSource(JSON.stringify({ videos: { "720p": { url: "https://video.example.com/recipe.mp4?token=1", mime_type: "video/mp4" } } }), null)).toEqual({
+      videoUrl: "https://video.example.com/recipe.mp4?token=1",
+      mediaType: "video/mp4",
+    });
+  });
+
+  it("does not treat streaming playlists as direct video files", () => {
+    expect(getPinVideoSource(JSON.stringify({ video_url: "https://video.example.com/recipe.m3u8" }), null)).toBeNull();
   });
 });

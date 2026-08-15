@@ -1,8 +1,10 @@
 "use client";
 
-import { useContext, useEffect, useState, type ReactNode } from "react";
+import { useContext, useEffect, useState, type DragEvent, type ReactNode } from "react";
+import { GripVertical, Plus, Trash2 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { RecipeIngredientList } from "@/components/recipe-ingredient-list";
 import { RecipeEditingContext } from "@/components/recipe-metadata-editor";
 import { Input } from "@/components/ui/input";
@@ -23,14 +25,24 @@ export function RecipeContent({
   emptySteps = <UnavailableContent />,
   showEmptySteps = true,
 }: RecipeContentProps) {
-  const isEditing = useContext(RecipeEditingContext);
+  const { isEditing, formId, setHasContentChanges } = useContext(RecipeEditingContext);
   const [ingredients, setIngredients] = useState(recipe.ingredients);
   const [steps, setSteps] = useState(recipe.steps);
+  const [draggedStepId, setDraggedStepId] = useState<string | null>(null);
 
   useEffect(() => {
     setIngredients(recipe.ingredients);
     setSteps(recipe.steps);
   }, [recipe.ingredients, recipe.steps]);
+
+  useEffect(() => {
+    const ingredientsChanged = JSON.stringify(ingredients.map(({ id, originalText, notes }) => ({ id, originalText, notes })))
+      !== JSON.stringify(recipe.ingredients.map(({ id, originalText, notes }) => ({ id, originalText, notes })));
+    const stepsChanged = JSON.stringify(steps.map(({ id, section, text }) => ({ id, section, text })))
+      !== JSON.stringify(recipe.steps.map(({ id, section, text }) => ({ id, section, text })));
+
+    setHasContentChanges(isEditing && (ingredientsChanged || stepsChanged));
+  }, [ingredients, isEditing, recipe.ingredients, recipe.steps, setHasContentChanges, steps]);
 
   const detailItems = [
     { label: "Total time", value: formatIso8601Duration(recipe.totalTime) },
@@ -38,6 +50,31 @@ export function RecipeContent({
     { label: "Cook time", value: formatIso8601Duration(recipe.cookTime) },
     { label: "Servings", value: recipe.yieldText },
   ].filter((item): item is { label: string; value: string } => Boolean(item.value));
+
+  function addIngredient() {
+    setIngredients((current) => [...current, {
+      id: createDraftId(), originalText: "", displayText: "", amount: null,
+      amountValue: null, amountMaxValue: null, unit: null, parsedText: null, notes: null,
+      canonicalIngredientId: null, canonicalName: null, attributes: [], normalizationStatus: "needs_review",
+    }]);
+  }
+
+  function addStep() {
+    setSteps((current) => [...current, { id: createDraftId(), section: null, text: "" }]);
+  }
+
+  function moveStep(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return;
+    setSteps((current) => {
+      const fromIndex = current.findIndex((step) => step.id === draggedId);
+      const toIndex = current.findIndex((step) => step.id === targetId);
+      if (fromIndex < 0 || toIndex < 0) return current;
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }
 
   return (
     <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-[1.1fr_0.9fr]">
@@ -61,47 +98,91 @@ export function RecipeContent({
         <Card className="bg-white/85">
           <CardHeader><CardTitle>Ingredients</CardTitle></CardHeader>
           <CardContent className="px-10">
-            {ingredients.length > 0 ? (
-              isEditing ? (
-                <section className="space-y-3">
-                  <input type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.map(({ id, originalText, notes }) => ({ id, originalText, notes })))} />
-                  {ingredients.map((ingredient, index) => (
-                    <label key={ingredient.id} className="block space-y-1">
-                      <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Ingredient {index + 1}</span>
+            {isEditing ? (
+              <section className="space-y-3">
+                <input form={formId} type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.map(({ id, originalText, notes }) => ({ id, originalText, notes })))} />
+                {ingredients.map((ingredient, index) => (
+                  <div key={ingredient.id} className="flex items-center gap-2">
                       <Input
                         value={ingredient.originalText}
                         onChange={(event) => setIngredients((current) => current.map((item) => item.id === ingredient.id ? { ...item, originalText: event.target.value } : item))}
                         aria-label={`Ingredient ${index + 1}`}
                       />
-                    </label>
-                  ))}
-                </section>
-              ) : <RecipeIngredientList ingredients={ingredients} />
-            ) : emptyIngredients}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIngredients((current) => current.filter((item) => item.id !== ingredient.id))}
+                      aria-label={`Delete ingredient ${index + 1}`}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button type="button" variant="outline" size="sm" onClick={addIngredient}>
+                  <Plus className="size-4" />
+                  Add ingredient
+                </Button>
+              </section>
+            ) : ingredients.length > 0 ? <RecipeIngredientList ingredients={ingredients} /> : emptyIngredients}
           </CardContent>
         </Card>
       </div>
 
-      {(recipe.steps.length > 0 || showEmptySteps) ? <Card className="bg-white/85">
+      {(isEditing || recipe.steps.length > 0 || showEmptySteps) ? <Card className="bg-white/85">
         <CardHeader><CardTitle>Recipe</CardTitle></CardHeader>
         <CardContent>
-          {steps.length > 0 ? (
-            isEditing ? (
+          {isEditing ? (
               <section className="space-y-4">
-                <input type="hidden" name="stepsJson" value={JSON.stringify(steps)} />
+                <input form={formId} type="hidden" name="stepsJson" value={JSON.stringify(steps)} />
                 {steps.map((step, index) => (
-                  <label key={step.id} className="block space-y-2 rounded-[24px] bg-secondary/40 p-4">
-                    <span className="text-sm font-medium">Step {index + 1}</span>
+                  <div
+                    key={step.id}
+                    onDragOver={(event: DragEvent<HTMLDivElement>) => event.preventDefault()}
+                    onDrop={() => {
+                      if (draggedStepId) moveStep(draggedStepId, step.id);
+                      setDraggedStepId(null);
+                    }}
+                    className="flex gap-2 rounded-[24px] bg-secondary/40 p-4"
+                  >
+                    <button
+                      type="button"
+                      draggable
+                      onDragStart={() => setDraggedStepId(step.id)}
+                      onDragEnd={() => setDraggedStepId(null)}
+                      aria-label={`Reorder step ${index + 1}`}
+                      className="mt-2 h-fit cursor-grab touch-none text-muted-foreground active:cursor-grabbing"
+                    >
+                      <GripVertical className="size-5" />
+                    </button>
+                    <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">Step {index + 1}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setSteps((current) => current.filter((item) => item.id !== step.id))}
+                        aria-label={`Delete step ${index + 1}`}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
                     <Textarea
                       value={step.text}
                       onChange={(event) => setSteps((current) => current.map((item) => item.id === step.id ? { ...item, text: event.target.value } : item))}
                       aria-label={`Step ${index + 1}`}
                       className="min-h-32 bg-white"
                     />
-                  </label>
+                    </div>
+                  </div>
                 ))}
+                <Button type="button" variant="outline" size="sm" onClick={addStep}>
+                  <Plus className="size-4" />
+                  Add step
+                </Button>
               </section>
-            ) : (
+            ) : steps.length > 0 ? (
             <ol className="space-y-4">
               {steps.map((step, index) => (
                 <li key={step.id} className="flex gap-4 rounded-[24px] bg-secondary/40 p-4">
@@ -113,12 +194,15 @@ export function RecipeContent({
                 </li>
               ))}
             </ol>
-            )
-          ) : emptySteps}
+            ) : emptySteps}
         </CardContent>
       </Card> : null}
     </div>
   );
+}
+
+function createDraftId() {
+  return `new-${crypto.randomUUID()}`;
 }
 
 function UnavailableContent() {

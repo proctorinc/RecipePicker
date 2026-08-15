@@ -2,7 +2,10 @@ import { load, type Cheerio, type CheerioAPI } from "cheerio";
 import type { Element } from "domhandler";
 import { z } from "zod";
 
-import { generateRecipeExtractionWithHouseholdAi } from "@/lib/server/ai-provider";
+import Tesseract from "tesseract.js";
+
+import { generateRecipeExtractionWithHouseholdAi, generateVideoRecipeExtractionWithHouseholdAi } from "@/lib/server/ai-provider";
+import { getPinImageSources, getPinVideoDiscovery } from "@/lib/server/media";
 import type { DatabaseClient } from "@/src/db/client";
 
 const RECIPE_TYPE = "recipe";
@@ -94,9 +97,12 @@ export type FetchStrategy =
   | "recipe_anchor_follow"
   | "browser_rendered_html"
   | "browser_reader_text"
-  | "ai_extraction";
-export type ContentVariant = "raw_html" | "recipe_anchor_html" | "browser_rendered_html" | "browser_reader_text";
-export type ExtractionStrategy = "schema_structured" | "dom_recipe_region" | "ai_structured";
+  | "ai_extraction"
+  | "pinterest_description"
+  | "pin_image_ocr"
+  | "pinterest_video";
+export type ContentVariant = "raw_html" | "recipe_anchor_html" | "browser_rendered_html" | "browser_reader_text" | "pinterest_description" | "pin_image_ocr" | "pinterest_video";
+export type ExtractionStrategy = "schema_structured" | "dom_recipe_region" | "ai_structured" | "pinterest_text_ai" | "image_ocr_ai" | "video_ai";
 export type ExtractionConfidence = "high" | "medium" | "low" | "none";
 
 export type FetchResult = {
@@ -214,6 +220,15 @@ type BrowserFetchResult = FetchResult & {
   readerText: string | null;
 };
 
+export type PinterestRecipeFallbackSource = {
+  title?: string | null;
+  description?: string | null;
+  altText?: string | null;
+  note?: string | null;
+  mediaJson?: string | null;
+  rawJson?: string | null;
+};
+
 export async function fetchRecipePage(url: string, signal?: AbortSignal): Promise<FetchResult> {
   return fetchRecipePageWithStrategy(url, "direct_http_html", signal);
 }
@@ -224,43 +239,47 @@ export function extractRecipeFromHtml(html: string, pageUrl: string): Extraction
 }
 
 export async function extractRecipeWithFallbacks(
-  url: string,
-  options?: { householdId?: string; signal?: AbortSignal; database?: DatabaseClient },
+  url: string | null,
+  options?: { householdId?: string; signal?: AbortSignal; database?: DatabaseClient; pinterestPin?: PinterestRecipeFallbackSource },
 ): Promise<ExtractionResult> {
   throwIfAborted(options?.signal);
   const attempts: ExtractionAttempt[] = [];
+  const finish = async () => {
+    const result = chooseBestExtraction(attempts);
+    return url ? ensureResultHasPreview(result, url, options?.signal) : result;
+  };
 
-  const directFetch = await fetchRecipePageWithStrategy(url, "direct_http_html", options?.signal);
-  throwIfAborted(options?.signal);
-  attempts.push(...buildAttemptsFromFetch(directFetch, "direct_http_html"));
+  if (url) {
+    const directFetch = await fetchRecipePageWithStrategy(url, "direct_http_html", options?.signal);
+    throwIfAborted(options?.signal);
+    attempts.push(...buildAttemptsFromFetch(directFetch, "direct_http_html"));
 
-  let best = chooseBestExtraction(attempts);
-  if (shouldStopAfter(best)) {
-    return await ensureResultHasPreview(best, url, options?.signal);
+    let best = chooseBestExtraction(attempts);
+    if (shouldStopAfter(best)) return finish();
+
+    const browserFetch = await fetchRecipePageWithBrowser(url, options?.signal);
+    throwIfAborted(options?.signal);
+    attempts.push(...buildAttemptsFromFetch(browserFetch, "browser_rendered_html", browserFetch.readerText));
+
+    best = chooseBestExtraction(attempts);
+    const aiAttempt = await extractRecipeWithAi(best, directFetch, browserFetch, options?.householdId ?? null, options?.signal, options?.database);
+    if (aiAttempt) attempts.push(aiAttempt);
   }
 
-  const browserFetch = await fetchRecipePageWithBrowser(url, options?.signal);
-  throwIfAborted(options?.signal);
-  attempts.push(...buildAttemptsFromFetch(browserFetch, "browser_rendered_html", browserFetch.readerText));
+  if (chooseBestExtraction(attempts).recipe) return finish();
+  const pin = options?.pinterestPin;
+  const sourceUrl = url;
+  const descriptionAttempt = await extractRecipeFromPinterestText(pin, sourceUrl, options?.householdId ?? null, options?.signal, options?.database);
+  if (descriptionAttempt) attempts.push(descriptionAttempt);
+  if (chooseBestExtraction(attempts).recipe) return finish();
 
-  best = chooseBestExtraction(attempts);
-  if (shouldStopAfter(best)) {
-    return await ensureResultHasPreview(best, url, options?.signal);
-  }
+  const imageAttempt = await extractRecipeFromPinImage(pin, sourceUrl, options?.householdId ?? null, options?.signal, options?.database);
+  if (imageAttempt) attempts.push(imageAttempt);
+  if (chooseBestExtraction(attempts).recipe) return finish();
 
-  const aiAttempt = await extractRecipeWithAi(
-    best,
-    directFetch,
-    browserFetch,
-    options?.householdId ?? null,
-    options?.signal,
-    options?.database,
-  );
-  if (aiAttempt) {
-    attempts.push(aiAttempt);
-  }
-
-  return await ensureResultHasPreview(chooseBestExtraction(attempts), url, options?.signal);
+  const videoAttempt = await extractRecipeFromPinVideo(pin, sourceUrl, options?.householdId ?? null, options?.signal, options?.database);
+  if (videoAttempt) attempts.push(videoAttempt);
+  return finish();
 }
 
 async function fetchRecipePageWithStrategy(url: string, fetchStrategy: FetchStrategy, signal?: AbortSignal): Promise<FetchResult> {
@@ -837,6 +856,12 @@ function strategyCost(strategy: FetchStrategy) {
       return 4;
     case "ai_extraction":
       return 5;
+    case "pinterest_description":
+      return 6;
+    case "pin_image_ocr":
+      return 7;
+    case "pinterest_video":
+      return 8;
   }
 }
 
@@ -865,6 +890,168 @@ function summarizeAttempt(attempt: ExtractionAttempt) {
     stepCount: attempt.recipe?.steps.length ?? 0,
     failureReason: attempt.failureReason,
   };
+}
+
+function buildPinterestText(pin: PinterestRecipeFallbackSource | undefined) {
+  if (!pin) return "";
+  return [
+    ["Title", pin.title],
+    ["Description", pin.description],
+    ["Alt text", pin.altText],
+    ["Note", pin.note],
+  ].flatMap(([label, value]) => typeof value === "string" && value.trim() ? [`${label}: ${value.trim()}`] : []).join("\n");
+}
+
+async function extractRecipeFromPinterestText(
+  pin: PinterestRecipeFallbackSource | undefined,
+  sourceUrl: string | null,
+  householdId: string | null,
+  signal?: AbortSignal,
+  database?: DatabaseClient,
+): Promise<ExtractionAttempt | null> {
+  const text = buildPinterestText(pin);
+  if (!text) return null;
+  return extractRecipeFromRecoveredText({
+    text,
+    sourceUrl,
+    householdId,
+    signal,
+    database,
+    fetchStrategy: "pinterest_description",
+    contentVariant: "pinterest_description",
+    extractionStrategy: "pinterest_text_ai",
+    payload: { textLength: text.length, fields: ["title", "description", "alt_text", "note"] },
+  });
+}
+
+async function extractRecipeFromPinImage(
+  pin: PinterestRecipeFallbackSource | undefined,
+  sourceUrl: string | null,
+  householdId: string | null,
+  signal?: AbortSignal,
+  database?: DatabaseClient,
+): Promise<ExtractionAttempt | null> {
+  if (!pin) return null;
+  const imageUrl = getPinImageSources(pin.mediaJson, pin.rawJson).imageUrl;
+  if (!imageUrl) return null;
+  const fetchedAt = new Date().toISOString();
+  try {
+    const result = await Tesseract.recognize(imageUrl, "eng");
+    throwIfAborted(signal);
+    const text = result.data.text.trim();
+    if (!text) {
+      return failedMediaAttempt("pin_image_ocr", "pin_image_ocr", "image_ocr_ai", sourceUrl ?? imageUrl, fetchedAt, "No text was recognized in the pin image.", { imageUrl });
+    }
+    return extractRecipeFromRecoveredText({
+      text,
+      sourceUrl: sourceUrl ?? imageUrl,
+      householdId,
+      signal,
+      database,
+      fetchStrategy: "pin_image_ocr",
+      contentVariant: "pin_image_ocr",
+      extractionStrategy: "image_ocr_ai",
+      payload: { imageUrl, ocrTextLength: text.length },
+    });
+  } catch (error) {
+    throwIfAborted(signal);
+    return failedMediaAttempt("pin_image_ocr", "pin_image_ocr", "image_ocr_ai", sourceUrl ?? imageUrl, fetchedAt, "Image OCR failed.", { imageUrl, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function extractRecipeFromPinVideo(
+  pin: PinterestRecipeFallbackSource | undefined,
+  sourceUrl: string | null,
+  householdId: string | null,
+  signal?: AbortSignal,
+  database?: DatabaseClient,
+): Promise<ExtractionAttempt | null> {
+  if (!pin) return null;
+  const videoDiscovery = getPinVideoDiscovery(pin.mediaJson, pin.rawJson);
+  if (!videoDiscovery.source) {
+    if (!videoDiscovery.failureReason) return null;
+    return failedMediaAttempt("pinterest_video", "pinterest_video", "video_ai", sourceUrl, new Date().toISOString(), videoDiscovery.failureReason, {});
+  }
+  const video = videoDiscovery.source;
+  const fetchedAt = new Date().toISOString();
+  if (!householdId) {
+    return failedMediaAttempt("pinterest_video", "pinterest_video", "video_ai", video.videoUrl, fetchedAt, "Video extraction requires a household AI connection.", {});
+  }
+  const result = await generateVideoRecipeExtractionWithHouseholdAi({
+    householdId,
+    database,
+    signal,
+    schema: aiRecipeSchema,
+    videoUrl: video.videoUrl,
+    mediaType: video.mediaType,
+    prompt: [
+      "Extract a complete recipe from this Pinterest video.",
+      "Analyze BOTH the on-screen text/visual cooking actions and spoken narration/audio.",
+      "Reconcile the sources: preserve explicitly stated quantities and step order, and do not invent missing ingredients or instructions.",
+      "Use concise complete instruction steps. Return nulls for unknown metadata.",
+    ].join("\n"),
+  });
+  throwIfAborted(signal);
+  if (!result.object) {
+    const reason = result.reason === "video_requires_gemini"
+      ? "Video extraction requires an active Google/Gemini AI connection."
+      : result.reason === "ai_not_configured"
+        ? "No active household AI connection is configured for video extraction."
+        : "Gemini could not analyze the pin video.";
+    return failedMediaAttempt("pinterest_video", "pinterest_video", "video_ai", video.videoUrl, fetchedAt, reason, { mediaType: video.mediaType, reason: result.reason });
+  }
+  const recipe = toRecipeFromAi(result.object, video.videoUrl);
+  if (!recipe) {
+    return failedMediaAttempt("pinterest_video", "pinterest_video", "video_ai", video.videoUrl, fetchedAt, "The video did not contain a complete recipe.", { mediaType: video.mediaType, analyzedModalities: ["visual", "audio"] });
+  }
+  const quality = scoreRecipeQuality(recipe, { ingredients: [], steps: [], title: null });
+  return {
+    status: "recipe_extracted",
+    method: "ai",
+    fetchStrategy: "pinterest_video",
+    contentVariant: "pinterest_video",
+    extractionStrategy: "video_ai",
+    warnings: [],
+    failureReason: null,
+    qualityScore: quality.score,
+    confidence: classifyConfidence(quality.score - 6),
+    qualitySignals: quality.signals,
+    candidateCount: 1,
+    payload: { mediaType: video.mediaType, analyzedModalities: ["visual", "audio"] },
+    recipe: { ...recipe, sourceMethod: "ai", rawRecipe: result.object },
+    fetchedAt,
+    sourceUrl: video.videoUrl,
+  };
+}
+
+async function extractRecipeFromRecoveredText(input: {
+  text: string;
+  sourceUrl: string | null;
+  householdId: string | null;
+  signal?: AbortSignal;
+  database?: DatabaseClient;
+  fetchStrategy: Extract<FetchStrategy, "pinterest_description" | "pin_image_ocr">;
+  contentVariant: Extract<ContentVariant, "pinterest_description" | "pin_image_ocr">;
+  extractionStrategy: Extract<ExtractionStrategy, "pinterest_text_ai" | "image_ocr_ai">;
+  payload: Record<string, unknown>;
+}): Promise<ExtractionAttempt> {
+  const fetchedAt = new Date().toISOString();
+  if (!input.householdId) return failedMediaAttempt(input.fetchStrategy, input.contentVariant, input.extractionStrategy, input.sourceUrl, fetchedAt, "No household AI connection is available to structure recovered recipe text.", input.payload);
+  try {
+    const parsed = await generateRecipeExtractionWithHouseholdAi({ householdId: input.householdId, prompt: ["Extract a recipe from the recovered Pinterest content below.", "Do not invent ingredients or steps that are not present.", "Return nulls for unknown fields.", "", input.text].join("\n"), schema: aiRecipeSchema, signal: input.signal, database: input.database });
+    throwIfAborted(input.signal);
+    const recipe = parsed ? toRecipeFromAi(parsed, input.sourceUrl ?? "Pinterest") : null;
+    if (!parsed || !recipe) return failedMediaAttempt(input.fetchStrategy, input.contentVariant, input.extractionStrategy, input.sourceUrl, fetchedAt, "Recovered content did not contain a complete recipe.", input.payload);
+    const quality = scoreRecipeQuality(recipe, { ingredients: [], steps: [], title: null });
+    return { status: "recipe_extracted", method: "ai", fetchStrategy: input.fetchStrategy, contentVariant: input.contentVariant, extractionStrategy: input.extractionStrategy, warnings: [], failureReason: null, qualityScore: quality.score, confidence: classifyConfidence(quality.score - 6), qualitySignals: quality.signals, candidateCount: 1, payload: input.payload, recipe: { ...recipe, sourceMethod: "ai", rawRecipe: parsed }, fetchedAt, sourceUrl: input.sourceUrl };
+  } catch (error) {
+    throwIfAborted(input.signal);
+    return failedMediaAttempt(input.fetchStrategy, input.contentVariant, input.extractionStrategy, input.sourceUrl, fetchedAt, "Recovered-text extraction failed.", { ...input.payload, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+function failedMediaAttempt(fetchStrategy: FetchStrategy, contentVariant: ContentVariant, extractionStrategy: ExtractionStrategy, sourceUrl: string | null, fetchedAt: string, failureReason: string, payload: Record<string, unknown>): ExtractionAttempt {
+  return { status: "extraction_failed", method: null, fetchStrategy, contentVariant, extractionStrategy, warnings: [failureReason], failureReason, qualityScore: null, confidence: "none", qualitySignals: null, candidateCount: 0, payload, recipe: null, fetchedAt, sourceUrl };
 }
 
 async function extractRecipeWithAi(

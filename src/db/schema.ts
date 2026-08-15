@@ -265,6 +265,40 @@ export const householdRecipeEvents = sqliteTable(
   }),
 );
 
+export const householdShoppingCarts = sqliteTable(
+  "household_shopping_carts",
+  {
+    cartId: generatedId("cart_id"),
+    householdId: text("household_id").notNull().references(() => households.householdId),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date").notNull(),
+    status: text("status").notNull().default("active"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    householdStatusIdx: index("idx_shopping_carts_household_status").on(table.householdId, table.status),
+    householdCreatedIdx: index("idx_shopping_carts_household_created").on(table.householdId, table.createdAt),
+  }),
+);
+
+export const householdShoppingCartItemStates = sqliteTable(
+  "household_shopping_cart_item_states",
+  {
+    cartItemStateId: generatedId("cart_item_state_id"),
+    cartId: text("cart_id").notNull().references(() => householdShoppingCarts.cartId),
+    itemId: text("item_id").notNull(),
+    checked: integer("checked", { mode: "boolean" }).notNull().default(false),
+    sortPosition: integer("sort_position").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    cartItemUniqueIdx: uniqueIndex("idx_shopping_cart_item_states_cart_item_unique").on(table.cartId, table.itemId),
+    cartSortIdx: index("idx_shopping_cart_item_states_cart_sort").on(table.cartId, table.checked, table.sortPosition),
+  }),
+);
+
 export const householdRecipeFeedback = sqliteTable(
   "household_recipe_feedback",
   {
@@ -891,6 +925,7 @@ export const householdsRelations = relations(households, ({ many }) => ({
   canonicalIngredients: many(householdCanonicalIngredients),
   ingredientAliases: many(householdIngredientAliases),
   ingredientPhraseMappings: many(householdIngredientPhraseMappings),
+  shoppingCarts: many(householdShoppingCarts),
 }));
 
 export const householdMembersRelations = relations(householdMembers, ({ one }) => ({
@@ -1016,6 +1051,21 @@ export const householdRecipeEventsRelations = relations(householdRecipeEvents, (
   review: one(householdRecipeReviews, {
     fields: [householdRecipeEvents.eventId],
     references: [householdRecipeReviews.eventId],
+  }),
+}));
+
+export const householdShoppingCartsRelations = relations(householdShoppingCarts, ({ one, many }) => ({
+  household: one(households, {
+    fields: [householdShoppingCarts.householdId],
+    references: [households.householdId],
+  }),
+  itemStates: many(householdShoppingCartItemStates),
+}));
+
+export const householdShoppingCartItemStatesRelations = relations(householdShoppingCartItemStates, ({ one }) => ({
+  cart: one(householdShoppingCarts, {
+    fields: [householdShoppingCartItemStates.cartId],
+    references: [householdShoppingCarts.cartId],
   }),
 }));
 

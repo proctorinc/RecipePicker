@@ -21,6 +21,8 @@ import {
   householdRecipeInstructions,
   householdRecipeReviews,
   householdRecipeVersions,
+  householdShoppingCarts,
+  householdShoppingCartItemStates,
   pinterestAccounts,
   recipeFolderMemberships,
   recipeFolders,
@@ -38,6 +40,7 @@ import { derivePinStatus } from "@/lib/server/status";
 import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
 import {
   buildCalendarDays,
+  expandDayRange,
   formatDay,
   formatMonthLabel,
   getTodayDayString,
@@ -283,6 +286,9 @@ export async function getRecipeDetail(
     const primaryVersion = versions.at(-1) ?? null;
     const primaryIngredients = primaryVersion ? parseVersionIngredientLines(primaryVersion.ingredientsJson) : null;
     const latestExtraction = row.pin.recipeExtractions[0];
+    const selectedExtraction = row.pin.recipeExtractions.find(
+      (extraction) => extraction.selected && extraction.sourceId === row.recipeInstructions?.sourceId,
+    ) ?? latestExtraction;
     const reviewerNames = await getReviewerNameMap(context.householdId);
     const reviews = row.reviews
       .map((review) => toRecipeReviewView(review, row, reviewerNames, context, versionNumberForReview(review.recipeVersionId, versions)))
@@ -355,6 +361,12 @@ export async function getRecipeDetail(
           section: step.section,
           text: step.text,
         })) ?? [],
+      extractionProvenance:
+        selectedExtraction?.contentVariant === "pin_image_ocr"
+          ? "image"
+          : selectedExtraction?.contentVariant === "pinterest_video"
+            ? "video"
+            : null,
       extractionSummary: latestExtraction
         ? `${latestExtraction.status.replaceAll("_", " ")}${latestExtraction.method ? ` via ${latestExtraction.method}` : ""}`
         : null,
@@ -684,13 +696,29 @@ export async function getRecipeHistoryPage(
   }
 }
 
-export async function getShoppingCartPage(selectedDateParams: string[]): Promise<ShoppingCartPageView> {
-  const selectedDates = [...new Set(selectedDateParams.filter(isValidDayString))].sort();
+export async function getShoppingCartPage(): Promise<ShoppingCartPageView> {
   const context = await requireHouseholdContext();
   const { db, sqlite } = await openDatabase();
 
   try {
-    const [events, alwaysHaves] = await Promise.all([
+    const [activeCart, history, alwaysHaves] = await Promise.all([
+      db.query.householdShoppingCarts.findFirst({
+        where: (table, { and, eq: equals }) => and(equals(table.householdId, context.householdId), equals(table.status, "active")),
+        orderBy: (table, { desc: orderDesc }) => [orderDesc(table.updatedAt)],
+      }),
+      db.query.householdShoppingCarts.findMany({
+        where: (table, { and, eq: equals }) => and(equals(table.householdId, context.householdId), equals(table.status, "archived")),
+        orderBy: (table, { desc: orderDesc }) => [orderDesc(table.updatedAt)],
+        columns: { cartId: true, startDate: true, endDate: true, createdAt: true },
+      }),
+      db.query.householdAlwaysHaveIngredients.findMany({
+        where: (table, { eq: equals }) => equals(table.householdId, context.householdId),
+        with: { canonicalIngredient: true },
+        orderBy: (table, { asc: orderAsc }) => [orderAsc(table.createdAt)],
+      }),
+    ]);
+    const selectedDates = activeCart ? expandDayRange(activeCart.startDate, activeCart.endDate) : [];
+    const [events, itemStates] = await Promise.all([
       selectedDates.length > 0
         ? db.query.householdRecipeEvents.findMany({
             where: (table, { and, eq: equals }) => and(equals(table.householdId, context.householdId), inArray(table.date, selectedDates)),
@@ -718,17 +746,14 @@ export async function getShoppingCartPage(selectedDateParams: string[]): Promise
             },
           })
         : Promise.resolve([]),
-      db.query.householdAlwaysHaveIngredients.findMany({
-        where: (table, { eq: equals }) => equals(table.householdId, context.householdId),
-        with: { canonicalIngredient: true },
-        orderBy: (table, { asc: orderAsc }) => [orderAsc(table.createdAt)],
-      }),
+      activeCart ? db.query.householdShoppingCartItemStates.findMany({ where: (table, { eq: equals }) => equals(table.cartId, activeCart.cartId) }) : Promise.resolve([]),
     ]);
     const sourceMeals = events.map((event) => ({
       eventId: event.eventId,
       date: event.date,
       recipeId: event.recipeId,
       recipeTitle: event.recipe.title ?? event.recipe.pin.title ?? event.recipe.recipeInstructions?.title ?? "Untitled recipe",
+      recipeImageUrl: event.recipe.imageUrl ?? getPinImageUrl(event.recipe.pin.mediaJson, event.recipe.pin.rawJson),
     }));
     const allItems = buildShoppingCartItems(events.flatMap((event) => {
       const sourceMeal = sourceMeals.find((meal) => meal.eventId === event.eventId)!;
@@ -754,15 +779,24 @@ export async function getShoppingCartPage(selectedDateParams: string[]): Promise
       }));
     }));
     const enabledAlwaysHaveIds = new Set(alwaysHaves.filter((item) => item.enabled).map((item) => item.canonicalIngredientId));
+    const stateByItemId = new Map(itemStates.map((item) => [item.itemId, item]));
     return {
+      cartId: activeCart?.cartId ?? null,
+      startDate: activeCart?.startDate ?? null,
+      endDate: activeCart?.endDate ?? null,
       selectedDates,
       sourceMeals,
       items: allItems
         .filter((item) => item.alternativeOptions
           ? !item.alternativeOptions.some((option) => option.canonicalIngredientId && enabledAlwaysHaveIds.has(option.canonicalIngredientId))
           : !item.canonicalIngredientId || !enabledAlwaysHaveIds.has(item.canonicalIngredientId))
-        .map((item) => ({ ...item, isAlwaysHave: item.canonicalIngredientId ? alwaysHaves.some((alwaysHave) => alwaysHave.canonicalIngredientId === item.canonicalIngredientId) : false })),
+        .map((item, index) => {
+          const state = stateByItemId.get(item.itemId);
+          return { ...item, isAlwaysHave: item.canonicalIngredientId ? alwaysHaves.some((alwaysHave) => alwaysHave.canonicalIngredientId === item.canonicalIngredientId) : false, checked: state?.checked ?? false, sortPosition: state?.sortPosition ?? index };
+        })
+        .sort((left, right) => Number(left.checked) - Number(right.checked) || left.sortPosition - right.sortPosition || left.displayName.localeCompare(right.displayName)),
       alwaysHaves: alwaysHaves.map((item) => ({ canonicalIngredientId: item.canonicalIngredientId, displayName: item.canonicalIngredient.displayName, enabled: item.enabled })),
+      history,
     };
   } finally {
     await sqlite.close();
@@ -805,6 +839,25 @@ export async function getRecipeOpsList(
     return rows
       .map((row) => {
         const latestExtraction = row.pin.recipeExtractions[0];
+        const ingredientReviewCount = getIngredientReviewCount(
+          row.recipeInstructions?.ingredients,
+        );
+        const status = derivePinStatus({
+          hasRecipe: Boolean(row.recipeInstructions),
+          latestExtractionStatus: latestExtraction?.status,
+          latestExtractionLowConfidence: latestExtraction?.lowConfidence,
+          ingredientReviewCount,
+        });
+        const summary = summarizeRecipeOps({
+          status,
+          hasRecipeContent: Boolean(row.recipeInstructions),
+          latestExtractionStatus: latestExtraction?.status ?? null,
+          latestFailureReason: latestExtraction?.failureReason ?? null,
+          latestLowConfidence: latestExtraction?.lowConfidence ?? false,
+          ingredientReviewCount,
+          latestWarnings: parseJsonArray(latestExtraction?.warningsJson),
+        });
+
         return {
           recipeId: row.recipeId,
           pinId: row.pin.pinterestPinId,
@@ -814,20 +867,15 @@ export async function getRecipeOpsList(
             row.recipeInstructions?.title ??
             "Untitled recipe",
           boardId: row.pin.pinterestBoardId,
-          status: derivePinStatus({
-            hasRecipe: Boolean(row.recipeInstructions),
-            latestExtractionStatus: latestExtraction?.status,
-            latestExtractionLowConfidence: latestExtraction?.lowConfidence,
-            ingredientReviewCount: getIngredientReviewCount(
-              row.recipeInstructions?.ingredients,
-            ),
-          }),
+          status,
           updatedAt: row.updatedAt,
           imageUrl:
             row.imageUrl ??
             row.recipeInstructions?.imageUrl ??
             getPinImageUrl(row.pin.mediaJson, row.pin.rawJson),
           sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link,
+          statusSummary: summary.plainLanguageStatus,
+          statusReason: summary.latestAttentionReason,
         } satisfies RecipeOpsListItem;
       })
       .filter(

@@ -29,11 +29,11 @@ export default async function RecipeSettingsPage({
     <div className="space-y-6">
       <SettingsNav currentPath="/settings/recipes" />
       <Card>
-        <CardHeader>
-          <CardTitle>Recipe operations</CardTitle>
-          <CardDescription>Filter recipes by board or status, then start a background re-parse job for all filtered recipes or just the ones you select.</CardDescription>
+        <CardHeader className="p-4 sm:p-6">
+          <CardTitle>Recipes</CardTitle>
+          <CardDescription>Filter, check a recipe’s state, or re-parse a selection.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
           <RecipeOpsTable items={items} boardOptions={boardOptions} jobs={jobs} />
         </CardContent>
       </Card>

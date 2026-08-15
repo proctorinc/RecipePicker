@@ -47,11 +47,11 @@ const feedbackCategoryOptions: Array<{
 export function RecipeSettingsWorkspace({ detail }: { detail: RecipeOpsDetail }) {
   return (
     <Tabs defaultValue="content" className="space-y-6">
-      <TabsList>
-        <TabsTrigger value="content">Recipe content</TabsTrigger>
-        <TabsTrigger value="feedback">Feedback</TabsTrigger>
-        <TabsTrigger value="history">Run history</TabsTrigger>
-        <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
+      <TabsList className="grid w-full grid-cols-4 rounded-2xl sm:inline-flex sm:w-auto sm:rounded-full">
+        <TabsTrigger className="px-2 text-xs sm:px-4 sm:text-sm" value="content">Content</TabsTrigger>
+        <TabsTrigger className="px-2 text-xs sm:px-4 sm:text-sm" value="feedback">Feedback</TabsTrigger>
+        <TabsTrigger className="px-2 text-xs sm:px-4 sm:text-sm" value="history">History</TabsTrigger>
+        <TabsTrigger className="px-2 text-xs sm:px-4 sm:text-sm" value="diagnostics">Details</TabsTrigger>
       </TabsList>
 
       <TabsContent value="content">
@@ -141,7 +141,22 @@ function RecipeContentEditor({ detail }: { detail: RecipeOpsDetail }) {
             </Button>
           </div>
           {detail.ingredients.length > 0 ? (
-            <div className="overflow-hidden rounded-[24px] border border-border/60">
+            <>
+            <div className="space-y-2 md:hidden">
+              {detail.ingredients.map((ingredient) => (
+                <div key={ingredient.id} className="rounded-2xl border border-border/60 bg-secondary/10 p-3">
+                  <p className="font-medium">{ingredient.originalText}</p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    <span>{formatParsedAmount(ingredient.amount, ingredient.unit)}</span>
+                    <span>{ingredient.canonicalName ?? "No match"}</span>
+                    <Badge variant={ingredient.normalizationStatus === "needs_review" ? "warning" : "outline"}>
+                      {formatIngredientStatus(ingredient.normalizationStatus)}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="hidden overflow-hidden rounded-[24px] border border-border/60 md:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -214,6 +229,7 @@ function RecipeContentEditor({ detail }: { detail: RecipeOpsDetail }) {
                 </TableBody>
               </Table>
             </div>
+            </>
           ) : (
             <div className="rounded-[24px] border border-dashed border-border/60 bg-secondary/10 p-6">
               <p className="font-medium">No structured ingredients are available yet.</p>
@@ -693,6 +709,9 @@ function buildPipelineSteps(
   const browserAttempts = attempts.filter((attempt) => attempt.fetchStrategy === "browser_rendered_html");
   const readerAttempts = attempts.filter((attempt) => attempt.fetchStrategy === "browser_reader_text");
   const aiAttempts = attempts.filter((attempt) => attempt.fetchStrategy === "ai_extraction");
+  const pinterestTextAttempts = attempts.filter((attempt) => attempt.fetchStrategy === "pinterest_description");
+  const imageOcrAttempts = attempts.filter((attempt) => attempt.fetchStrategy === "pin_image_ocr");
+  const videoAttempts = attempts.filter((attempt) => attempt.fetchStrategy === "pinterest_video");
   const attemptedStrategies = new Set(attempts.map((attempt) => attempt.fetchStrategy));
 
   return [
@@ -701,6 +720,9 @@ function buildPipelineSteps(
     describePipelineStep("browser_html", "Browser render", browserAttempts, attemptedStrategies, "browser_rendered_html"),
     describePipelineStep("reader_text", "Visible text pass", readerAttempts, attemptedStrategies, "browser_reader_text"),
     describePipelineStep("ai_structured", "AI extraction", aiAttempts, attemptedStrategies, "ai_extraction"),
+    describePipelineStep("pinterest_text", "Pinterest text", pinterestTextAttempts, attemptedStrategies, "pinterest_description"),
+    describePipelineStep("image_ocr", "Image OCR", imageOcrAttempts, attemptedStrategies, "pin_image_ocr"),
+    describePipelineStep("video_ai", "Video + audio AI", videoAttempts, attemptedStrategies, "pinterest_video"),
   ];
 }
 
@@ -758,7 +780,7 @@ function describeUntriedStep(
     return "Not tried on this run. No useful visible-text pass was recorded after browser rendering.";
   }
 
-  if (strategy === "browser_rendered_html" || strategy === "ai_extraction") {
+  if (strategy === "browser_rendered_html" || strategy === "ai_extraction" || strategy === "pinterest_description" || strategy === "pin_image_ocr" || strategy === "pinterest_video") {
     return "Not tried on this run. An earlier stage likely stopped the pipeline first.";
   }
 

@@ -154,7 +154,7 @@ export function RecipeOpsTable({
         cancelFormAction={cancelFormAction}
         resumeFormAction={resumeFormAction}
       />
-      <div className="flex flex-col gap-4 rounded-[24px] border border-border/60 bg-secondary/20 p-4">
+      <div className="flex flex-col gap-3 rounded-[24px] border border-border/60 bg-secondary/20 p-3 sm:gap-4 sm:p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-2">
@@ -198,8 +198,8 @@ export function RecipeOpsTable({
             />
             <BulkRerunButton disabled={targetRecipeIds.length === 0}>
               {selectedCount > 0
-                ? `Start re-parse job for ${selectedCount} recipes`
-                : `Start re-parse job for ${filteredItems.length} recipes`}
+                ? `Re-parse ${selectedCount} selected`
+                : `Re-parse ${filteredItems.length} shown`}
             </BulkRerunButton>
           </form>
         </div>
@@ -220,6 +220,24 @@ export function RecipeOpsTable({
         </div>
       </div>
 
+      <div className="space-y-2 md:hidden">
+        {filteredItems.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">
+            No recipes match the current filters.
+          </div>
+        ) : null}
+        {filteredItems.map((item) => (
+          <RecipeOpsMobileCard
+            key={item.recipeId}
+            item={item}
+            boardLabel={boardOptions.find((option) => option.value === item.boardId)?.label ?? item.boardId}
+            selected={selectedRecipeIds.includes(item.recipeId)}
+            onSelectedChange={(checked) => toggleRecipe(item.recipeId, checked)}
+          />
+        ))}
+      </div>
+
+      <div className="hidden md:block">
       <Table>
         <TableHeader>
           <TableRow>
@@ -261,6 +279,11 @@ export function RecipeOpsTable({
                   <p className="text-xs text-muted-foreground">
                     {item.sourceUrl ?? "No source URL"}
                   </p>
+                  {item.status !== "recipe_ready" ? (
+                    <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                      {item.statusReason ?? item.statusSummary}
+                    </p>
+                  ) : null}
                 </div>
               </TableCell>
               <TableCell>
@@ -283,7 +306,55 @@ export function RecipeOpsTable({
           ))}
         </TableBody>
       </Table>
+      </div>
     </div>
+  );
+}
+
+function RecipeOpsMobileCard({
+  item,
+  boardLabel,
+  selected,
+  onSelectedChange,
+}: {
+  item: RecipeOpsListItem;
+  boardLabel: string;
+  selected: boolean;
+  onSelectedChange: (checked: boolean) => void;
+}) {
+  const statusDetail = item.statusReason ?? item.statusSummary;
+
+  return (
+    <article className="rounded-2xl border border-border/60 bg-background/80 p-3 shadow-sm">
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={(event) => onSelectedChange(event.target.checked)}
+          className="mt-1 h-4 w-4 shrink-0 rounded border border-border"
+          aria-label={`Select recipe ${item.title}`}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="line-clamp-2 font-medium leading-5">{item.title}</p>
+            <StatusBadge status={item.status} />
+          </div>
+          <p className="mt-1 truncate text-xs text-muted-foreground">{boardLabel}</p>
+          {item.status !== "recipe_ready" ? (
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">{statusDetail}</p>
+          ) : null}
+          <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>Updated {formatDate(item.updatedAt)}</span>
+            <Link
+              href={`/settings/recipes/${item.recipeId}`}
+              className="shrink-0 font-medium text-foreground underline underline-offset-4"
+            >
+              Details
+            </Link>
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }
 

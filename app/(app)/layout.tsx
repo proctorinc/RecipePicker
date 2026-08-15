@@ -20,6 +20,7 @@ export default async function AuthenticatedAppLayout({
     <AppShell
       householdName={household.householdName}
       showAiPicker={access.isPremium}
+      showSettings={household.role === "owner" || access.isActualAdmin}
     >
       {children}
     </AppShell>

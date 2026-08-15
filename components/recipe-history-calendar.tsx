@@ -37,7 +37,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { createRecipeEventsAction } from "@/lib/actions/operations";
+import { createRecipeEventsAction, createShoppingCartAction } from "@/lib/actions/operations";
 import { buildFeedLoadingSkeletons } from "@/lib/feed-layout";
 import {
   cn,
@@ -66,11 +66,11 @@ type ReviewDialogTarget = {
 export function RecipeHistoryCalendar({
   history,
   fromRecipe = false,
-  initialCartDates = [],
+  initialCartSelection = false,
 }: {
   history: RecipeHistoryPageView;
   fromRecipe?: boolean;
-  initialCartDates?: string[];
+  initialCartSelection?: boolean;
 }) {
   const [dayDialogDate, setDayDialogDate] = useState<string | null>(null);
   const [recipePickerOpen, setRecipePickerOpen] = useState(false);
@@ -85,8 +85,9 @@ export function RecipeHistoryCalendar({
     RecipeHistoryRecipeOption[] | null
   >(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
-  const [cartSelectionMode, setCartSelectionMode] = useState(false);
-  const [cartSelectedDates, setCartSelectedDates] = useState<string[]>(initialCartDates);
+  const [cartSelectionMode, setCartSelectionMode] = useState(initialCartSelection);
+  const [cartRangeStart, setCartRangeStart] = useState<string | null>(null);
+  const [cartRangeEnd, setCartRangeEnd] = useState<string | null>(null);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
@@ -117,7 +118,11 @@ export function RecipeHistoryCalendar({
     () => new Set(selectedDates),
     [selectedDates],
   );
-  const cartSelectedDateSet = useMemo(() => new Set(cartSelectedDates), [cartSelectedDates]);
+  const cartSelectedDateSet = useMemo(() => {
+    if (!cartRangeStart) return new Set<string>();
+    const [start, end] = cartRangeEnd && cartRangeEnd < cartRangeStart ? [cartRangeEnd, cartRangeStart] : [cartRangeStart, cartRangeEnd ?? cartRangeStart];
+    return new Set(history.days.filter((day) => day.date >= start && day.date <= end).map((day) => day.date));
+  }, [cartRangeStart, cartRangeEnd, history.days]);
   const selectedRecipe = history.selectedRecipe;
   const loadingSkeletonColumns = useMemo(
     () => buildFeedLoadingSkeletons(3),
@@ -132,9 +137,7 @@ export function RecipeHistoryCalendar({
     setSelectedDates([]);
   }, [history.month, history.selectedRecipe?.recipeId]);
 
-  useEffect(() => {
-    setCartSelectedDates(initialCartDates);
-  }, [initialCartDates]);
+  useEffect(() => { setCartSelectionMode(initialCartSelection); setCartRangeStart(null); setCartRangeEnd(null); }, [initialCartSelection]);
 
   useEffect(() => {
     if (!isSelectionMode) {
@@ -229,9 +232,10 @@ export function RecipeHistoryCalendar({
 
   function openDay(day: RecipeHistoryDayView) {
     if (cartSelectionMode) {
-      if (day.events.length > 0) {
-        setCartSelectedDates((current) => current.includes(day.date) ? current.filter((entry) => entry !== day.date) : [...current, day.date]);
-      }
+      if (!cartRangeStart) { setCartRangeStart(day.date); setCartRangeEnd(null); return; }
+      setCartRangeEnd(day.date);
+      const data = new FormData(); data.set("startDate", cartRangeStart); data.set("endDate", day.date);
+      startTransition(async () => { const result = await createShoppingCartAction({ status: "idle", message: "" }, data); if (result.status === "success") { startNavigation("/shopping-cart"); router.push("/shopping-cart"); } else toast.error(result.message); });
       return;
     }
     if (isSelectionMode) {
@@ -269,15 +273,12 @@ export function RecipeHistoryCalendar({
   }
 
   function buildHistoryHref(month: string) {
-    const cartParams = cartSelectedDates.length ? [...cartSelectedDates].sort().map((date) => `&date=${encodeURIComponent(date)}`).join("") : "";
+    const cartParams = cartSelectionMode ? "&cart=select" : "";
     return history.selectedRecipe
       ? `/history?month=${encodeURIComponent(month)}&recipeId=${encodeURIComponent(history.selectedRecipe.recipeId)}${fromRecipe ? "&from=recipe" : ""}${cartParams}`
       : `/history?month=${encodeURIComponent(month)}${cartParams}`;
   }
 
-  function shoppingCartHref() {
-    return `/shopping-cart?${[...cartSelectedDates].sort().map((date) => `date=${encodeURIComponent(date)}`).join("&")}`;
-  }
 
   function buildRecipeHref(recipeId: string) {
     if (history.selectedRecipe?.recipeId !== recipeId) {
@@ -385,16 +386,12 @@ export function RecipeHistoryCalendar({
           </div>
         </div>
       ) : null}
-      {cartSelectionMode && cartSelectedDates.length > 0 ? (
-        <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur">
-          <div className="flex items-center gap-3"><Button type="button" variant="ghost" size="sm" onClick={() => setCartSelectedDates([])}>Clear</Button><Button asChild className="flex-1"><AppTransitionLink href={shoppingCartHref()}><ShoppingCart className="h-4 w-4" />Build cart for {cartSelectedDates.length} {cartSelectedDates.length === 1 ? "day" : "days"}</AppTransitionLink></Button></div>
-        </div>
-      ) : null}
+      {cartSelectionMode ? <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur"><div className="flex items-center gap-3"><Button type="button" variant="ghost" size="sm" onClick={() => { setCartRangeStart(null); setCartRangeEnd(null); }}>{cartRangeStart ? "Restart" : "Cancel"}</Button><p className="flex-1 text-sm text-muted-foreground">{cartRangeStart ? "Choose an end date" : "Choose a start date"}</p><Button asChild variant="ghost" size="sm"><AppTransitionLink href="/shopping-cart">Back</AppTransitionLink></Button></div></div> : null}
 
       <section className="rounded-[24px] border border-white/70 bg-white/90 p-2 shadow-soft sm:rounded-[32px] sm:p-6">
         <div className="gap-2 mb-4 flex items-center justify-end sm:mb-6">
-          <Button type="button" variant={cartSelectionMode ? "outline" : "default"} size="sm" onClick={() => { setCartSelectionMode((current) => !current); setSelectedDates([]); }} disabled={isSelectionMode}>
-            <ShoppingCart className="h-4 w-4" />{cartSelectionMode ? "Done selecting" : "Build cart"}
+          <Button type="button" variant={cartSelectionMode ? "outline" : "default"} size="sm" onClick={() => { if (cartSelectionMode) router.push("/shopping-cart"); else router.push(`/history?month=${encodeURIComponent(history.month)}&cart=select`); }} disabled={isSelectionMode}>
+            <ShoppingCart className="h-4 w-4" />{cartSelectionMode ? "Cancel cart" : "Build cart"}
           </Button>
           {selectedRecipe && (
             <Button asChild type="button" variant="ghost" size="sm">
@@ -533,9 +530,8 @@ export function RecipeHistoryCalendar({
                 isSelectionMode &&
                   selectedDateSet.has(day.date) &&
                   "border-primary bg-primary/10 ring-2 ring-primary/35 sm:border-primary/70",
-                cartSelectionMode && day.events.length > 0 && cartSelectedDateSet.has(day.date) &&
+                cartSelectionMode && cartSelectedDateSet.has(day.date) &&
                   "border-primary bg-primary/10 ring-2 ring-primary/35 sm:border-primary/70",
-                cartSelectionMode && day.events.length === 0 && "cursor-not-allowed opacity-55",
                 day.isToday && "border-primary/40 ring-1 ring-primary/25",
               )}
             >

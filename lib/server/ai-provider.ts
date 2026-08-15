@@ -2,7 +2,7 @@ import { createId } from "@paralleldrive/cuid2";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateObject } from "ai";
+import { generateObject, type ModelMessage } from "ai";
 import { eq } from "drizzle-orm";
 import { z, type ZodTypeAny } from "zod";
 
@@ -44,7 +44,7 @@ export type AiConnectionSummary = {
 
 type ConnectionRow = typeof householdAiConnectionsTable.$inferSelect;
 
-type StoredAiConfig = {
+export type StoredAiConfig = {
   provider: AiProvider;
   model: string;
   apiKey: string;
@@ -56,6 +56,11 @@ type StructuredGenerationArgs<TSchema extends ZodTypeAny> = {
   schema: TSchema;
   signal?: AbortSignal;
   database?: DatabaseClient;
+};
+
+type VideoGenerationArgs<TSchema extends ZodTypeAny> = StructuredGenerationArgs<TSchema> & {
+  videoUrl: string;
+  mediaType: string;
 };
 
 const AI_MODEL_CATALOG: Record<AiProvider, AiModelOption[]> = {
@@ -312,6 +317,40 @@ export async function generateRecipeExtractionWithHouseholdAi<
   TSchema extends ZodTypeAny,
 >(args: StructuredGenerationArgs<TSchema>) {
   return generateHouseholdAiObject(args);
+}
+
+/**
+ * Video input is currently intentionally Gemini-only. The Interactions API can
+ * fetch a public direct video URL and considers both video frames and audio.
+ */
+export async function generateVideoRecipeExtractionWithHouseholdAi<
+  TSchema extends ZodTypeAny,
+>(args: VideoGenerationArgs<TSchema>): Promise<
+  | { object: z.infer<TSchema>; provider: "google" }
+  | { object: null; reason: "ai_not_configured" | "video_requires_gemini" | "video_request_failed" }
+> {
+  const config = await getStoredHouseholdAiConfig(args.householdId, args.database);
+  if (!config) return { object: null, reason: "ai_not_configured" };
+  if (config.provider !== "google") return { object: null, reason: "video_requires_gemini" };
+
+  try {
+    const messages: ModelMessage[] = [{
+      role: "user",
+      content: [
+        { type: "text", text: args.prompt },
+        { type: "file", data: new URL(args.videoUrl), mediaType: args.mediaType },
+      ],
+    }];
+    const { object } = await generateObject({
+      model: createGoogleGenerativeAI({ apiKey: config.apiKey }).interactions(config.model),
+      schema: args.schema,
+      messages,
+      abortSignal: args.signal,
+    });
+    return { object: object as z.infer<TSchema>, provider: "google" };
+  } catch {
+    return { object: null, reason: "video_request_failed" };
+  }
 }
 
 export async function generateRecipePickerWithHouseholdAi<

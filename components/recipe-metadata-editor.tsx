@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { saveRecipeMetadataAction } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
@@ -17,7 +18,7 @@ const initialActionState: ActionState = {
   message: "",
 };
 
-export const RecipeEditingContext = createContext(false);
+export const RecipeEditingContext = createContext({ isEditing: false, formId: "", setHasContentChanges: (_hasChanges: boolean) => {} });
 
 type RecipeMetadataEditorProps = {
   recipeId: string;
@@ -26,6 +27,7 @@ type RecipeMetadataEditorProps = {
   backHref: string;
   backLabel: string;
   children: React.ReactNode;
+  topContent?: React.ReactNode;
   content?: React.ReactNode;
   editBanner?: React.ReactNode;
 };
@@ -37,6 +39,7 @@ export function RecipeMetadataEditor({
   backHref,
   backLabel,
   children,
+  topContent,
   content,
   editBanner,
 }: RecipeMetadataEditorProps) {
@@ -49,13 +52,17 @@ export function RecipeMetadataEditor({
   const [draftDescription, setDraftDescription] = useState(description ?? "");
   const [displayTitle, setDisplayTitle] = useState(title);
   const [displayDescription, setDisplayDescription] = useState(description ?? "");
+  const [hasContentChanges, setHasContentChanges] = useState(false);
+  const [saveChoiceOpen, setSaveChoiceOpen] = useState(false);
   const [state, formAction, pending] = useActionState(saveRecipeMetadataAction, initialActionState);
+  const formId = `recipe-metadata-${recipeId}`;
 
   useEffect(() => {
     setDraftTitle(title);
     setDraftDescription(description ?? "");
     setDisplayTitle(title);
     setDisplayDescription(description ?? "");
+    setHasContentChanges(false);
   }, [description, title]);
 
   useEffect(() => {
@@ -63,6 +70,7 @@ export function RecipeMetadataEditor({
       setDisplayTitle(draftTitle.trim());
       setDisplayDescription(draftDescription.trim());
       setIsEditing(false);
+      setHasContentChanges(false);
       toast.success(state.message);
       router.refresh();
       return;
@@ -88,84 +96,118 @@ export function RecipeMetadataEditor({
     }
   }, [draftDescription, draftTitle, isEditing]);
 
+  const hasMetadataChanges = draftTitle.trim() !== displayTitle.trim()
+    || draftDescription.trim() !== displayDescription.trim();
+  const hasChanges = hasMetadataChanges || hasContentChanges;
+
+  function save(versionMode: "update" | "new") {
+    const form = formRef.current;
+    if (!form || !hasChanges) return;
+    const formData = new FormData(form);
+    formData.set("versionMode", versionMode);
+    formAction(formData);
+    setSaveChoiceOpen(false);
+  }
+
   return (
-    <RecipeEditingContext.Provider value={isEditing}>
-    <form
-      ref={formRef}
-      className="contents"
-      onSubmit={(event) => {
-        event.preventDefault();
-        formAction(new FormData(event.currentTarget));
-      }}
-    >
-      <input type="hidden" name="recipeId" value={recipeId} />
-      <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur">
-        <div className="flex items-center justify-between gap-3">
-          <Button asChild variant="outline">
-            <AppTransitionLink href={backHref} prefetch>
-              <ArrowLeft className="size-4" />
-              {backLabel}
-            </AppTransitionLink>
-          </Button>
-          <EditSubmitButton
-            isEditing={isEditing}
-            pending={pending}
-            onSave={() => formRef.current?.requestSubmit()}
-            onEnableEditing={() => {
-              setDraftTitle(displayTitle);
-              setDraftDescription(displayDescription);
-              setIsEditing(true);
-            }}
-          />
+    <RecipeEditingContext.Provider value={{ isEditing, formId, setHasContentChanges }}>
+      <div className="contents">
+        <form
+          id={formId}
+          ref={formRef}
+          className="contents"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (hasChanges) setSaveChoiceOpen(true);
+          }}
+        >
+          <input type="hidden" name="recipeId" value={recipeId} />
+          <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur">
+            <div className="flex items-center justify-between gap-3">
+              <Button asChild variant="outline">
+                <AppTransitionLink href={backHref} prefetch>
+                  <ArrowLeft className="size-4" />
+                  {backLabel}
+                </AppTransitionLink>
+              </Button>
+              <EditSubmitButton
+                isEditing={isEditing}
+                pending={pending}
+                hasChanges={hasChanges}
+                onSave={() => setSaveChoiceOpen(true)}
+                onEnableEditing={() => {
+                  setDraftTitle(displayTitle);
+                  setDraftDescription(displayDescription);
+                  setHasContentChanges(false);
+                  setIsEditing(true);
+                }}
+              />
+            </div>
+          </div>
+        </form>
+
+        <Dialog open={saveChoiceOpen} onOpenChange={setSaveChoiceOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Save recipe changes</DialogTitle>
+              <DialogDescription>Choose whether to save these changes to the current version or create a new version with them.</DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" disabled={pending} onClick={() => save("update")}>Save current version</Button>
+              <Button type="button" disabled={pending} onClick={() => save("new")}>Create a new version</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {children}
+        {editBanner}
+
+        <div className="space-y-2 px-4">
+          <section>
+            {isEditing ? (
+              <Textarea
+                ref={titleRef}
+                form={formId}
+                name="title"
+                value={draftTitle}
+                onChange={(event) => setDraftTitle(event.target.value)}
+                placeholder="Add a recipe title"
+                rows={2}
+                className={cn(
+                  "min-h-0 resize-none overflow-hidden rounded-none border-0 bg-secondary/35 px-0 py-0",
+                  "font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight text-foreground shadow-none focus-visible:ring-0 sm:text-5xl",
+                )}
+              />
+            ) : (
+              <h2 className="max-w-3xl whitespace-pre-wrap font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight sm:text-5xl">
+                {displayTitle}
+              </h2>
+            )}
+          </section>
+
+          <section>
+            {isEditing ? (
+              <Textarea
+                ref={descriptionRef}
+                form={formId}
+                name="description"
+                value={draftDescription}
+                onChange={(event) => setDraftDescription(event.target.value)}
+                placeholder="Add a short description for this recipe."
+                rows={4}
+                className="min-h-[7.5rem] resize-none overflow-hidden rounded-none border-0 bg-secondary/30 px-0 py-0 text-sm text-muted-foreground shadow-none focus-visible:ring-0 sm:text-base"
+              />
+            ) : displayDescription.trim() ? (
+              <p className="whitespace-pre-wrap text-sm text-muted-foreground sm:text-base">
+                {displayDescription}
+              </p>
+            ) : null}
+          </section>
+
+          {topContent}
+          {content}
         </div>
       </div>
-
-      {children}
-      {editBanner}
-
-      <div className="space-y-2 px-4">
-        <section>
-          {isEditing ? (
-            <Textarea
-              ref={titleRef}
-              name="title"
-              value={draftTitle}
-              onChange={(event) => setDraftTitle(event.target.value)}
-              placeholder="Add a recipe title"
-              rows={2}
-              className={cn(
-                "min-h-0 resize-none overflow-hidden rounded-none border-0 bg-secondary/35 px-0 py-0",
-                "font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight text-foreground shadow-none focus-visible:ring-0 sm:text-5xl",
-              )}
-            />
-          ) : (
-            <h2 className="max-w-3xl whitespace-pre-wrap font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight sm:text-5xl">
-              {displayTitle}
-            </h2>
-          )}
-        </section>
-
-        <section>
-          {isEditing ? (
-            <Textarea
-              ref={descriptionRef}
-              name="description"
-              value={draftDescription}
-              onChange={(event) => setDraftDescription(event.target.value)}
-              placeholder="Add a short description for this recipe."
-              rows={4}
-              className="min-h-[7.5rem] resize-none overflow-hidden rounded-none border-0 bg-secondary/30 px-0 py-0 text-sm text-muted-foreground shadow-none focus-visible:ring-0 sm:text-base"
-            />
-          ) : displayDescription.trim() ? (
-            <p className="whitespace-pre-wrap text-sm text-muted-foreground sm:text-base">
-              {displayDescription}
-            </p>
-          ) : null}
-        </section>
-
-        {content}
-      </div>
-    </form>
     </RecipeEditingContext.Provider>
   );
 }
@@ -173,18 +215,20 @@ export function RecipeMetadataEditor({
 function EditSubmitButton({
   isEditing,
   pending,
+  hasChanges,
   onSave,
   onEnableEditing,
 }: {
   isEditing: boolean;
   pending: boolean;
+  hasChanges: boolean;
   onSave: () => void;
   onEnableEditing: () => void;
 }) {
   return (
     <Button
       type="button"
-      disabled={pending}
+      disabled={pending || (isEditing && !hasChanges)}
       onClick={() => {
         if (isEditing) {
           onSave();

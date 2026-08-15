@@ -227,23 +227,6 @@ async function extractRecipeRow(
   const target = { householdId, recipeId: row.recipeId, pinId: row.pinId };
   let stage = "validate_source";
   logInfo("recipe_parse.recipe.started", { target, action: "extract_recipe", rerun });
-  if (!row.pin.link) {
-    logWarn("recipe_parse.recipe.skipped", {
-      target,
-      action: "validate_source",
-      reason: "missing_source_url",
-      result: { status: "skipped" },
-    });
-    return completeRecipeResult(target, startedAt, {
-      outcome: "skipped",
-      extracted: 0,
-      reviewNeeded: 0,
-      failed: 0,
-      skipped: 1,
-      extractionId: null,
-    });
-  }
-
   if (row.recipeInstructions !== null && !rerun) {
     logInfo("recipe_parse.recipe.skipped", {
       target,
@@ -268,6 +251,14 @@ async function extractRecipeRow(
       householdId,
       signal,
       database: db,
+      pinterestPin: {
+        title: row.pin.title,
+        description: row.pin.description,
+        altText: row.pin.altText,
+        note: row.pin.note,
+        mediaJson: row.pin.mediaJson,
+        rawJson: row.pin.rawJson,
+      },
     });
     throwIfAborted(signal);
     for (const attempt of extractionResult.attempts) {
@@ -276,15 +267,16 @@ async function extractRecipeRow(
 
     stage = "persist";
     logInfo("recipe_parse.recipe.action_started", { target, action: "persist_sources" });
+    const originalSourceUrl = row.pin.link ?? `pinterest://pin/${row.pin.pinterestPinId}`;
     const sourceIdsByKey = await persistSourcesForAttempts(
       db,
       householdId,
       row.pinId,
-      row.pin.link,
+      originalSourceUrl,
       extractionResult.attempts,
     );
     const selectedSourceId =
-      getAttemptSourceId(sourceIdsByKey, extractionResult.fetchStrategy, extractionResult.sourceUrl ?? row.pin.link) ?? null;
+      getAttemptSourceId(sourceIdsByKey, extractionResult.fetchStrategy, extractionResult.sourceUrl ?? originalSourceUrl) ?? null;
     logInfo("recipe_parse.recipe.action_started", { target, action: "persist_extraction" });
     const extractionId = await persistExtractionRow(db, householdId, row.pinId, extractionResult, selectedSourceId);
     throwIfAborted(signal);
@@ -502,7 +494,15 @@ async function persistRecipeInstructions(
     }),
   );
 
-  const existingInstructions = await db.query.householdRecipeInstructions.findFirst({
+  // Do all destructive replacement work in one transaction. Normalization is
+  // intentionally completed first: if it fails, no existing recipe content
+  // has been touched. Once replacement starts, a failed write rolls back to
+  // the previously saved instructions, steps, and ingredients.
+  const transactionDb = db as unknown as {
+    transaction: (callback: (tx: DatabaseClient) => Promise<void>) => Promise<void>;
+  };
+  await transactionDb.transaction(async (tx) => {
+    const existingInstructions = await tx.query.householdRecipeInstructions.findFirst({
       where: (table, { eq }) => eq(table.recipeId, recipeId),
       columns: {
         recipeId: true,
@@ -510,12 +510,12 @@ async function persistRecipeInstructions(
       },
     });
 
-  await db.delete(householdRecipeSteps).where(eq(householdRecipeSteps.recipeId, recipeId)).run();
-  await db.delete(householdRecipeIngredientAlternatives).where(eq(householdRecipeIngredientAlternatives.recipeId, recipeId)).run();
-  await db.delete(householdRecipeIngredients).where(eq(householdRecipeIngredients.recipeId, recipeId)).run();
+    await tx.delete(householdRecipeSteps).where(eq(householdRecipeSteps.recipeId, recipeId)).run();
+    await tx.delete(householdRecipeIngredientAlternatives).where(eq(householdRecipeIngredientAlternatives.recipeId, recipeId)).run();
+    await tx.delete(householdRecipeIngredients).where(eq(householdRecipeIngredients.recipeId, recipeId)).run();
 
-  if (existingInstructions) {
-    await db.update(householdRecipeInstructions)
+    if (existingInstructions) {
+      await tx.update(householdRecipeInstructions)
       .set({
         householdId,
         sourceId,
@@ -537,9 +537,9 @@ async function persistRecipeInstructions(
         updatedAt: now,
       })
       .where(eq(householdRecipeInstructions.recipeId, recipeId))
-      .run();
-  } else {
-    await db.insert(householdRecipeInstructions)
+        .run();
+    } else {
+      await tx.insert(householdRecipeInstructions)
       .values({
         recipeId,
         householdId,
@@ -562,28 +562,28 @@ async function persistRecipeInstructions(
         createdAt: now,
         updatedAt: now,
       })
-      .run();
-  }
+        .run();
+    }
 
-  if (recipe.steps.length > 0) {
-    await db.insert(householdRecipeSteps)
-      .values(
-        recipe.steps.map((step) => ({
-          householdId,
-          recipeId,
-          position: step.position,
-          section: step.section,
-          rawText: step.rawText,
-          text: step.text,
-        })),
-      )
-      .run();
-  }
+    if (recipe.steps.length > 0) {
+      await tx.insert(householdRecipeSteps)
+        .values(
+          recipe.steps.map((step) => ({
+            householdId,
+            recipeId,
+            position: step.position,
+            section: step.section,
+            rawText: step.rawText,
+            text: step.text,
+          })),
+        )
+        .run();
+    }
 
-  if (normalizedIngredients.length > 0) {
-    for (const [index, item] of normalizedIngredients.entries()) {
-      const { ingredient, normalization, alternatives } = item;
-      const savedIngredient = await db.insert(householdRecipeIngredients)
+    if (normalizedIngredients.length > 0) {
+      for (const [index, item] of normalizedIngredients.entries()) {
+        const { ingredient, normalization, alternatives } = item;
+        const savedIngredient = await tx.insert(householdRecipeIngredients)
         .values({
           householdId,
           recipeId,
@@ -604,28 +604,29 @@ async function persistRecipeInstructions(
           normalizationStatus: normalization?.normalizationStatus ?? "not_ingredient",
         })
         .returning()
-        .get();
+          .get();
 
-      if (alternatives.length > 0) {
-        await db.insert(householdRecipeIngredientAlternatives)
-          .values(alternatives.map((alternative, alternativeIndex) => ({
-            householdId,
-            recipeId,
-            ingredientId: savedIngredient.ingredientId,
-            position: alternativeIndex + 1,
-            ingredientText: alternative.ingredientText,
-            normalizedIngredientPhrase: alternative.normalizedIngredientPhrase,
-            canonicalIngredientId: alternative.canonicalIngredientId,
-            attributesJson: JSON.stringify(alternative.attributes),
-            matchConfidence: alternative.matchConfidence,
-            matchedBy: alternative.matchedBy,
-            aiSuggestionsJson: alternative.aiSuggestions.length > 0 ? JSON.stringify(alternative.aiSuggestions) : null,
-            normalizationStatus: alternative.normalizationStatus,
-          })))
-          .run();
+        if (alternatives.length > 0) {
+          await tx.insert(householdRecipeIngredientAlternatives)
+            .values(alternatives.map((alternative, alternativeIndex) => ({
+              householdId,
+              recipeId,
+              ingredientId: savedIngredient.ingredientId,
+              position: alternativeIndex + 1,
+              ingredientText: alternative.ingredientText,
+              normalizedIngredientPhrase: alternative.normalizedIngredientPhrase,
+              canonicalIngredientId: alternative.canonicalIngredientId,
+              attributesJson: JSON.stringify(alternative.attributes),
+              matchConfidence: alternative.matchConfidence,
+              matchedBy: alternative.matchedBy,
+              aiSuggestionsJson: alternative.aiSuggestions.length > 0 ? JSON.stringify(alternative.aiSuggestions) : null,
+              normalizationStatus: alternative.normalizationStatus,
+            })))
+            .run();
+        }
       }
     }
-  }
+  });
 
   return reviewCount;
 }

@@ -13,6 +13,7 @@ import { RecipeReviewLauncher } from "@/components/recipe-review-launcher";
 import { RecipeVersionHistory } from "@/components/recipe-version-history";
 import { PublishPersonalRecipe } from "@/components/publish-personal-recipe";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { RecipePageScrollToTop } from "@/app/(app)/recipe/[recipeId]/scroll-to-top";
 import { extractRecipeAction } from "@/lib/actions/operations";
@@ -69,12 +70,47 @@ export default async function RecipePage({
             showEmptySteps={false}
           />
         }
-        editBanner={
-          <RecipeVersionHistory
-            recipeId={recipe.recipeId}
-            versions={recipe.versions}
-            variant="create"
-          />
+        topContent={
+          <>
+            <div className="flex w-full flex-wrap gap-2">
+              <Button asChild variant="secondary">
+                <AppTransitionLink
+                  href={`/history?recipeId=${encodeURIComponent(recipe.recipeId)}&from=recipe`}
+                  prefetch
+                >
+                  <CalendarPlus className="size-4" />
+                  Add to calendar
+                </AppTransitionLink>
+              </Button>
+              <CopyPublicRecipeLink
+                url={getPublicRecipeUrl(recipe.recipeId, recipe.primaryVersionNumber)}
+              />
+              {recipe.sourceUrl && (
+                <Button asChild>
+                  <a href={recipe.sourceUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink className="size-4" />
+                    Original Source
+                  </a>
+                </Button>
+              )}
+
+              {recipe.pin.pinterestPinId.startsWith("personal:") ? (
+                <PublishPersonalRecipe
+                  recipeId={recipe.recipeId}
+                  boards={publishOptions.boards}
+                  canPublish={publishOptions.canPublish}
+                />
+              ) : null}
+            </div>
+
+            <RecipeReviewLauncher
+              recipeId={recipe.recipeId}
+              recipeTitle={recipe.title}
+              averageRating={recipe.averageRating}
+              reviewCount={recipe.reviewCount}
+              reviews={recipe.reviews}
+            />
+          </>
         }
       >
         <section className="overflow-hidden rounded-t-[36px] border border-white/70 bg-white/70 shadow-soft">
@@ -101,10 +137,13 @@ export default async function RecipePage({
             <div className="absolute inset-x-0 bottom-0 p-2 text-white sm:p-8">
               <div className="mb-3 flex flex-wrap gap-2">
                 <RecipeVersionHistory
-                  recipeId={recipe.recipeId}
                   versions={recipe.versions}
-                  variant="indicators"
                 />
+                {recipe.extractionProvenance ? (
+                  <Badge variant="secondary">
+                    {recipe.extractionProvenance === "image" ? "Image recipe" : "Video recipe"}
+                  </Badge>
+                ) : null}
                 {recipe.totalTime ? (
                   <MetaChip
                     icon={<Clock3 className="h-4 w-4" />}
@@ -125,45 +164,6 @@ export default async function RecipePage({
           </div>
         </section>
       </RecipeMetadataEditor>
-
-      <div className="flex flex-wrap gap-2 w-full">
-        <Button asChild variant="secondary">
-          <AppTransitionLink
-            href={`/history?recipeId=${encodeURIComponent(recipe.recipeId)}&from=recipe`}
-            prefetch
-          >
-            <CalendarPlus className="size-4" />
-            Add to calendar
-          </AppTransitionLink>
-        </Button>
-        <CopyPublicRecipeLink
-          url={getPublicRecipeUrl(recipe.recipeId, recipe.primaryVersionNumber)}
-        />
-        {recipe.sourceUrl && (
-          <Button asChild>
-            <a href={recipe.sourceUrl} target="_blank" rel="noreferrer">
-              <ExternalLink className="size-4" />
-              Original Source
-            </a>
-          </Button>
-        )}
-
-        {recipe.pin.pinterestPinId.startsWith("personal:") ? (
-          <PublishPersonalRecipe
-            recipeId={recipe.recipeId}
-            boards={publishOptions.boards}
-            canPublish={publishOptions.canPublish}
-          />
-        ) : null}
-      </div>
-
-      <RecipeReviewLauncher
-        recipeId={recipe.recipeId}
-        recipeTitle={recipe.title}
-        averageRating={recipe.averageRating}
-        reviewCount={recipe.reviewCount}
-        reviews={recipe.reviews}
-      />
 
       {access.isAdmin && (
         <Card className="bg-white/85">
@@ -231,11 +231,6 @@ function EmptyRecipeState({
         >
           Extract recipe
         </ActionForm>
-        <Button asChild variant="ghost">
-          <AppTransitionLink href={`/settings/recipes/${recipeId}`} prefetch>
-            Open settings
-          </AppTransitionLink>
-        </Button>
       </div>
     </div>
   );

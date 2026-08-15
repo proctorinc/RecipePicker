@@ -173,6 +173,7 @@ export type RecipeDetailView = {
     section: string | null;
     text: string;
   }>;
+  extractionProvenance: "image" | "video" | null;
   extractionSummary: string | null;
 };
 
@@ -301,6 +302,8 @@ export type RecipeOpsListItem = {
   updatedAt: string | null;
   imageUrl: string | null;
   sourceUrl: string | null;
+  statusSummary: string;
+  statusReason: string | null;
 };
 
 export type RecipeParseJobStatus =
@@ -518,6 +521,7 @@ export type ShoppingCartSourceMealView = {
   date: string;
   recipeId: string;
   recipeTitle: string;
+  recipeImageUrl: string | null;
 };
 
 export type ShoppingCartItemView = {
@@ -532,6 +536,8 @@ export type ShoppingCartItemView = {
     canonicalIngredientId: string | null;
     displayName: string;
   }> | null;
+  checked: boolean;
+  sortPosition: number;
 };
 
 export type AlwaysHaveIngredientView = {
@@ -541,8 +547,12 @@ export type AlwaysHaveIngredientView = {
 };
 
 export type ShoppingCartPageView = {
+  cartId: string | null;
+  startDate: string | null;
+  endDate: string | null;
   selectedDates: string[];
   sourceMeals: ShoppingCartSourceMealView[];
   items: ShoppingCartItemView[];
   alwaysHaves: AlwaysHaveIngredientView[];
+  history: Array<{ cartId: string; startDate: string; endDate: string; createdAt: string }>;
 };

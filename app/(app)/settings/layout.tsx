@@ -1,9 +1,22 @@
 import type { ReactNode } from "react";
+import { redirect } from "next/navigation";
+
 import { PageIntro, PageShell } from "@/components/page-shell";
+import { getCurrentUserAccess } from "@/lib/server/access";
+import { requireHouseholdContext } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
 
-export default function SettingsLayout({ children }: { children: ReactNode }) {
+export default async function SettingsLayout({ children }: { children: ReactNode }) {
+  const [household, access] = await Promise.all([
+    requireHouseholdContext(),
+    getCurrentUserAccess(),
+  ]);
+
+  if (household.role !== "owner" && !access.isActualAdmin) {
+    redirect("/");
+  }
+
   return (
     <PageShell>
       <PageIntro

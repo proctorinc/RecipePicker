@@ -11,7 +11,7 @@ export type CartIngredientInput = {
   amountMaxValue: number | null;
   unit: string | null;
   normalizationStatus: string;
-  sourceMeal: { eventId: string; date: string; recipeId: string; recipeTitle: string };
+  sourceMeal: { eventId: string; date: string; recipeId: string; recipeTitle: string; recipeImageUrl: string | null };
   alternatives: CartIngredientAlternative[];
 };
 

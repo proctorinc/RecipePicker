@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildShoppingCartItems } from "@/lib/shopping-cart";
 
-const meal = { eventId: "event-1", date: "2026-08-14", recipeId: "recipe-1", recipeTitle: "Dinner" };
+const meal = { eventId: "event-1", date: "2026-08-14", recipeId: "recipe-1", recipeTitle: "Dinner", recipeImageUrl: null };
 const ingredient = (overrides: Partial<Parameters<typeof buildShoppingCartItems>[0][number]> = {}) => ({
   ingredientId: "ingredient-1", canonicalIngredientId: "salt", canonicalName: "Salt", originalText: "salt", ingredientText: "salt",
   amountText: "1", amountValue: 1, amountMaxValue: null, unit: "teaspoon", normalizationStatus: "confirmed", alternatives: [], sourceMeal: meal, ...overrides,

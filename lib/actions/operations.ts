@@ -24,6 +24,7 @@ import {
   householdRecipeEvents,
   householdRecipeFeedback,
   householdRecipeIngredients,
+  householdRecipeIngredientAlternatives,
   householdAlwaysHaveIngredients,
   householdCanonicalIngredients,
   householdIngredientAliases,
@@ -32,6 +33,8 @@ import {
   householdRecipeSteps,
   householdRecipeVersions,
   householdRecipes,
+  householdShoppingCarts,
+  householdShoppingCartItemStates,
 } from "@/lib/server/db";
 import {
   createCanonicalIngredient,
@@ -67,7 +70,7 @@ import { getRecipeHouseholdPinId } from "@/lib/server/queries";
 import { extractRecipes } from "@/lib/server/extract";
 import { createCustomRecipe, publishPersonalRecipe } from "@/lib/server/custom-recipe";
 import { revalidateAll, recipeScopedPaths, toErrorState, toOptionalString } from "@/lib/actions/helpers";
-import { getTodayDayString, isValidDayString } from "@/lib/utils";
+import { expandDayRange, getTodayDayString, isValidDayString } from "@/lib/utils";
 import type { ActionState } from "@/lib/actions/types";
 import type { IngredientReviewSuggestionView, RecipeExtractionFeedbackCategory } from "@/types/view-models";
 
@@ -736,6 +739,83 @@ export const joinHouseholdInviteAction = withActionLogging(
 },
 );
 
+export const createShoppingCartAction = withActionLogging(
+  "action.create_shopping_cart",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const first = String(formData.get("startDate") ?? "").trim();
+    const second = String(formData.get("endDate") ?? "").trim();
+    if (!isValidDayString(first) || !isValidDayString(second) || expandDayRange(first, second).length === 0) return { status: "error", message: "Choose a valid date range." };
+    const [startDate, endDate] = first <= second ? [first, second] : [second, first];
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+      try {
+        const now = new Date().toISOString();
+        await sqlite.transaction(async (tx) => {
+          await tx.update(householdShoppingCarts).set({ status: "archived", updatedAt: now }).where(and(eq(householdShoppingCarts.householdId, context.householdId), eq(householdShoppingCarts.status, "active"))).run();
+          await tx.insert(householdShoppingCarts).values({ householdId: context.householdId, startDate, endDate, status: "active", createdAt: now, updatedAt: now }).run();
+        });
+      } finally { await sqlite.close(); }
+      revalidateAll(["/shopping-cart", "/history"]);
+      return { status: "success", message: "Shared shopping cart updated." };
+    } catch (error) { return toErrorState(error, "Unable to create the shopping cart."); }
+  },
+);
+
+export const restoreShoppingCartAction = withActionLogging(
+  "action.restore_shopping_cart",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const cartId = String(formData.get("cartId") ?? "").trim();
+    if (!cartId) return { status: "error", message: "Choose a cart to restore." };
+    try {
+      const context = await requireHouseholdContext(); const { db, sqlite } = await openDatabase();
+      try {
+        const cart = await db.query.householdShoppingCarts.findFirst({ where: (table, { and, eq: equals }) => and(equals(table.cartId, cartId), equals(table.householdId, context.householdId), equals(table.status, "archived")), columns: { cartId: true } });
+        if (!cart) return { status: "error", message: "That cart is no longer available." };
+        const now = new Date().toISOString();
+        await sqlite.transaction(async (tx) => {
+          await tx.update(householdShoppingCarts).set({ status: "archived", updatedAt: now }).where(and(eq(householdShoppingCarts.householdId, context.householdId), eq(householdShoppingCarts.status, "active"))).run();
+          await tx.update(householdShoppingCarts).set({ status: "active", updatedAt: now }).where(and(eq(householdShoppingCarts.cartId, cartId), eq(householdShoppingCarts.householdId, context.householdId))).run();
+        });
+      } finally { await sqlite.close(); }
+      revalidateAll(["/shopping-cart", "/history"]); return { status: "success", message: "Previous cart restored." };
+    } catch (error) { return toErrorState(error, "Unable to restore the cart."); }
+  },
+);
+
+async function getOwnedActiveCart(cartId: string) {
+  const context = await requireHouseholdContext(); const { db, sqlite } = await openDatabase();
+  const cart = await db.query.householdShoppingCarts.findFirst({ where: (table, { and, eq: equals }) => and(equals(table.cartId, cartId), equals(table.householdId, context.householdId), equals(table.status, "active")) });
+  return { context, db, sqlite, cart };
+}
+
+export const setShoppingCartItemCheckedAction = withActionLogging(
+  "action.set_shopping_cart_item_checked",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const cartId = String(formData.get("cartId") ?? "").trim(); const itemId = String(formData.get("itemId") ?? "").trim(); const checked = String(formData.get("checked")) === "true";
+    if (!cartId || !itemId) return { status: "error", message: "Cart item details are incomplete." };
+    try { const { db, sqlite, cart } = await getOwnedActiveCart(cartId); try {
+      if (!cart) return { status: "error", message: "This is not the active household cart." };
+      const now = new Date().toISOString();
+      await db.insert(householdShoppingCartItemStates).values({ cartId, itemId, checked, sortPosition: 0, createdAt: now, updatedAt: now }).onConflictDoUpdate({ target: [householdShoppingCartItemStates.cartId, householdShoppingCartItemStates.itemId], set: { checked, updatedAt: now } }).run();
+    } finally { await sqlite.close(); } revalidateAll(["/shopping-cart"]); return { status: "success", message: "Cart item updated." }; } catch (error) { return toErrorState(error, "Unable to update the cart item."); }
+  },
+);
+
+export const reorderShoppingCartItemsAction = withActionLogging(
+  "action.reorder_shopping_cart_items",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const cartId = String(formData.get("cartId") ?? "").trim();
+    let itemIds: string[] = []; try { const parsed = JSON.parse(String(formData.get("itemIds") ?? "[]")); itemIds = Array.isArray(parsed) ? [...new Set(parsed.filter((item): item is string => typeof item === "string" && item.length > 0))] : []; } catch { /* invalid payload */ }
+    if (!cartId || itemIds.length === 0) return { status: "error", message: "Cart ordering details are incomplete." };
+    try { const { db, sqlite, cart } = await getOwnedActiveCart(cartId); try {
+      if (!cart) return { status: "error", message: "This is not the active household cart." };
+      const now = new Date().toISOString();
+      for (const [sortPosition, itemId] of itemIds.entries()) await db.insert(householdShoppingCartItemStates).values({ cartId, itemId, checked: false, sortPosition, createdAt: now, updatedAt: now }).onConflictDoUpdate({ target: [householdShoppingCartItemStates.cartId, householdShoppingCartItemStates.itemId], set: { sortPosition, updatedAt: now } }).run();
+    } finally { await sqlite.close(); } revalidateAll(["/shopping-cart"]); return { status: "success", message: "Cart order saved." }; } catch (error) { return toErrorState(error, "Unable to save cart order."); }
+  },
+);
+
 export const addAlwaysHaveIngredientAction = withActionLogging(
   "action.add_always_have_ingredient",
   async (_: ActionState, formData: FormData): Promise<ActionState> => {
@@ -1366,6 +1446,7 @@ export const saveRecipeMetadataAction = withActionLogging(
   const recipeId = String(formData.get("recipeId") ?? "").trim();
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
+  const versionMode = String(formData.get("versionMode") ?? "").trim();
   const hasContentEdits = formData.has("ingredientsJson") || formData.has("stepsJson");
   const ingredients = parseRecipeContentItems(formData.get("ingredientsJson"), isRecipeIngredientInput);
   const steps = parseRecipeContentItems(formData.get("stepsJson"), isRecipeStepInput);
@@ -1376,6 +1457,10 @@ export const saveRecipeMetadataAction = withActionLogging(
 
   if (!title) {
     return { status: "error", message: "Title cannot be empty." };
+  }
+
+  if (versionMode !== "update" && versionMode !== "new") {
+    return { status: "error", message: "Choose whether to save the current version or create a new one." };
   }
 
   try {
@@ -1408,23 +1493,59 @@ export const saveRecipeMetadataAction = withActionLogging(
 
         const knownIngredientIds = new Set(recipe.recipeInstructions.ingredients.map((ingredient) => ingredient.ingredientId));
         const knownStepIds = new Set(recipe.recipeInstructions.steps.map((step) => step.stepId));
-        if (ingredients.some((ingredient) => !knownIngredientIds.has(ingredient.id) || !ingredient.originalText.trim())) {
+        const submittedIngredientIds = new Set<string>();
+        const submittedStepIds = new Set<string>();
+        if (ingredients.some((ingredient) => (!knownIngredientIds.has(ingredient.id) && !isNewRecipeContentItem(ingredient.id)) || !ingredient.originalText.trim() || submittedIngredientIds.has(ingredient.id) || !submittedIngredientIds.add(ingredient.id))) {
           return { status: "error", message: "One or more ingredient edits are invalid." };
         }
-        if (steps.some((step) => !knownStepIds.has(step.id) || !step.text.trim())) {
+        if (steps.some((step) => (!knownStepIds.has(step.id) && !isNewRecipeContentItem(step.id)) || !step.text.trim() || submittedStepIds.has(step.id) || !submittedStepIds.add(step.id))) {
           return { status: "error", message: "One or more instruction edits are invalid." };
         }
 
-        for (const ingredient of ingredients) {
-          await db.update(householdRecipeIngredients)
-            .set({ originalText: ingredient.originalText.trim(), notes: ingredient.notes?.trim() || null })
-            .where(and(eq(householdRecipeIngredients.recipeId, recipeId), eq(householdRecipeIngredients.ingredientId, ingredient.id)))
+        const deletedIngredientIds = [...knownIngredientIds].filter((id) => !submittedIngredientIds.has(id));
+        const deletedStepIds = [...knownStepIds].filter((id) => !submittedStepIds.has(id));
+        if (deletedIngredientIds.length > 0) {
+          await db.delete(householdRecipeIngredientAlternatives)
+            .where(and(eq(householdRecipeIngredientAlternatives.recipeId, recipeId), inArray(householdRecipeIngredientAlternatives.ingredientId, deletedIngredientIds)))
+            .run();
+          await db.delete(householdRecipeIngredients)
+            .where(and(eq(householdRecipeIngredients.recipeId, recipeId), eq(householdRecipeIngredients.householdId, context.householdId), inArray(householdRecipeIngredients.ingredientId, deletedIngredientIds)))
             .run();
         }
-        for (const step of steps) {
+        if (deletedStepIds.length > 0) {
+          await db.delete(householdRecipeSteps)
+            .where(and(eq(householdRecipeSteps.recipeId, recipeId), eq(householdRecipeSteps.householdId, context.householdId), inArray(householdRecipeSteps.stepId, deletedStepIds)))
+            .run();
+        }
+
+        for (const [position, ingredient] of ingredients.entries()) {
+          if (isNewRecipeContentItem(ingredient.id)) {
+            await db.insert(householdRecipeIngredients).values({
+              ingredientId: crypto.randomUUID(), householdId: context.householdId, recipeId, position,
+              originalText: ingredient.originalText.trim(), amountText: null, amountValue: null, amountMaxValue: null,
+              unit: null, ingredientText: null, notes: ingredient.notes?.trim() || null,
+              normalizedIngredientPhrase: null, canonicalIngredientId: null, attributesJson: "[]",
+              matchConfidence: null, matchedBy: "manual_entry", aiSuggestionsJson: null,
+              normalizationStatus: "needs_review",
+            }).run();
+            continue;
+          }
+          await db.update(householdRecipeIngredients)
+            .set({ originalText: ingredient.originalText.trim(), notes: ingredient.notes?.trim() || null, position })
+            .where(and(eq(householdRecipeIngredients.recipeId, recipeId), eq(householdRecipeIngredients.householdId, context.householdId), eq(householdRecipeIngredients.ingredientId, ingredient.id)))
+            .run();
+        }
+        for (const [position, step] of steps.entries()) {
+          if (isNewRecipeContentItem(step.id)) {
+            await db.insert(householdRecipeSteps).values({
+              stepId: crypto.randomUUID(), householdId: context.householdId, recipeId, position,
+              section: step.section?.trim() || null, rawText: step.text.trim(), text: step.text.trim(),
+            }).run();
+            continue;
+          }
           await db.update(householdRecipeSteps)
-            .set({ section: step.section?.trim() || null, text: step.text.trim() })
-            .where(and(eq(householdRecipeSteps.recipeId, recipeId), eq(householdRecipeSteps.stepId, step.id)))
+            .set({ section: step.section?.trim() || null, rawText: step.text.trim(), text: step.text.trim(), position })
+            .where(and(eq(householdRecipeSteps.recipeId, recipeId), eq(householdRecipeSteps.householdId, context.householdId), eq(householdRecipeSteps.stepId, step.id)))
             .run();
         }
 
@@ -1432,21 +1553,23 @@ export const saveRecipeMetadataAction = withActionLogging(
           where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
           orderBy: (table, { desc }) => [desc(table.versionNumber)],
         });
-        if (primaryVersion) {
-          const priorSnapshot = buildRecipeVersionSnapshot(recipe);
-          const updatedSnapshot = {
-            ...priorSnapshot,
-            ingredients: priorSnapshot.ingredients.map((ingredient) => ({
-              ...ingredient,
-              originalText: ingredients.find((item) => item.id === ingredient.id)?.originalText.trim() ?? ingredient.originalText,
-              displayText: ingredients.find((item) => item.id === ingredient.id)?.originalText.trim() ?? ingredient.displayText,
-            })),
-            steps: priorSnapshot.steps.map((step) => ({
-              ...step,
-              section: steps.find((item) => item.id === step.id)?.section?.trim() || null,
-              text: steps.find((item) => item.id === step.id)?.text.trim() ?? step.text,
-            })),
-          };
+        const [savedIngredients, savedSteps] = await Promise.all([
+          db.query.householdRecipeIngredients.findMany({
+            where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+            orderBy: (table, { asc }) => [asc(table.position)],
+          }),
+          db.query.householdRecipeSteps.findMany({
+            where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+            orderBy: (table, { asc }) => [asc(table.position)],
+          }),
+        ]);
+        const updatedSnapshot = buildRecipeVersionSnapshot({
+          ...recipe,
+          title,
+          description: description || null,
+          recipeInstructions: { ...recipe.recipeInstructions, ingredients: savedIngredients, steps: savedSteps },
+        });
+        if (primaryVersion && versionMode === "update") {
           await db.update(householdRecipeVersions)
             .set({
               ingredientsJson: JSON.stringify(updatedSnapshot.ingredients.map((item) => item.originalText)),
@@ -1455,7 +1578,50 @@ export const saveRecipeMetadataAction = withActionLogging(
             })
             .where(eq(householdRecipeVersions.recipeVersionId, primaryVersion.recipeVersionId))
             .run();
+        } else if (versionMode === "new") {
+          const priorSnapshot = buildRecipeVersionSnapshot(recipe);
+          if (!primaryVersion) {
+            await db.insert(householdRecipeVersions).values({
+              householdId: context.householdId, recipeId, versionNumber: 1,
+              ingredientsJson: JSON.stringify(priorSnapshot.ingredients.map((item) => item.originalText)),
+              stepsJson: JSON.stringify(priorSnapshot.steps.map((item) => ({ section: item.section, text: item.text }))),
+              snapshotJson: JSON.stringify(priorSnapshot), note: "Original recipe",
+              createdByClerkUserId: context.clerkUserId, createdAt: recipe.createdAt,
+            }).run();
+          }
+          await db.insert(householdRecipeVersions).values({
+            householdId: context.householdId, recipeId, versionNumber: (primaryVersion?.versionNumber ?? 1) + 1,
+            ingredientsJson: JSON.stringify(updatedSnapshot.ingredients.map((item) => item.originalText)),
+            stepsJson: JSON.stringify(updatedSnapshot.steps.map((item) => ({ section: item.section, text: item.text }))),
+            snapshotJson: JSON.stringify(updatedSnapshot), note: null,
+            createdByClerkUserId: context.clerkUserId, createdAt: now,
+          }).run();
         }
+      }
+
+      if (!hasContentEdits && versionMode === "new") {
+        const primaryVersion = await db.query.householdRecipeVersions.findFirst({
+          where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+          orderBy: (table, { desc }) => [desc(table.versionNumber)],
+        });
+        const priorSnapshot = buildRecipeVersionSnapshot(recipe);
+        const updatedSnapshot = buildRecipeVersionSnapshot({ ...recipe, title, description: description || null });
+        if (!primaryVersion) {
+          await db.insert(householdRecipeVersions).values({
+            householdId: context.householdId, recipeId, versionNumber: 1,
+            ingredientsJson: JSON.stringify(priorSnapshot.ingredients.map((item) => item.originalText)),
+            stepsJson: JSON.stringify(priorSnapshot.steps.map((item) => ({ section: item.section, text: item.text }))),
+            snapshotJson: JSON.stringify(priorSnapshot), note: "Original recipe",
+            createdByClerkUserId: context.clerkUserId, createdAt: recipe.createdAt,
+          }).run();
+        }
+        await db.insert(householdRecipeVersions).values({
+          householdId: context.householdId, recipeId, versionNumber: (primaryVersion?.versionNumber ?? 1) + 1,
+          ingredientsJson: JSON.stringify(updatedSnapshot.ingredients.map((item) => item.originalText)),
+          stepsJson: JSON.stringify(updatedSnapshot.steps.map((item) => ({ section: item.section, text: item.text }))),
+          snapshotJson: JSON.stringify(updatedSnapshot), note: null,
+          createdByClerkUserId: context.clerkUserId, createdAt: now,
+        }).run();
       }
 
       await db.update(householdRecipes)
@@ -1475,7 +1641,7 @@ export const saveRecipeMetadataAction = withActionLogging(
     revalidateAll(recipeScopedPaths(undefined, recipeId));
     return {
       status: "success",
-      message: "Saved the recipe details.",
+      message: versionMode === "new" ? "New recipe version created." : "Saved the recipe details.",
     };
   } catch (error) {
     return toErrorState(error, "Unable to save the recipe details.");
@@ -2336,6 +2502,10 @@ function isRecipeStepInput(value: unknown): value is RecipeStepInput {
 
   const item = value as Record<string, unknown>;
   return typeof item.id === "string" && typeof item.text === "string" && (typeof item.section === "string" || item.section === null);
+}
+
+function isNewRecipeContentItem(id: string) {
+  return id.startsWith("new-");
 }
 
 function isIngredientReviewSuggestion(value: unknown): value is IngredientReviewSuggestionView {

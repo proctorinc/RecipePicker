@@ -111,6 +111,19 @@ export function isValidMonthString(value: string) {
   return /^\d{4}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}-01T00:00:00.000Z`).getTime());
 }
 
+export function expandDayRange(startDate: string, endDate: string) {
+  if (!isValidDayString(startDate) || !isValidDayString(endDate)) return [];
+  const [start, end] = startDate <= endDate ? [startDate, endDate] : [endDate, startDate];
+  const days: string[] = [];
+  const cursor = new Date(`${start}T00:00:00.000Z`);
+  const limit = new Date(`${end}T00:00:00.000Z`).getTime();
+  while (cursor.getTime() <= limit && days.length < 366) {
+    days.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return days;
+}
+
 export function getTodayDayString(now = new Date()) {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, "0");

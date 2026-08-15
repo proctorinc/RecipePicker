@@ -10,6 +10,16 @@ export type PinImageSources = {
   previewImageUrl: string | null;
 };
 
+export type PinVideoSource = {
+  videoUrl: string;
+  mediaType: string;
+};
+
+export type PinVideoDiscovery = {
+  source: PinVideoSource | null;
+  failureReason: string | null;
+};
+
 const SIZE_HINTS = new Map<string, number>([
   ["originals", 4000],
   ["orig", 4000],
@@ -38,6 +48,87 @@ export function getPinImageSources(
   }
 
   return resolveImageSources(findImageCandidates(fallbackRawJson));
+}
+
+/** Finds a direct video asset supplied by Pinterest. HLS playlists are
+ * intentionally excluded because Gemini's URL input requires a video file. */
+export function getPinVideoSource(
+  mediaJson: string | null | undefined,
+  fallbackRawJson: string | null | undefined,
+): PinVideoSource | null {
+  return getPinVideoDiscovery(mediaJson, fallbackRawJson).source;
+}
+
+export function getPinVideoDiscovery(
+  mediaJson: string | null | undefined,
+  fallbackRawJson: string | null | undefined,
+): PinVideoDiscovery {
+  const candidate = findVideoCandidate(mediaJson) ?? findVideoCandidate(fallbackRawJson);
+  if (!candidate) return { source: null, failureReason: null };
+  if (!isDirectVideoUrl(candidate.url)) {
+    return { source: null, failureReason: "The pin video is a stream, not a direct video file." };
+  }
+  return { source: { videoUrl: candidate.url, mediaType: inferVideoMediaType(candidate.url, candidate.record) }, failureReason: null };
+}
+
+function findVideoCandidate(value: string | null | undefined): { url: string; record: Record<string, unknown> } | null {
+  if (!value) return null;
+
+  try {
+    return crawlForVideoCandidate(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function crawlForVideoCandidate(value: unknown, seen = new Set<unknown>()): { url: string; record: Record<string, unknown> } | null {
+  if (!value || typeof value !== "object") return null;
+  if (seen.has(value)) return null;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = crawlForVideoCandidate(entry, seen);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const url = [record.url, record.video_url, record.videoUrl].find(
+    (candidate): candidate is string => typeof candidate === "string" && isVideoUrlCandidate(candidate),
+  );
+  if (url) {
+    return { url, record };
+  }
+
+  for (const key of preferredVideoObjectKeys(record)) {
+    const found = crawlForVideoCandidate(record[key], seen);
+    if (found) return found;
+  }
+  return null;
+}
+
+function preferredVideoObjectKeys(record: Record<string, unknown>) {
+  const keys = Object.keys(record);
+  const preferred = ["videos", "video_list", "video", "media", "url", "video_url", "videoUrl"];
+  return [...preferred.filter((key) => key in record), ...keys.filter((key) => !preferred.includes(key))];
+}
+
+function isDirectVideoUrl(value: string) {
+  if (!isVideoUrlCandidate(value) || /\.m3u8(?:\?|$)/i.test(value)) return false;
+  return /\.(mp4|mpeg|mpg|mov|avi|webm|wmv|3gp)(?:\?|$)/i.test(value) || /video/i.test(value);
+}
+
+function isVideoUrlCandidate(value: string) {
+  return /^https:\/\//i.test(value) && (/\.(mp4|mpeg|mpg|mov|avi|webm|wmv|3gp|m3u8)(?:\?|$)/i.test(value) || /video/i.test(value));
+}
+
+function inferVideoMediaType(url: string, record: Record<string, unknown>) {
+  if (typeof record.media_type === "string" && record.media_type.startsWith("video/")) return record.media_type;
+  if (typeof record.mime_type === "string" && record.mime_type.startsWith("video/")) return record.mime_type;
+  const extension = url.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1]?.toLowerCase();
+  return ({ mp4: "video/mp4", mpeg: "video/mpeg", mpg: "video/mpeg", mov: "video/quicktime", avi: "video/avi", webm: "video/webm", wmv: "video/wmv", "3gp": "video/3gpp" } as Record<string, string>)[extension ?? ""] ?? "video/mp4";
 }
 
 function findImageCandidates(value: string | null | undefined) {

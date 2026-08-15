@@ -46,24 +46,28 @@ export async function AppShell({
   children,
   householdName,
   showAiPicker = false,
+  showSettings = true,
 }: {
   children: ReactNode;
   householdName: string;
   showAiPicker?: boolean;
+  showSettings?: boolean;
 }) {
+  const visibleBaseLinks = showSettings
+    ? baseLinks
+    : baseLinks.filter((link) => link.href !== "/settings");
   const links = showAiPicker
     ? [
-        baseLinks[0],
+        visibleBaseLinks[0],
         {
           href: "/picker",
           label: "AI Picker",
           icon: Sparkles,
           matches: (pathname: string) => pathname.startsWith("/picker"),
         },
-        baseLinks[1],
-        baseLinks[2],
+        ...visibleBaseLinks.slice(1),
       ]
-    : baseLinks;
+    : visibleBaseLinks;
 
   return (
     <div className="min-h-screen bg-grain pb-16">
@@ -123,7 +127,7 @@ export async function AppShell({
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-2 py-4 pb-24 sm:px-6 md:pb-4 lg:px-8">
         {children}
       </main>
-      <MobileNav showAiPicker={showAiPicker} />
+      <MobileNav showAiPicker={showAiPicker} showSettings={showSettings} />
     </div>
   );
 }
