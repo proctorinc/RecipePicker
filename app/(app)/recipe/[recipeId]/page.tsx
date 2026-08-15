@@ -62,6 +62,13 @@ export default async function RecipePage({
         description={recipe.description}
         backHref={backHref}
         backLabel={backLabel}
+        content={
+          <RecipeContent
+            recipe={recipe}
+            emptyIngredients={<EmptyRecipeState recipeId={recipe.recipeId} status={recipe.status} />}
+            showEmptySteps={false}
+          />
+        }
         editBanner={
           <RecipeVersionHistory
             recipeId={recipe.recipeId}
@@ -156,14 +163,6 @@ export default async function RecipePage({
         averageRating={recipe.averageRating}
         reviewCount={recipe.reviewCount}
         reviews={recipe.reviews}
-      />
-
-      <RecipeContent
-        recipe={recipe}
-        emptyIngredients={
-          <EmptyRecipeState recipeId={recipe.recipeId} status={recipe.status} />
-        }
-        showEmptySteps={false}
       />
 
       {access.isAdmin && (

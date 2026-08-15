@@ -26,6 +26,7 @@ type RecipeMetadataEditorProps = {
   backHref: string;
   backLabel: string;
   children: React.ReactNode;
+  content?: React.ReactNode;
   editBanner?: React.ReactNode;
 };
 
@@ -36,6 +37,7 @@ export function RecipeMetadataEditor({
   backHref,
   backLabel,
   children,
+  content,
   editBanner,
 }: RecipeMetadataEditorProps) {
   const router = useRouter();
@@ -160,6 +162,8 @@ export function RecipeMetadataEditor({
             </p>
           ) : null}
         </section>
+
+        {content}
       </div>
     </form>
     </RecipeEditingContext.Provider>

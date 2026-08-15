@@ -17,12 +17,12 @@ export function IngredientReviewTable({ items }: {
   items: IngredientReviewItemView[];
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(items.length > 0);
+  const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
   const [isRefreshing, startTransition] = useTransition();
   const item = items[index] ?? null;
 
-  useEffect(() => { setOpen(items.length > 0); setIndex((value) => Math.min(value, Math.max(items.length - 1, 0))); }, [items]);
+  useEffect(() => { setIndex((value) => Math.min(value, Math.max(items.length - 1, 0))); }, [items]);
   if (!item) return <p className="text-sm text-muted-foreground">No ingredients are waiting for review.</p>;
 
   return (

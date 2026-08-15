@@ -1,7 +1,12 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useContext, useEffect, useState, type ReactNode } from "react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecipeIngredientList } from "@/components/recipe-ingredient-list";
+import { RecipeEditingContext } from "@/components/recipe-metadata-editor";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { formatIso8601Duration } from "@/lib/utils";
 import type { PublicRecipeDetailView } from "@/types/view-models";
 
@@ -18,6 +23,15 @@ export function RecipeContent({
   emptySteps = <UnavailableContent />,
   showEmptySteps = true,
 }: RecipeContentProps) {
+  const isEditing = useContext(RecipeEditingContext);
+  const [ingredients, setIngredients] = useState(recipe.ingredients);
+  const [steps, setSteps] = useState(recipe.steps);
+
+  useEffect(() => {
+    setIngredients(recipe.ingredients);
+    setSteps(recipe.steps);
+  }, [recipe.ingredients, recipe.steps]);
+
   const detailItems = [
     { label: "Total time", value: formatIso8601Duration(recipe.totalTime) },
     { label: "Prep time", value: formatIso8601Duration(recipe.prepTime) },
@@ -47,7 +61,23 @@ export function RecipeContent({
         <Card className="bg-white/85">
           <CardHeader><CardTitle>Ingredients</CardTitle></CardHeader>
           <CardContent className="px-10">
-            {recipe.ingredients.length > 0 ? <RecipeIngredientList ingredients={recipe.ingredients} /> : emptyIngredients}
+            {ingredients.length > 0 ? (
+              isEditing ? (
+                <section className="space-y-3">
+                  <input type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.map(({ id, originalText, notes }) => ({ id, originalText, notes })))} />
+                  {ingredients.map((ingredient, index) => (
+                    <label key={ingredient.id} className="block space-y-1">
+                      <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Ingredient {index + 1}</span>
+                      <Input
+                        value={ingredient.originalText}
+                        onChange={(event) => setIngredients((current) => current.map((item) => item.id === ingredient.id ? { ...item, originalText: event.target.value } : item))}
+                        aria-label={`Ingredient ${index + 1}`}
+                      />
+                    </label>
+                  ))}
+                </section>
+              ) : <RecipeIngredientList ingredients={ingredients} />
+            ) : emptyIngredients}
           </CardContent>
         </Card>
       </div>
@@ -55,9 +85,25 @@ export function RecipeContent({
       {(recipe.steps.length > 0 || showEmptySteps) ? <Card className="bg-white/85">
         <CardHeader><CardTitle>Recipe</CardTitle></CardHeader>
         <CardContent>
-          {recipe.steps.length > 0 ? (
+          {steps.length > 0 ? (
+            isEditing ? (
+              <section className="space-y-4">
+                <input type="hidden" name="stepsJson" value={JSON.stringify(steps)} />
+                {steps.map((step, index) => (
+                  <label key={step.id} className="block space-y-2 rounded-[24px] bg-secondary/40 p-4">
+                    <span className="text-sm font-medium">Step {index + 1}</span>
+                    <Textarea
+                      value={step.text}
+                      onChange={(event) => setSteps((current) => current.map((item) => item.id === step.id ? { ...item, text: event.target.value } : item))}
+                      aria-label={`Step ${index + 1}`}
+                      className="min-h-32 bg-white"
+                    />
+                  </label>
+                ))}
+              </section>
+            ) : (
             <ol className="space-y-4">
-              {recipe.steps.map((step, index) => (
+              {steps.map((step, index) => (
                 <li key={step.id} className="flex gap-4 rounded-[24px] bg-secondary/40 p-4">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-sm font-semibold shadow-sm">{index + 1}</div>
                   <div>
@@ -67,6 +113,7 @@ export function RecipeContent({
                 </li>
               ))}
             </ol>
+            )
           ) : emptySteps}
         </CardContent>
       </Card> : null}

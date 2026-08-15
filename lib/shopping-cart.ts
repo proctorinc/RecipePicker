@@ -14,7 +14,15 @@ export type CartIngredientInput = {
   sourceMeal: { eventId: string; date: string; recipeId: string; recipeTitle: string };
 };
 
-const VOLUME_TO_TEASPOONS: Record<string, number> = { cup: 48, tablespoon: 3, teaspoon: 1 };
+const VOLUME_UNITS = [
+  { unit: "cup", teaspoons: 48 },
+  { unit: "tablespoon", teaspoons: 3 },
+  { unit: "teaspoon", teaspoons: 1 },
+] as const;
+
+const VOLUME_TO_TEASPOONS = Object.fromEntries(
+  VOLUME_UNITS.map(({ unit, teaspoons }) => [unit, teaspoons]),
+) as Record<string, number>;
 
 export type BuiltCartItem = {
   itemId: string;
@@ -55,7 +63,7 @@ function buildGroup(key: string, entries: CartIngredientInput[]): BuiltCartItem[
   const items: BuiltCartItem[] = [];
   for (const [unitKey, values] of numericGroups) {
     const total = values.reduce((sum, entry) => sum + (entry.amountValue ?? 0) * (unitKey === "volume" ? VOLUME_TO_TEASPOONS[entry.unit ?? ""]! : 1), 0);
-    const unit = unitKey === "volume" ? chooseVolumeUnit(total) : (values[0]!.unit ?? null);
+    const unit = unitKey === "volume" ? chooseVolumeUnit(total, values) : (values[0]!.unit ?? null);
     const amount = unitKey === "volume" ? total / VOLUME_TO_TEASPOONS[unit!]! : total;
     items.push({ itemId: `${key}:${unitKey}`, canonicalIngredientId: first.canonicalIngredientId, displayName, amountText: formatAmount(amount), unit, sourceMeals: uniqueSources(values.map((entry) => entry.sourceMeal)) });
   }
@@ -65,14 +73,37 @@ function buildGroup(key: string, entries: CartIngredientInput[]): BuiltCartItem[
   return items.length ? items : [{ itemId: key, canonicalIngredientId: first.canonicalIngredientId, displayName, amountText: null, unit: null, sourceMeals: sources }];
 }
 
-function chooseVolumeUnit(teaspoons: number) {
-  if (teaspoons >= 48) return "cup";
-  if (teaspoons >= 3) return "tablespoon";
-  return "teaspoon";
+function chooseVolumeUnit(teaspoons: number, entries: CartIngredientInput[]) {
+  // Keep the largest original unit as the floor. This matches recipe scaling:
+  // 1/2 cup remains a cup measurement instead of being demoted to 8 tbsp.
+  const preferredUnit = VOLUME_UNITS.find((candidate) => entries.some((entry) => entry.unit === candidate.unit))!;
+
+  return VOLUME_UNITS.find(
+    (candidate) => candidate.teaspoons >= preferredUnit.teaspoons && teaspoons / candidate.teaspoons >= 1,
+  )?.unit ?? preferredUnit.unit;
 }
 
 function formatAmount(amount: number) {
   const rounded = Math.round(amount * 1_000_000) / 1_000_000;
+  const whole = Math.floor(rounded);
+  const fraction = rounded - whole;
+  const commonFractions: Array<[number, string]> = [
+    [1 / 8, "⅛"],
+    [1 / 4, "¼"],
+    [1 / 3, "⅓"],
+    [3 / 8, "⅜"],
+    [1 / 2, "½"],
+    [5 / 8, "⅝"],
+    [2 / 3, "⅔"],
+    [3 / 4, "¾"],
+    [7 / 8, "⅞"],
+  ];
+  const commonFraction = commonFractions.find(([candidate]) => Math.abs(fraction - candidate) < 0.000001);
+
+  if (commonFraction) {
+    return whole ? `${whole}${commonFraction[1]}` : commonFraction[1];
+  }
+
   return `${rounded}`;
 }
 

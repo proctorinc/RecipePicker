@@ -11,8 +11,23 @@ describe("buildShoppingCartItems", () => {
   it("combines duplicate canonical ingredients and compatible volume units", () => {
     const items = buildShoppingCartItems([ingredient(), ingredient({ ingredientId: "ingredient-2", amountValue: 1, unit: "tablespoon", sourceMeal: { ...meal, eventId: "event-2" } })]);
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ displayName: "Salt", amountText: "1.333333", unit: "tablespoon" });
+    expect(items[0]).toMatchObject({ displayName: "Salt", amountText: "1⅓", unit: "tablespoon" });
     expect(items[0]!.sourceMeals).toHaveLength(2);
+  });
+
+  it("keeps the largest original volume unit and formats neat fractions", () => {
+    const items = buildShoppingCartItems([
+      ingredient({ amountText: "1/2", amountValue: 0.5, unit: "cup" }),
+      ingredient({ ingredientId: "ingredient-2", amountText: "1/4", amountValue: 0.25, unit: "cup", sourceMeal: { ...meal, eventId: "event-2" } }),
+    ]);
+
+    expect(items[0]).toMatchObject({ displayName: "Salt", amountText: "¾", unit: "cup" });
+  });
+
+  it("does not demote a half cup to tablespoons", () => {
+    const items = buildShoppingCartItems([ingredient({ amountText: "1/2", amountValue: 0.5, unit: "cup" })]);
+
+    expect(items[0]).toMatchObject({ amountText: "½", unit: "cup" });
   });
 
   it("keeps incompatible units and unreviewed ingredients as separate lines", () => {

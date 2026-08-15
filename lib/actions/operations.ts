@@ -1194,6 +1194,9 @@ export const saveRecipeMetadataAction = withActionLogging(
   const recipeId = String(formData.get("recipeId") ?? "").trim();
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
+  const hasContentEdits = formData.has("ingredientsJson") || formData.has("stepsJson");
+  const ingredients = parseRecipeContentItems(formData.get("ingredientsJson"), isRecipeIngredientInput);
+  const steps = parseRecipeContentItems(formData.get("stepsJson"), isRecipeStepInput);
 
   if (!recipeId) {
     return { status: "error", message: "Recipe ID is required." };
@@ -1211,13 +1214,76 @@ export const saveRecipeMetadataAction = withActionLogging(
     try {
       const recipe = await db.query.householdRecipes.findFirst({
         where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
-        columns: {
-          recipeId: true,
+        with: {
+          pin: true,
+          recipeInstructions: {
+            with: {
+              ingredients: true,
+              steps: true,
+            },
+          },
         },
       });
 
       if (!recipe) {
         return { status: "error", message: "Recipe was not found." };
+      }
+
+      if (hasContentEdits) {
+        if (!recipe.recipeInstructions) {
+          return { status: "error", message: "This recipe does not have editable structured content yet." };
+        }
+
+        const knownIngredientIds = new Set(recipe.recipeInstructions.ingredients.map((ingredient) => ingredient.ingredientId));
+        const knownStepIds = new Set(recipe.recipeInstructions.steps.map((step) => step.stepId));
+        if (ingredients.some((ingredient) => !knownIngredientIds.has(ingredient.id) || !ingredient.originalText.trim())) {
+          return { status: "error", message: "One or more ingredient edits are invalid." };
+        }
+        if (steps.some((step) => !knownStepIds.has(step.id) || !step.text.trim())) {
+          return { status: "error", message: "One or more instruction edits are invalid." };
+        }
+
+        for (const ingredient of ingredients) {
+          await db.update(householdRecipeIngredients)
+            .set({ originalText: ingredient.originalText.trim(), notes: ingredient.notes?.trim() || null })
+            .where(and(eq(householdRecipeIngredients.recipeId, recipeId), eq(householdRecipeIngredients.ingredientId, ingredient.id)))
+            .run();
+        }
+        for (const step of steps) {
+          await db.update(householdRecipeSteps)
+            .set({ section: step.section?.trim() || null, text: step.text.trim() })
+            .where(and(eq(householdRecipeSteps.recipeId, recipeId), eq(householdRecipeSteps.stepId, step.id)))
+            .run();
+        }
+
+        const primaryVersion = await db.query.householdRecipeVersions.findFirst({
+          where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+          orderBy: (table, { desc }) => [desc(table.versionNumber)],
+        });
+        if (primaryVersion) {
+          const priorSnapshot = buildRecipeVersionSnapshot(recipe);
+          const updatedSnapshot = {
+            ...priorSnapshot,
+            ingredients: priorSnapshot.ingredients.map((ingredient) => ({
+              ...ingredient,
+              originalText: ingredients.find((item) => item.id === ingredient.id)?.originalText.trim() ?? ingredient.originalText,
+              displayText: ingredients.find((item) => item.id === ingredient.id)?.originalText.trim() ?? ingredient.displayText,
+            })),
+            steps: priorSnapshot.steps.map((step) => ({
+              ...step,
+              section: steps.find((item) => item.id === step.id)?.section?.trim() || null,
+              text: steps.find((item) => item.id === step.id)?.text.trim() ?? step.text,
+            })),
+          };
+          await db.update(householdRecipeVersions)
+            .set({
+              ingredientsJson: JSON.stringify(updatedSnapshot.ingredients.map((item) => item.originalText)),
+              stepsJson: JSON.stringify(updatedSnapshot.steps.map((item) => ({ section: item.section, text: item.text }))),
+              snapshotJson: JSON.stringify(updatedSnapshot),
+            })
+            .where(eq(householdRecipeVersions.recipeVersionId, primaryVersion.recipeVersionId))
+            .run();
+        }
       }
 
       await db.update(householdRecipes)
