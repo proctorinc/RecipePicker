@@ -51,6 +51,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 
 import {
   getPinterestRecipeFolderTree,
+  getPublicRecipeDetail,
   getRecipeDetail,
 } from "@/lib/server/queries";
 
@@ -266,6 +267,23 @@ describe("getRecipeDetail", () => {
         sourceType: "section",
       },
     ]);
+  });
+});
+
+describe("getPublicRecipeDetail", () => {
+  it("loads safe recipe content without resolving a household", async () => {
+    mockRequireHouseholdContext.mockRejectedValueOnce(new Error("must not be called"));
+
+    await expect(getPublicRecipeDetail("recipe_section")).resolves.toMatchObject({
+      recipeId: "recipe_section",
+      title: "Section meal",
+      ingredients: [],
+      steps: [],
+    });
+  });
+
+  it("returns null for a recipe that does not exist", async () => {
+    await expect(getPublicRecipeDetail("missing_recipe")).resolves.toBeNull();
   });
 });
 

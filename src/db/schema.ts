@@ -220,6 +220,7 @@ export const householdRecipeReviews = sqliteTable(
     recipeId: text("recipe_id")
       .notNull()
       .references(() => householdRecipes.recipeId),
+    recipeVersionId: text("recipe_version_id").references(() => householdRecipeVersions.recipeVersionId),
     eventId: text("event_id").references(() => householdRecipeEvents.eventId),
     reviewedByClerkUserId: text("reviewed_by_clerk_user_id"),
     ratingValue: real("rating_value").notNull(),
@@ -361,6 +362,26 @@ export const householdRecipes = sqliteTable(
     pinIdUniqueIdx: uniqueIndex("idx_household_recipes_pin_id_unique").on(table.pinId),
     householdIdx: index("idx_household_recipes_household_id").on(table.householdId),
     householdUpdatedIdx: index("idx_household_recipes_household_updated").on(table.householdId, table.updatedAt),
+  }),
+);
+
+/** Immutable, user-created recipe revisions. The highest version is the primary recipe. */
+export const householdRecipeVersions = sqliteTable(
+  "household_recipe_versions",
+  {
+    recipeVersionId: generatedId("recipe_version_id"),
+    householdId: text("household_id").notNull().references(() => households.householdId),
+    recipeId: text("recipe_id").notNull().references(() => householdRecipes.recipeId),
+    versionNumber: integer("version_number").notNull(),
+    ingredientsJson: text("ingredients_json").notNull(),
+    stepsJson: text("steps_json").notNull(),
+    note: text("note"),
+    createdByClerkUserId: text("created_by_clerk_user_id"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => ({
+    recipeVersionUniqueIdx: uniqueIndex("idx_household_recipe_versions_recipe_version_unique").on(table.recipeId, table.versionNumber),
+    householdRecipeVersionIdx: index("idx_household_recipe_versions_household_recipe_version").on(table.householdId, table.recipeId, table.versionNumber),
   }),
 );
 
@@ -699,6 +720,7 @@ export const householdRecipeIngredients = sqliteTable(
     matchedBy: text("matched_by"),
     aiSuggestionsJson: text("ai_suggestions_json"),
     normalizationStatus: text("normalization_status").notNull(),
+    reviewDisposition: text("review_disposition").notNull().default("pending"),
   },
   (table) => ({
     recipeIdIdx: index("idx_household_recipe_ingredients_instruction_id").on(table.recipeId),
@@ -727,6 +749,7 @@ export const householdCanonicalIngredients = sqliteTable(
       (): AnySQLiteColumn => householdCanonicalIngredients.canonicalIngredientId,
     ),
     ingredientKind: text("ingredient_kind").notNull().default("leaf"),
+    catalogStatus: text("catalog_status").notNull().default("confirmed"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

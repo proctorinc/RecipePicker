@@ -17,6 +17,7 @@ import {
   householdRecipeEvents,
   householdRecipeInstructions,
   householdRecipeReviews,
+  householdRecipeVersions,
   pinterestAccounts,
   recipeFolderMemberships,
   recipeFolders,
@@ -61,7 +62,9 @@ import type {
   RecipeOpsListItem,
   RecipeParseJobDetail,
   RecipeParseJobSummary,
+  PublicRecipeDetailView,
   RecipeReviewView,
+  RecipeVersionView,
 } from "@/types/view-models";
 
 type DatabaseHandle = Awaited<ReturnType<typeof openDatabase>>["db"];
@@ -249,10 +252,16 @@ export async function getRecipeDetail(
       return null;
     }
 
+    const versions = await db.query.householdRecipeVersions.findMany({
+      where: (table, { and, eq }) => and(eq(table.recipeId, row.recipeId), eq(table.householdId, context.householdId)),
+      orderBy: (table, { asc }) => [asc(table.versionNumber)],
+    });
+    const primaryVersion = versions.at(-1) ?? null;
+    const primaryIngredients = primaryVersion ? parseVersionIngredientLines(primaryVersion.ingredientsJson) : null;
     const latestExtraction = row.pin.recipeExtractions[0];
     const reviewerNames = await getReviewerNameMap(context.householdId);
     const reviews = row.reviews
-      .map((review) => toRecipeReviewView(review, row, reviewerNames, context))
+      .map((review) => toRecipeReviewView(review, row, reviewerNames, context, versionNumberForReview(review.recipeVersionId, versions)))
       .sort(compareReviewsByDate);
     const aggregate = getRecipeReviewAggregate(row.reviews);
     const folderPath = buildRecipeFolderPath(row.folderMemberships[0]?.folder ?? null);
@@ -262,7 +271,6 @@ export async function getRecipeDetail(
       row.pin.mediaJson,
       row.pin.rawJson,
     );
-
     return {
       recipeId: row.recipeId,
       folderPath,
@@ -297,11 +305,13 @@ export async function getRecipeDetail(
       averageRating: aggregate.averageRating,
       reviewCount: aggregate.reviewCount,
       reviews,
+      primaryVersionNumber: primaryVersion?.versionNumber ?? 1,
+      versions: toRecipeVersionViews(versions, row.recipeInstructions?.ingredients.map((ingredient) => ingredient.originalText) ?? []),
       ingredients:
-        row.recipeInstructions?.ingredients.map((ingredient) => ({
+        row.recipeInstructions?.ingredients.map((ingredient, index) => ({
           id: ingredient.ingredientId,
-          originalText: ingredient.originalText,
-          displayText: ingredient.originalText,
+          originalText: primaryIngredients?.[index] ?? ingredient.originalText,
+          displayText: primaryIngredients?.[index] ?? ingredient.originalText,
           amount: ingredient.amountText,
           amountValue: ingredient.amountValue,
           amountMaxValue: ingredient.amountMaxValue,
@@ -324,6 +334,86 @@ export async function getRecipeDetail(
       extractionSummary: latestExtraction
         ? `${latestExtraction.status.replaceAll("_", " ")}${latestExtraction.method ? ` via ${latestExtraction.method}` : ""}`
         : null,
+    };
+  } finally {
+    await sqlite.close();
+  }
+}
+
+/**
+ * Loads only the fields safe to show to anyone who knows a recipe's public URL.
+ * Unlike getRecipeDetail, this deliberately does not resolve a household or load
+ * reviews, folders, extraction state, or raw Pinterest records.
+ */
+export async function getPublicRecipeDetail(
+  recipeId: string,
+): Promise<PublicRecipeDetailView | null> {
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const row = await db.query.householdRecipes.findFirst({
+      where: (table, { eq }) => eq(table.recipeId, recipeId),
+      with: {
+        pin: true,
+        recipeInstructions: {
+          with: {
+            ingredients: {
+              orderBy: (table, { asc }) => [asc(table.position)],
+              with: { canonicalIngredient: true },
+            },
+            steps: {
+              orderBy: (table, { asc }) => [asc(table.position)],
+            },
+          },
+        },
+      },
+    });
+
+    if (!row) {
+      return null;
+    }
+
+    const imageSources = resolveRecipeImageSources(
+      row.imageUrl,
+      row.recipeInstructions?.imageUrl,
+      row.pin.mediaJson,
+      row.pin.rawJson,
+    );
+    const rawRecipe = parseJsonRecord(row.recipeInstructions?.rawRecipeJson);
+    const isCreatedInApp = rawRecipe?.createdInApp === true;
+
+    return {
+      recipeId: row.recipeId,
+      title: row.title ?? row.pin.title ?? row.recipeInstructions?.title ?? "Untitled recipe",
+      imageUrl: imageSources.imageUrl,
+      previewImageUrl: imageSources.previewImageUrl,
+      description: row.description ?? row.pin.description ?? row.recipeInstructions?.description ?? null,
+      sourceUrl: row.recipeInstructions?.canonicalUrl ?? (isCreatedInApp ? null : row.pin.link),
+      dominantColor: row.pin.dominantColor,
+      yieldText: row.recipeInstructions?.yieldText ?? null,
+      prepTime: row.recipeInstructions?.prepTime ?? null,
+      cookTime: row.recipeInstructions?.cookTime ?? null,
+      totalTime: row.recipeInstructions?.totalTime ?? null,
+      ingredients: row.recipeInstructions?.ingredients.map((ingredient) => ({
+        id: ingredient.ingredientId,
+        originalText: ingredient.originalText,
+        displayText: ingredient.originalText,
+        amount: ingredient.amountText,
+        amountValue: ingredient.amountValue,
+        amountMaxValue: ingredient.amountMaxValue,
+        unit: ingredient.unit,
+        parsedText: ingredient.ingredientText,
+        notes: ingredient.notes,
+        canonicalIngredientId: ingredient.canonicalIngredientId,
+        canonicalName: ingredient.canonicalIngredient?.displayName ?? null,
+        attributes: parseJsonArray(ingredient.attributesJson),
+        normalizationStatus: toIngredientStatus(ingredient.normalizationStatus),
+      })) ?? [],
+      steps: row.recipeInstructions?.steps.map((step) => ({
+        id: step.stepId,
+        section: step.section,
+        text: step.text,
+      })) ?? [],
     };
   } finally {
     await sqlite.close();
@@ -1190,6 +1280,26 @@ export async function getCanonicalIngredientOptions(): Promise<
   }
 }
 
+export async function getIngredientCatalog(): Promise<import("@/types/view-models").IngredientCatalogItemView[]> {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+  try {
+    const rows = await db.query.householdCanonicalIngredients.findMany({
+      where: (table, { eq }) => eq(table.householdId, context.householdId),
+      orderBy: (table, { asc }) => [asc(table.displayName)],
+      with: { parentCanonicalIngredient: true, aliases: true, recipeIngredients: { columns: { ingredientId: true } } },
+    });
+    return rows.map((row) => ({
+      canonicalIngredientId: row.canonicalIngredientId, displayName: row.displayName,
+      ingredientKind: row.ingredientKind === "family" || row.ingredientKind === "base" ? row.ingredientKind : "leaf",
+      catalogStatus: row.catalogStatus === "provisional" ? "provisional" : "confirmed",
+      parentCanonicalIngredientId: row.parentCanonicalIngredientId,
+      parentDisplayName: row.parentCanonicalIngredient?.displayName ?? null,
+      aliases: row.aliases.map((alias) => alias.aliasText), usageCount: row.recipeIngredients.length,
+    }));
+  } finally { await sqlite.close(); }
+}
+
 export async function getIngredientReviewQueue(
   page = 1,
   pageSize = 20,
@@ -1208,6 +1318,7 @@ export async function getIngredientReviewQueue(
           and(
             eq(table.householdId, context.householdId),
             eq(table.normalizationStatus, "needs_review"),
+            eq(table.reviewDisposition, "pending"),
             recipeId ? eq(table.recipeId, recipeId) : undefined,
           ),
         columns: {
@@ -1228,6 +1339,7 @@ export async function getIngredientReviewQueue(
           and(
             eq(table.householdId, context.householdId),
             eq(table.normalizationStatus, "needs_review"),
+            eq(table.reviewDisposition, "pending"),
             recipeId ? eq(table.recipeId, recipeId) : undefined,
           ),
         orderBy: (table, { asc }) => [asc(table.recipeId), asc(table.position)],
@@ -1277,6 +1389,9 @@ export async function getIngredientReviewQueue(
           ingredient.recipeInstructions.title ??
           "Untitled recipe",
         originalText: ingredient.originalText,
+        amountText: ingredient.amountText,
+        unit: ingredient.unit,
+        notes: ingredient.notes,
         parsedIngredientText: ingredient.ingredientText,
         normalizedIngredientPhrase: ingredient.normalizedIngredientPhrase,
         suggestedCanonicalIngredientId:
@@ -1836,6 +1951,7 @@ function toRecipeReviewView(
   review: {
     reviewId: string;
     recipeId: string;
+    recipeVersionId?: string | null;
     eventId: string | null;
     reviewedByClerkUserId: string | null;
     ratingValue: number;
@@ -1862,6 +1978,7 @@ function toRecipeReviewView(
   },
   reviewerNames: Map<string, string>,
   context: Awaited<ReturnType<typeof requireHouseholdContext>>,
+  recipeVersionNumber = 1,
 ): RecipeReviewView {
   const recipeTitle =
     recipe.title ??
@@ -1879,6 +1996,7 @@ function toRecipeReviewView(
   return {
     reviewId: review.reviewId,
     recipeId: recipe.recipeId,
+    recipeVersionNumber,
     eventId: review.eventId,
     recipeTitle,
     recipeImageUrl: recipeImageSources.imageUrl,
@@ -1891,6 +2009,47 @@ function toRecipeReviewView(
     canEdit: canManage,
     canDelete: canManage,
   };
+}
+
+function parseVersionIngredientLines(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function versionNumberForReview(
+  recipeVersionId: string | null,
+  versions: Array<{ recipeVersionId: string; versionNumber: number }>,
+) {
+  return versions.find((version) => version.recipeVersionId === recipeVersionId)?.versionNumber ?? 1;
+}
+
+function toRecipeVersionViews(
+  versions: Array<{ recipeVersionId: string; versionNumber: number; ingredientsJson: string; note: string | null; createdAt: string }>,
+  currentIngredients: string[],
+): RecipeVersionView[] {
+  const records = versions.length > 0
+    ? versions
+    : [{ recipeVersionId: null, versionNumber: 1, ingredientsJson: JSON.stringify(currentIngredients), note: "Original recipe", createdAt: "" }];
+  return records.map((version, index) => {
+    const ingredients = parseVersionIngredientLines(version.ingredientsJson);
+    const prior = index > 0 ? parseVersionIngredientLines(records[index - 1].ingredientsJson) : [];
+    return {
+      recipeVersionId: version.recipeVersionId,
+      versionNumber: version.versionNumber,
+      createdAt: version.createdAt || null,
+      note: version.note,
+      isPrimary: index === records.length - 1,
+      ingredients,
+      changes: {
+        added: ingredients.filter((ingredient) => !prior.includes(ingredient)),
+        removed: prior.filter((ingredient) => !ingredients.includes(ingredient)),
+      },
+    };
+  });
 }
 
 function toRecipeHistoryEventView(

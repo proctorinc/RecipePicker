@@ -1,8 +1,9 @@
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { IngredientReviewTable } from "@/components/ingredient-review-table";
+import { IngredientCatalog } from "@/components/ingredient-catalog";
 import { SettingsNav } from "@/components/settings-nav";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getCanonicalIngredientOptions, getIngredientReviewQueue } from "@/lib/server/queries";
+import { getCanonicalIngredientOptions, getIngredientCatalog, getIngredientReviewQueue } from "@/lib/server/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +18,10 @@ export default async function IngredientSettingsPage({
   const rawPage = typeof params.page === "string" ? Number.parseInt(params.page, 10) : 1;
   const requestedPage = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
   const recipeId = typeof params.recipeId === "string" ? params.recipeId : undefined;
-  const [queue, canonicalOptions] = await Promise.all([
+  const [queue, canonicalOptions, catalog] = await Promise.all([
     getIngredientReviewQueue(requestedPage, PAGE_SIZE, recipeId),
     getCanonicalIngredientOptions(),
+    getIngredientCatalog(),
   ]);
   const startItem = queue.totalCount === 0 ? 0 : (queue.page - 1) * queue.pageSize + 1;
   const endItem = queue.totalCount === 0 ? 0 : startItem + queue.items.length - 1;
@@ -72,6 +74,10 @@ export default async function IngredientSettingsPage({
           ) : null}
           <IngredientReviewTable items={queue.items} canonicalOptions={canonicalOptions} />
         </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>Ingredient catalog</CardTitle><CardDescription>Provisional ingredients are safe to keep now and organize later. Merge duplicates or assign a family here.</CardDescription></CardHeader>
+        <CardContent><IngredientCatalog items={catalog} /></CardContent>
       </Card>
     </div>
   );

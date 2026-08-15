@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 
 import { auth } from "@clerk/nextjs/server";
 import { cookies } from "next/headers";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import {
   ADMIN_ROLE_OVERRIDE_COOKIE,
@@ -24,12 +24,17 @@ import {
   householdRecipeEvents,
   householdRecipeFeedback,
   householdRecipeIngredients,
+  householdCanonicalIngredients,
+  householdIngredientAliases,
+  householdIngredientPhraseMappings,
   householdRecipeReviews,
   householdRecipeSteps,
+  householdRecipeVersions,
   householdRecipes,
 } from "@/lib/server/db";
 import {
   createCanonicalIngredient,
+  normalizeIngredientKey,
   normalizeAttributes,
   upsertReviewedIngredientMapping,
   type IngredientKind,
@@ -732,24 +737,12 @@ export const reviewIngredientAction = withActionLogging(
   async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const ingredientId = String(formData.get("ingredientId") ?? "").trim();
   const recipeId = String(formData.get("recipeId") ?? "").trim();
-  const normalizedPhrase = String(formData.get("normalizedIngredientPhrase") ?? "").trim();
-  const selectedCanonicalIngredientId = String(formData.get("canonicalIngredientId") ?? "").trim() || null;
-  const newCanonicalName = String(formData.get("newCanonicalName") ?? "").trim() || null;
-  const parentCanonicalIngredientId = String(formData.get("parentCanonicalIngredientId") ?? "").trim() || null;
-  const aliasText = String(formData.get("aliasText") ?? "").trim() || null;
-  const ingredientKind = toIngredientKind(String(formData.get("ingredientKind") ?? "").trim());
-  const reviewMode = toReviewMode(String(formData.get("reviewMode") ?? "").trim());
-  const savePhraseMapping = toChecked(formData.get("savePhraseMapping"));
-  const saveAlias = toChecked(formData.get("saveAlias"));
-  const acceptCurrentSuggestion = toChecked(formData.get("acceptCurrentSuggestion"));
-  const acceptSuggestionIndex = Number.parseInt(String(formData.get("acceptSuggestionIndex") ?? ""), 10);
-  const aiSuggestions = parseIngredientReviewSuggestions(formData.get("aiSuggestionsJson"));
-  const attributes = normalizeAttributes(
-    String(formData.get("attributes") ?? "")
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
-  );
+  const action = String(formData.get("action") ?? "accept").trim();
+  const ingredientText = String(formData.get("ingredientText") ?? "").trim();
+  const amountText = toOptionalString(formData.get("amountText"));
+  const unit = toOptionalString(formData.get("unit"));
+  const notes = toOptionalString(formData.get("notes"));
+  const canonicalIngredientId = toOptionalString(formData.get("canonicalIngredientId"));
 
   if (!ingredientId || !recipeId) {
     return { status: "error", message: "Ingredient review details are incomplete." };
@@ -769,72 +762,51 @@ export const reviewIngredientAction = withActionLogging(
         return { status: "error", message: "Ingredient review item was not found." };
       }
 
-      const acceptedSuggestion =
-        Number.isInteger(acceptSuggestionIndex) && acceptSuggestionIndex >= 0 ? aiSuggestions[acceptSuggestionIndex] ?? null : null;
-      const resolvedReview = resolveReviewSubmission({
-        selectedCanonicalIngredientId,
-        newCanonicalName,
-        parentCanonicalIngredientId,
-        ingredientKind,
-        attributes,
-        reviewMode,
-        acceptedSuggestion,
-        acceptCurrentSuggestion,
-        fallbackSuggestedCanonicalIngredientId: String(formData.get("fallbackSuggestedCanonicalIngredientId") ?? "").trim() || null,
-        fallbackSuggestedCanonicalName: String(formData.get("fallbackSuggestedCanonicalName") ?? "").trim() || null,
-        fallbackSuggestedParentCanonicalIngredientId:
-          String(formData.get("fallbackSuggestedParentCanonicalIngredientId") ?? "").trim() || null,
-        fallbackSuggestedIngredientKind: toIngredientKind(String(formData.get("fallbackSuggestedIngredientKind") ?? "").trim()),
-        fallbackSuggestedAttributes: normalizeAttributes(
-          String(formData.get("fallbackSuggestedAttributes") ?? "")
-            .split(",")
-            .map((entry) => entry.trim())
-            .filter(Boolean),
-        ),
-      });
-
-      if (!resolvedReview) {
-        return { status: "error", message: "Choose an existing ingredient, accept a suggestion, or create a new one." };
+      if (action === "reject") {
+        await db.update(householdRecipeIngredients).set({
+          canonicalIngredientId: null,
+          normalizationStatus: "not_ingredient",
+          reviewDisposition: "rejected",
+          matchedBy: "review_rejected",
+          aiSuggestionsJson: null,
+        }).where(and(eq(householdRecipeIngredients.householdId, context.householdId), eq(householdRecipeIngredients.ingredientId, ingredientId))).run();
+        return { status: "success", message: "Marked as not an ingredient." };
       }
 
-      const canonicalIngredient =
-        resolvedReview.mode === "create_new"
-          ? await createCanonicalIngredient(db, context.householdId, resolvedReview.displayName, {
-              parentCanonicalIngredientId: resolvedReview.parentCanonicalIngredientId,
-              ingredientKind: resolvedReview.ingredientKind,
-            })
-          : { canonicalIngredientId: resolvedReview.canonicalIngredientId };
+      if (!ingredientText) {
+        return { status: "error", message: "Tell us what the ingredient is before accepting it." };
+      }
 
+      const existingCanonical = canonicalIngredientId
+        ? await db.query.householdCanonicalIngredients.findFirst({
+            where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.canonicalIngredientId, canonicalIngredientId)),
+            columns: { canonicalIngredientId: true },
+          })
+        : null;
+      if (canonicalIngredientId && !existingCanonical) {
+        return { status: "error", message: "That existing ingredient is no longer available." };
+      }
+      const canonicalIngredient = existingCanonical
+        ? existingCanonical
+        : await createCanonicalIngredient(db, context.householdId, ingredientText, {
+            ingredientKind: "leaf",
+            catalogStatus: "provisional",
+          });
+      const normalizedPhrase = normalizeIngredientKey(ingredientText);
       await upsertReviewedIngredientMapping({
-        db,
-        householdId: context.householdId,
-        normalizedPhrase: normalizedPhrase || ingredient.normalizedIngredientPhrase || ingredient.originalText,
+        db, householdId: context.householdId, normalizedPhrase,
         canonicalIngredientId: canonicalIngredient.canonicalIngredientId,
-        aliasText: aliasText || ingredient.originalText,
-        attributes: resolvedReview.attributes,
-        savePhraseMapping,
-        saveAlias,
+        aliasText: ingredientText === ingredient.originalText ? ingredient.originalText : null,
+        attributes: [],
       });
-
-      await db.update(householdRecipeIngredients)
-        .set({
-          canonicalIngredientId: canonicalIngredient.canonicalIngredientId,
-          attributesJson: JSON.stringify(resolvedReview.attributes),
-          matchConfidence: 100,
-          matchedBy: "confirmed_review",
-          aiSuggestionsJson: null,
-          normalizationStatus: "confirmed",
-        })
-        .where(
-          and(
-            eq(householdRecipeIngredients.householdId, context.householdId),
-            eq(
-              householdRecipeIngredients.normalizedIngredientPhrase,
-              normalizedPhrase || ingredient.normalizedIngredientPhrase || ingredient.originalText,
-            ),
-          ),
-        )
-        .run();
+      await db.update(householdRecipeIngredients).set({
+        originalText: ingredient.originalText,
+        amountText, amountValue: null, amountMaxValue: null, unit,
+        ingredientText, notes, normalizedIngredientPhrase: normalizedPhrase,
+        canonicalIngredientId: canonicalIngredient.canonicalIngredientId,
+        attributesJson: "[]", matchConfidence: 100, matchedBy: "confirmed_review",
+        aiSuggestionsJson: null, normalizationStatus: "confirmed", reviewDisposition: "accepted",
+      }).where(and(eq(householdRecipeIngredients.householdId, context.householdId), eq(householdRecipeIngredients.ingredientId, ingredientId))).run();
     } finally {
       await sqlite.close();
     }
@@ -842,7 +814,7 @@ export const reviewIngredientAction = withActionLogging(
     revalidateAll(recipeScopedPaths(undefined, recipeId).concat("/settings/ingredients"));
     return {
       status: "success",
-      message: "Ingredient mapping confirmed and saved for future imports.",
+      message: "Ingredient accepted and saved for future imports.",
     };
   } catch (error) {
     return toErrorState(error, "Unable to save the ingredient review.");
@@ -860,6 +832,124 @@ export const reviewIngredientAction = withActionLogging(
         saveAlias: toChecked(formData.get("saveAlias")),
       },
     }),
+  },
+);
+
+export const mergeCanonicalIngredientsAction = withActionLogging(
+  "action.merge_canonical_ingredients",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const sourceId = String(formData.get("sourceCanonicalIngredientId") ?? "").trim();
+    const targetId = String(formData.get("targetCanonicalIngredientId") ?? "").trim();
+    if (!sourceId || !targetId || sourceId === targetId) return { status: "error", message: "Choose two different ingredients to merge." };
+    try {
+      const context = await requireHouseholdContext(); const { db, sqlite } = await openDatabase();
+      try {
+        const rows = await db.query.householdCanonicalIngredients.findMany({ where: (table, { and, eq, inArray }) => and(eq(table.householdId, context.householdId), inArray(table.canonicalIngredientId, [sourceId, targetId])), columns: { canonicalIngredientId: true, parentCanonicalIngredientId: true } });
+        if (rows.length !== 2) return { status: "error", message: "One of those ingredients was not found." };
+        const aliases = await db.query.householdIngredientAliases.findMany({ where: (table, { and, eq, inArray }) => and(eq(table.householdId, context.householdId), inArray(table.canonicalIngredientId, [sourceId, targetId])), columns: { aliasId: true, canonicalIngredientId: true, normalizedAlias: true } });
+        const targetAliases = new Set(aliases.filter((alias) => alias.canonicalIngredientId === targetId).map((alias) => alias.normalizedAlias));
+        const duplicateSourceAliasIds = aliases.filter((alias) => alias.canonicalIngredientId === sourceId && targetAliases.has(alias.normalizedAlias)).map((alias) => alias.aliasId);
+        for (const aliasId of duplicateSourceAliasIds) await db.delete(householdIngredientAliases).where(eq(householdIngredientAliases.aliasId, aliasId)).run();
+        const source = rows.find((row) => row.canonicalIngredientId === sourceId)!;
+        const target = rows.find((row) => row.canonicalIngredientId === targetId)!;
+        if (target.parentCanonicalIngredientId === sourceId) await db.update(householdCanonicalIngredients).set({ parentCanonicalIngredientId: source.parentCanonicalIngredientId, updatedAt: new Date().toISOString() }).where(eq(householdCanonicalIngredients.canonicalIngredientId, targetId)).run();
+        await db.update(householdRecipeIngredients).set({ canonicalIngredientId: targetId }).where(and(eq(householdRecipeIngredients.householdId, context.householdId), eq(householdRecipeIngredients.canonicalIngredientId, sourceId))).run();
+        await db.update(householdIngredientAliases).set({ canonicalIngredientId: targetId }).where(and(eq(householdIngredientAliases.householdId, context.householdId), eq(householdIngredientAliases.canonicalIngredientId, sourceId))).run();
+        await db.update(householdIngredientPhraseMappings).set({ canonicalIngredientId: targetId }).where(and(eq(householdIngredientPhraseMappings.householdId, context.householdId), eq(householdIngredientPhraseMappings.canonicalIngredientId, sourceId))).run();
+        await db.update(householdCanonicalIngredients).set({ parentCanonicalIngredientId: targetId, updatedAt: new Date().toISOString() }).where(and(eq(householdCanonicalIngredients.householdId, context.householdId), eq(householdCanonicalIngredients.parentCanonicalIngredientId, sourceId))).run();
+        await db.delete(householdCanonicalIngredients).where(and(eq(householdCanonicalIngredients.householdId, context.householdId), eq(householdCanonicalIngredients.canonicalIngredientId, sourceId))).run();
+      } finally { await sqlite.close(); }
+      revalidateAll(["/settings/ingredients"]); return { status: "success", message: "Ingredients merged." };
+    } catch (error) { return toErrorState(error, "Unable to merge ingredients."); }
+  },
+);
+
+export const reparentCanonicalIngredientAction = withActionLogging(
+  "action.reparent_canonical_ingredient",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const ingredientId = String(formData.get("canonicalIngredientId") ?? "").trim();
+    const parentId = toOptionalString(formData.get("parentCanonicalIngredientId"));
+    if (!ingredientId || ingredientId === parentId) return { status: "error", message: "Choose a valid parent." };
+    try {
+      const context = await requireHouseholdContext(); const { db, sqlite } = await openDatabase();
+      try {
+        const ingredient = await db.query.householdCanonicalIngredients.findFirst({ where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.canonicalIngredientId, ingredientId)), columns: { canonicalIngredientId: true } });
+        const parent = parentId ? await db.query.householdCanonicalIngredients.findFirst({ where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.canonicalIngredientId, parentId)), columns: { canonicalIngredientId: true, ingredientKind: true } }) : null;
+        if (!ingredient || (parentId && (!parent || parent.ingredientKind !== "family"))) return { status: "error", message: "Choose an existing family as the parent." };
+        await db.update(householdCanonicalIngredients).set({ parentCanonicalIngredientId: parentId, updatedAt: new Date().toISOString() }).where(and(eq(householdCanonicalIngredients.householdId, context.householdId), eq(householdCanonicalIngredients.canonicalIngredientId, ingredientId))).run();
+      } finally { await sqlite.close(); }
+      revalidateAll(["/settings/ingredients"]); return { status: "success", message: "Ingredient family updated." };
+    } catch (error) { return toErrorState(error, "Unable to update ingredient family."); }
+  },
+);
+
+export const createRecipeVersionAction = withActionLogging(
+  "action.create_recipe_version",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const recipeId = String(formData.get("recipeId") ?? "").trim();
+    const ingredientLines = String(formData.get("ingredientLines") ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const note = toOptionalString(formData.get("note"));
+
+    if (!recipeId || ingredientLines.length === 0) {
+      return { status: "error", message: "Add at least one ingredient to create a version." };
+    }
+
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+      const now = new Date().toISOString();
+      try {
+        const recipe = await db.query.householdRecipes.findFirst({
+          where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+          with: {
+            recipeInstructions: { with: { ingredients: { orderBy: (table, { asc }) => [asc(table.position)] }, steps: { orderBy: (table, { asc }) => [asc(table.position)] } } },
+          },
+        });
+        if (!recipe?.recipeInstructions) {
+          return { status: "error", message: "This recipe needs structured content before it can be versioned." };
+        }
+
+        const versions = await db.query.householdRecipeVersions.findMany({
+          where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+          orderBy: (table, { asc }) => [asc(table.versionNumber)],
+        });
+        const steps = recipe.recipeInstructions.steps.map((step) => ({ section: step.section, text: step.text }));
+
+        // Existing recipes are implicitly v1. Persist that snapshot before adding v2.
+        if (versions.length === 0) {
+          await db.insert(householdRecipeVersions).values({
+            householdId: context.householdId,
+            recipeId,
+            versionNumber: 1,
+            ingredientsJson: JSON.stringify(recipe.recipeInstructions.ingredients.map((item) => item.originalText)),
+            stepsJson: JSON.stringify(steps),
+            note: "Original recipe",
+            createdByClerkUserId: context.clerkUserId,
+            createdAt: recipe.createdAt,
+          }).run();
+        }
+        const nextNumber = (versions.at(-1)?.versionNumber ?? 1) + 1;
+        await db.insert(householdRecipeVersions).values({
+          householdId: context.householdId,
+          recipeId,
+          versionNumber: nextNumber,
+          ingredientsJson: JSON.stringify(ingredientLines),
+          stepsJson: JSON.stringify(steps),
+          note,
+          createdByClerkUserId: context.clerkUserId,
+          createdAt: now,
+        }).run();
+      } finally {
+        await sqlite.close();
+      }
+      revalidateAll(recipeScopedPaths(undefined, recipeId));
+      return { status: "success", message: "New recipe version created. It is now the primary version." };
+    } catch (error) {
+      return toErrorState(error, "Unable to create the recipe version.");
+    }
   },
 );
 
@@ -945,6 +1035,23 @@ export const saveRecipeContentAction = withActionLogging(
         })
         .where(and(eq(householdRecipes.recipeId, recipeId), eq(householdRecipes.householdId, context.householdId)))
         .run();
+
+      // Editing is intentionally allowed without creating a revision. If this
+      // recipe already has versions, keep the primary snapshot in sync so the
+      // edit belongs to that version rather than silently creating history.
+      const primaryVersion = await db.query.householdRecipeVersions.findFirst({
+        where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+        orderBy: (table, { desc }) => [desc(table.versionNumber)],
+      });
+      if (primaryVersion) {
+        await db.update(householdRecipeVersions)
+          .set({
+            ingredientsJson: ingredients.length > 0 ? JSON.stringify(ingredients.map((item) => item.originalText.trim())) : primaryVersion.ingredientsJson,
+            stepsJson: steps.length > 0 ? JSON.stringify(steps.map((item) => ({ section: item.section?.trim() || null, text: item.text.trim() }))) : primaryVersion.stepsJson,
+          })
+          .where(eq(householdRecipeVersions.recipeVersionId, primaryVersion.recipeVersionId))
+          .run();
+      }
     } finally {
       await sqlite.close();
     }
@@ -1470,6 +1577,12 @@ export const createRecipeReviewAction = withActionLogging(
         return { status: "error", message: "Recipe was not found." };
       }
 
+      const primaryVersion = await db.query.householdRecipeVersions.findFirst({
+        where: (table, { and, eq }) => and(eq(table.recipeId, recipe.recipeId), eq(table.householdId, context.householdId)),
+        orderBy: (table, { desc }) => [desc(table.versionNumber)],
+        columns: { recipeVersionId: true },
+      });
+
       const linkedEvent = eventId
         ? await db.query.householdRecipeEvents.findFirst({
           where: (table, { and, eq }) => and(eq(table.eventId, eventId), eq(table.householdId, context.householdId)),
@@ -1519,6 +1632,7 @@ export const createRecipeReviewAction = withActionLogging(
         .values({
           householdId: context.householdId,
           recipeId: recipe.recipeId,
+          recipeVersionId: primaryVersion?.recipeVersionId ?? null,
           eventId: resolvedEventId,
           reviewedByClerkUserId: context.clerkUserId,
           ratingValue,

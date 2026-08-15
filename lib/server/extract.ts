@@ -301,7 +301,10 @@ async function extractRecipeRow(
       throwIfAborted(signal);
     }
 
-    if (extractionResult.status === "recipe_extracted" && extractionResult.recipe && selectedSourceId) {
+    // A review flag describes confidence; it must not prevent us from saving
+    // the best recipe content and normalizing its ingredients. A later re-run
+    // replaces this content (and reparses the ingredients) after it is fixed.
+    if (extractionResult.recipe && selectedSourceId) {
       logInfo("recipe_parse.recipe.action_started", { target, action: "persist_recipe_instructions" });
       const reviewCount = await persistRecipeInstructions(
         db,

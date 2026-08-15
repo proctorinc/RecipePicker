@@ -767,7 +767,10 @@ function chooseBestExtraction(attempts: ExtractionAttempt[]): ExtractionResult {
     recipe: best.recipe,
     qualityScore: best.qualityScore,
     confidence: best.confidence,
-    selected: best.status === "recipe_extracted",
+    // Keep the best usable recipe even when its extraction needs review. The
+    // lowConfidence flag carries that warning without blocking downstream
+    // recipe and ingredient parsing.
+    selected: best.recipe !== null,
     lowConfidence,
     failureReason: best.failureReason,
     qualitySignals: best.qualitySignals,
@@ -1468,12 +1471,12 @@ function gatherVisibleRecipeSignals($: CheerioAPI) {
     normalizeWhitespace($("h1").first().text()) ||
     normalizeWhitespace($("[class*='recipe']").first().find("h1,h2").first().text()) ||
     null;
-  const ingredients = collectSectionItems($, ["ingredients"]);
+  const ingredients = collectSectionItems($, ["ingredients"], true);
   const steps = collectSectionItems($, ["instructions", "directions", "method", "preparation"]);
   return { title, ingredients, steps };
 }
 
-function collectSectionItems($: CheerioAPI, headings: string[]) {
+function collectSectionItems($: CheerioAPI, headings: string[], ingredientOnly = false) {
   const results: string[] = [];
 
   $("h1,h2,h3,h4,h5,h6").each((_, element) => {
@@ -1492,7 +1495,10 @@ function collectSectionItems($: CheerioAPI, headings: string[]) {
       if (tagName === "ul" || tagName === "ol") {
         siblingNode
           .find("li")
-          .each((___, li) => pushUnique(results, normalizeWhitespace($(li).text())));
+          .each((___, li) => {
+            const line = normalizeWhitespace($(li).text());
+            if (!ingredientOnly || looksLikeIngredientLine(line)) pushUnique(results, line);
+          });
       } else {
         const blockLines = siblingNode
           .find("p,li")
@@ -1500,15 +1506,24 @@ function collectSectionItems($: CheerioAPI, headings: string[]) {
           .get()
           .filter(Boolean);
         if (blockLines.length > 0) {
-          blockLines.forEach((line) => pushUnique(results, line));
+          blockLines.filter((line) => !ingredientOnly || looksLikeIngredientLine(line)).forEach((line) => pushUnique(results, line));
         } else {
-          preserveLines(siblingNode.text()).forEach((line) => pushUnique(results, line));
+          preserveLines(siblingNode.text()).filter((line) => !ingredientOnly || looksLikeIngredientLine(line)).forEach((line) => pushUnique(results, line));
         }
       }
     });
   });
 
   return results;
+}
+
+function looksLikeIngredientLine(value: string) {
+  const line = normalizeWhitespace(value);
+  if (!line || line.length > 140) return false;
+  if (/^(cook|heat|add|stir|mix|serve|bake|preheat|make|saute|sauté|place|remove|pour|whisk)\b/i.test(line)) return false;
+  if (/^(notes?|instructions?|directions?|method|preparation|equipment|mixing bowls?|report abuse|page updated)\b/i.test(line)) return false;
+  if (/[.!?]$/.test(line) && line.split(/\s+/).length > 5) return false;
+  return line.split(/\s+/).length <= 18;
 }
 
 function scoreRecipeQuality(

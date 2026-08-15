@@ -114,7 +114,7 @@ export function RecipeReviewLauncher({
                                 {review.eatenOn
                                   ? `${formatDay(review.eatenOn)} by `
                                   : "No date included by "}
-                                {review.reviewerName}
+                                {review.reviewerName} · Version {review.recipeVersionNumber}
                               </p>
                               {review.note ? (
                                 <p className="text-sm leading-6 text-foreground">

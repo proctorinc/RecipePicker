@@ -6,17 +6,20 @@ import { ActionForm } from "@/components/action-form";
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { PageShell } from "@/components/page-shell";
 import { RecipeImage } from "@/components/recipe-image";
-import { RecipeIngredientList } from "@/components/recipe-ingredient-list";
+import { CopyPublicRecipeLink } from "@/components/copy-public-recipe-link";
+import { RecipeContent } from "@/components/recipe-content";
 import { RecipeMetadataEditor } from "@/components/recipe-metadata-editor";
 import { RecipeReviewLauncher } from "@/components/recipe-review-launcher";
+import { RecipeVersionHistory } from "@/components/recipe-version-history";
 import { PublishPersonalRecipe } from "@/components/publish-personal-recipe";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { RecipePageScrollToTop } from "@/app/(app)/recipe/[recipeId]/scroll-to-top";
 import { extractRecipeAction } from "@/lib/actions/operations";
 import { getCustomRecipeBoardOptions, getRecipeDetail } from "@/lib/server/queries";
 import { formatIso8601Duration } from "@/lib/utils";
 import { getCurrentUserAccess } from "@/lib/server/access";
+import { getPublicRecipeUrl } from "@/lib/public-recipe-url";
 
 export const dynamic = "force-dynamic";
 
@@ -47,27 +50,6 @@ export default async function RecipePage({
     reviewRecipeId && reviewRecipeId === recipeId
       ? "Back to review"
       : "Back to feed";
-  const detailItems = [
-    {
-      label: "Total time",
-      value: formatIso8601Duration(recipe.totalTime),
-    },
-    {
-      label: "Prep time",
-      value: formatIso8601Duration(recipe.prepTime),
-    },
-    {
-      label: "Cook time",
-      value: formatIso8601Duration(recipe.cookTime),
-    },
-    {
-      label: "Servings",
-      value: recipe.yieldText,
-    },
-  ].filter((item): item is { label: string; value: string } =>
-    Boolean(item.value),
-  );
-
   return (
     <PageShell>
       <RecipePageScrollToTop />
@@ -123,6 +105,7 @@ export default async function RecipePage({
       </RecipeMetadataEditor>
 
       <div className="flex gap-2 w-full">
+        <CopyPublicRecipeLink url={getPublicRecipeUrl(recipe.recipeId)} />
         {recipe.sourceUrl && (
           <Button asChild>
             <a href={recipe.sourceUrl} target="_blank" rel="noreferrer">
@@ -153,87 +136,13 @@ export default async function RecipePage({
         reviews={recipe.reviews}
       />
 
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="space-y-6">
-          {detailItems.length > 0 ? (
-            <Card className="bg-white/85">
-              <CardHeader>
-                <CardTitle>Recipe details</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                  {detailItems.map((item) => (
-                    <div
-                      key={item.label}
-                      className="rounded-[20px] bg-secondary/35 px-4 py-3"
-                    >
-                      <dt className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                        {item.label}
-                      </dt>
-                      <dd className="mt-1 text-base font-medium text-foreground">
-                        {item.value}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </CardContent>
-            </Card>
-          ) : null}
+      <RecipeVersionHistory recipeId={recipe.recipeId} versions={recipe.versions} />
 
-          <Card className="bg-white/85">
-            <CardHeader>
-              <CardTitle>Ingredients</CardTitle>
-            </CardHeader>
-            <CardContent className="px-10">
-              {recipe.ingredients.length > 0 ? (
-                <RecipeIngredientList ingredients={recipe.ingredients} />
-              ) : (
-                <EmptyRecipeState
-                  recipeId={recipe.recipeId}
-                  status={recipe.status}
-                />
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {recipe.steps.length > 0 && (
-          <Card className="bg-white/85">
-            <CardHeader>
-              <CardTitle>Recipe</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {recipe.steps.length > 0 ? (
-                <ol className="space-y-4">
-                  {recipe.steps.map((step, index) => (
-                    <li
-                      key={step.id}
-                      className="flex gap-4 rounded-[24px] bg-secondary/40 p-4"
-                    >
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-sm font-semibold shadow-sm">
-                        {index + 1}
-                      </div>
-                      <div>
-                        {step.section ? (
-                          <p className="mb-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                            {step.section}
-                          </p>
-                        ) : null}
-                        <p className="leading-7">{step.text}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <EmptyRecipeState
-                  recipeId={recipe.recipeId}
-                  status={recipe.status}
-                />
-              )}
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      <RecipeContent
+        recipe={recipe}
+        emptyIngredients={<EmptyRecipeState recipeId={recipe.recipeId} status={recipe.status} />}
+        showEmptySteps={false}
+      />
 
       {access.isAdmin && (
         <Card className="bg-white/85">

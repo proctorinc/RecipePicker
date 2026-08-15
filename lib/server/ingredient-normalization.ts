@@ -38,6 +38,7 @@ export type IngredientSearchResolution = {
   parentCanonicalIngredientId: string | null;
   parentCanonicalDisplayName: string | null;
   ingredientKind: IngredientKind;
+  catalogStatus?: "provisional" | "confirmed";
   descendantCanonicalIngredientIds: string[];
   searchCanonicalIngredientIds: string[];
   attributes: string[];
@@ -73,6 +74,7 @@ type CanonicalWithParent = {
   normalizedKey: string;
   parentCanonicalIngredientId: string | null;
   ingredientKind: IngredientKind;
+  catalogStatus: "provisional" | "confirmed";
   createdAt: string;
   updatedAt: string;
   parentCanonicalIngredient?: {
@@ -80,6 +82,7 @@ type CanonicalWithParent = {
     displayName: string;
     normalizedKey: string;
     ingredientKind: IngredientKind;
+    catalogStatus: "provisional" | "confirmed";
     parentCanonicalIngredientId: string | null;
     householdId: string;
     createdAt: string;
@@ -279,6 +282,7 @@ export async function normalizeIngredientForHousehold(
     ingredient.ingredientText ?? ingredient.originalText,
     {
       ingredientKind: "leaf",
+      catalogStatus: "provisional",
     },
   );
   const autoResult = resolvedIngredientFromCanonical(
@@ -503,6 +507,7 @@ export async function createCanonicalIngredient(
   options?: {
     parentCanonicalIngredientId?: string | null;
     ingredientKind?: IngredientKind;
+    catalogStatus?: "provisional" | "confirmed";
   },
 ) {
   const normalizedKey = normalizeIngredientKey(displayName);
@@ -537,6 +542,7 @@ export async function createCanonicalIngredient(
     normalizedKey,
     parentCanonicalIngredientId: options?.parentCanonicalIngredientId ?? null,
     ingredientKind: options?.ingredientKind ?? "leaf",
+    catalogStatus: options?.catalogStatus ?? "confirmed",
     createdAt: now,
     updatedAt: now,
   };
@@ -563,6 +569,7 @@ export async function getCanonicalIngredientOptionsForHousehold(
     canonicalIngredientId: ingredient.canonicalIngredientId,
     displayName: ingredient.displayName,
     ingredientKind: ingredient.ingredientKind,
+    catalogStatus: ingredient.catalogStatus === "provisional" ? "provisional" : "confirmed",
     parentCanonicalIngredientId: ingredient.parentCanonicalIngredientId,
     parentDisplayName: ingredient.parentCanonicalIngredient?.displayName ?? null,
   }));
@@ -654,9 +661,14 @@ async function tryMatchHierarchyRule(
     return null;
   }
 
+  if (options?.persist === false) {
+    return null;
+  }
+
   const leafCanonical = await createCanonicalIngredient(db, householdId, normalizedPhrase, {
     parentCanonicalIngredientId: familyCanonical.canonicalIngredientId,
     ingredientKind: "leaf",
+    catalogStatus: "provisional",
   });
 
   return resolvedIngredientFromCanonical(
@@ -779,6 +791,7 @@ async function buildSearchResolution(
     parentCanonicalIngredientId: canonicalIngredient.parentCanonicalIngredientId,
     parentCanonicalDisplayName: canonicalIngredient.parentCanonicalIngredient?.displayName ?? null,
     ingredientKind: canonicalIngredient.ingredientKind,
+    catalogStatus: canonicalIngredient.catalogStatus,
     descendantCanonicalIngredientIds,
     searchCanonicalIngredientIds,
     attributes: normalizeAttributes(attributes),
@@ -888,6 +901,7 @@ async function findAliasByKey(db: any, householdId: string, normalizedAlias: str
         householdId: string;
         createdAt: string;
         updatedAt: string;
+        catalogStatus: "provisional" | "confirmed";
         canonicalIngredient: CanonicalWithParent;
       }
     | undefined;

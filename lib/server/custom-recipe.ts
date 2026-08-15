@@ -14,6 +14,7 @@ import {
   pinterestAccounts,
 } from "@/lib/server/db";
 import { createPinterestPin, getValidPinterestAccessToken } from "@/lib/server/pinterest";
+import { getPublicRecipeUrl } from "@/lib/public-recipe-url";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -74,7 +75,7 @@ export async function createCustomRecipe(input: CustomRecipeInput) {
 
     const publishedPin = isPublishing ? await createPinterestPin({
       boardId: input.boardId!, title: input.title, description: input.description,
-      link: input.sourceUrl, imageBase64: image.bytes.toString("base64"), contentType: image.contentType,
+      link: getPublicRecipeUrl(recipeId), imageBase64: image.bytes.toString("base64"), contentType: image.contentType,
     }, await getValidPinterestAccessToken(input.householdId)) : null;
     if (isPublishing && !publishedPin?.id) throw new Error("Pinterest did not return an ID for the new Pin.");
 
@@ -116,7 +117,7 @@ export async function createCustomRecipe(input: CustomRecipeInput) {
         boardSectionId: publishedPin?.board_section_id ?? null,
         title: input.title,
         description: input.description,
-        link: input.sourceUrl,
+        link: publishedPin?.link ?? (isPublishing ? getPublicRecipeUrl(recipeId) : input.sourceUrl),
         altText: input.title,
         dominantColor: publishedPin?.dominant_color ?? null,
         note: null,
@@ -246,7 +247,7 @@ export async function publishPersonalRecipe(args: {
       boardId: args.boardId,
       title: recipe.title || recipe.recipeInstructions.title || "Untitled recipe",
       description: recipe.description || recipe.recipeInstructions.description,
-      link: recipe.recipeInstructions.canonicalUrl,
+      link: getPublicRecipeUrl(recipe.recipeId),
       imageBase64: image.bytes.toString("base64"),
       contentType: image.contentType,
     }, await getValidPinterestAccessToken(args.householdId));
@@ -256,6 +257,7 @@ export async function publishPersonalRecipe(args: {
       boardId: board.boardId,
       pinterestBoardId: args.boardId,
       boardSectionId: publishedPin.board_section_id ?? null,
+      link: publishedPin.link ?? getPublicRecipeUrl(recipe.recipeId),
       createdAt: publishedPin.created_at ?? recipe.pin.createdAt,
       mediaJson: publishedPin.media ? JSON.stringify(publishedPin.media) : null,
       creatorJson: publishedPin.creator ? JSON.stringify(publishedPin.creator) : null,
@@ -305,6 +307,8 @@ async function resolveRecipeImage(file?: File | null, remoteUrl?: string | null)
     access: "public",
     contentType,
     addRandomSuffix: false,
+    token: process.env.BLOB_READ_WRITE_TOKEN ?? process.env.RECIPES_BLOB_READ_WRITE_TOKEN,
+    storeId: process.env.BLOB_STORE_ID ?? process.env.RECIPES_BLOB_STORE_ID,
   });
   return { bytes, contentType, url: blob.url };
 }

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/r(.*)",
   "/api/inngest(.*)",
 ]);
 const REQUEST_ID_HEADER = "x-request-id";

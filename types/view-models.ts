@@ -35,6 +35,7 @@ export type RecipeReviewAggregate = {
 export type RecipeReviewView = {
   reviewId: string;
   recipeId: string;
+  recipeVersionNumber: number;
   eventId: string | null;
   recipeTitle: string;
   recipeImageUrl: string | null;
@@ -46,6 +47,16 @@ export type RecipeReviewView = {
   reviewerClerkUserId: string | null;
   canEdit: boolean;
   canDelete: boolean;
+};
+
+export type RecipeVersionView = {
+  recipeVersionId: string | null;
+  versionNumber: number;
+  createdAt: string | null;
+  note: string | null;
+  isPrimary: boolean;
+  ingredients: string[];
+  changes: { added: string[]; removed: string[] };
 };
 
 export type RecipeHistoryRecipeOption = {
@@ -125,6 +136,8 @@ export type RecipeDetailView = {
   averageRating: number | null;
   reviewCount: number;
   reviews: RecipeReviewView[];
+  versions: RecipeVersionView[];
+  primaryVersionNumber: number;
   ingredients: Array<{
     id: string;
     originalText: string;
@@ -148,6 +161,23 @@ export type RecipeDetailView = {
   extractionSummary: string | null;
 };
 
+export type PublicRecipeDetailView = Pick<
+  RecipeDetailView,
+  | "recipeId"
+  | "title"
+  | "imageUrl"
+  | "previewImageUrl"
+  | "description"
+  | "sourceUrl"
+  | "dominantColor"
+  | "yieldText"
+  | "prepTime"
+  | "cookTime"
+  | "totalTime"
+  | "ingredients"
+  | "steps"
+>;
+
 export type RecipeFolderTreeNode = {
   folderId: string;
   name: string | null;
@@ -165,6 +195,7 @@ export type CanonicalIngredientOption = {
   ingredientKind: "family" | "base" | "leaf";
   parentCanonicalIngredientId: string | null;
   parentDisplayName: string | null;
+  catalogStatus: "provisional" | "confirmed";
 };
 
 export type IngredientReviewSuggestionView = {
@@ -185,6 +216,9 @@ export type IngredientReviewItemView = {
   recipeId: string;
   recipeTitle: string;
   originalText: string;
+  amountText: string | null;
+  unit: string | null;
+  notes: string | null;
   parsedIngredientText: string | null;
   normalizedIngredientPhrase: string | null;
   suggestedCanonicalIngredientId: string | null;
@@ -207,6 +241,11 @@ export type IngredientReviewQueuePageView = {
   pageSize: number;
   totalCount: number;
   totalPages: number;
+};
+
+export type IngredientCatalogItemView = CanonicalIngredientOption & {
+  aliases: string[];
+  usageCount: number;
 };
 
 export type BoardSyncSummary = {

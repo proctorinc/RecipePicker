@@ -78,6 +78,16 @@ describe("recipe extraction", () => {
     expect(result.attempts.some((attempt) => attempt.fetchStrategy === "recipe_anchor_follow")).toBe(false);
   });
 
+  it("does not treat instruction prose beside an ingredient heading as an ingredient", () => {
+    const html = `
+      <main><h1>Simple soup</h1><h2>Ingredients</h2>
+      <p>2 carrots</p><p>1 onion</p><p>Cook the vegetables over medium heat until softened.</p>
+      <h2>Instructions</h2><p>Heat oil in a pot.</p><p>Add vegetables and cook until tender.</p></main>`;
+    const result = extractRecipeFromHtml(html, "https://example.com/soup");
+
+    expect(result.recipe?.ingredients.map((ingredient) => ingredient.originalText)).toEqual(["2 carrots", "1 onion"]);
+  });
+
   it("short-circuits after a high-confidence direct fetch", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

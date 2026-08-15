@@ -1,534 +1,110 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
-import { Sparkles, Wand2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { reviewIngredientAction } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
-import type {
-  CanonicalIngredientOption,
-  IngredientReviewItemView,
-  IngredientReviewSuggestionView,
-} from "@/types/view-models";
+import type { CanonicalIngredientOption, IngredientReviewItemView } from "@/types/view-models";
 
-const initialState: ActionState = {
-  status: "idle",
-  message: "",
-};
+const initialState: ActionState = { status: "idle", message: "" };
 
-type ReviewMode = "match_existing" | "create_new";
-
-export function IngredientReviewTable({
-  items,
-  canonicalOptions,
-}: {
+export function IngredientReviewTable({ items, canonicalOptions }: {
   items: IngredientReviewItemView[];
   canonicalOptions: CanonicalIngredientOption[];
 }) {
   const router = useRouter();
-  const [hiddenIngredientIds, setHiddenIngredientIds] = useState<string[]>([]);
-  const [activeIngredientId, setActiveIngredientId] = useState<string | null>(null);
+  const [open, setOpen] = useState(items.length > 0);
+  const [index, setIndex] = useState(0);
   const [isRefreshing, startTransition] = useTransition();
-  const visibleItems = items.filter((item) => !hiddenIngredientIds.includes(item.ingredientId));
-  const activeItem = visibleItems.find((item) => item.ingredientId === activeIngredientId) ?? null;
+  const item = items[index] ?? null;
 
-  useEffect(() => {
-    setHiddenIngredientIds((current) => current.filter((ingredientId) => items.some((item) => item.ingredientId === ingredientId)));
-  }, [items]);
-
-  useEffect(() => {
-    if (activeIngredientId && !visibleItems.some((item) => item.ingredientId === activeIngredientId)) {
-      setActiveIngredientId(null);
-    }
-  }, [activeIngredientId, visibleItems]);
-
-  if (items.length === 0) {
-    return <p className="text-sm text-muted-foreground">No ingredient matches are waiting for review.</p>;
-  }
-
-  if (visibleItems.length === 0) {
-    return <p className="text-sm text-muted-foreground">Loading the next pending ingredients...</p>;
-  }
+  useEffect(() => { setOpen(items.length > 0); setIndex((value) => Math.min(value, Math.max(items.length - 1, 0))); }, [items]);
+  if (!item) return <p className="text-sm text-muted-foreground">No ingredients are waiting for review.</p>;
 
   return (
     <>
-      <div className="space-y-4">
-        <div className="rounded-[24px] border border-border/60 bg-secondary/20 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
-            <p>{visibleItems.length} ingredients currently need review on this page</p>
-            {isRefreshing ? <p>Loading the next pending ingredients...</p> : null}
-          </div>
-        </div>
-
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Ingredient</TableHead>
-              <TableHead>Current guess</TableHead>
-              <TableHead>Recipe</TableHead>
-              <TableHead>Signals</TableHead>
-              <TableHead className="w-[120px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {visibleItems.map((item) => (
-              <TableRow key={item.ingredientId}>
-                <TableCell>
-                  <div className="space-y-1">
-                    <p className="font-medium">{item.originalText}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Parsed as: {item.parsedIngredientText ?? item.normalizedIngredientPhrase ?? "unknown"}
-                    </p>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground">{describeCurrentSuggestion(item)}</p>
-                    {item.suggestedParentCanonicalName ? (
-                      <p className="text-xs text-muted-foreground">Family: {item.suggestedParentCanonicalName}</p>
-                    ) : null}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="space-y-1">
-                    <p className="font-medium">{item.recipeTitle}</p>
-                    {item.sourceUrl ? (
-                      <a
-                        href={item.sourceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-muted-foreground underline underline-offset-4"
-                      >
-                        Open source recipe
-                      </a>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">No source URL</p>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-2">
-                    {item.matchConfidence ? <Badge variant="outline">{item.matchConfidence}% confidence</Badge> : null}
-                    {item.matchedBy ? <Badge variant="secondary">{formatMatchSource(item.matchedBy)}</Badge> : null}
-                    {item.occurrenceCount > 1 ? <Badge variant="warning">{item.occurrenceCount} uses</Badge> : null}
-                    {item.aiSuggestions.length > 0 ? <Badge variant="outline">{item.aiSuggestions.length} AI suggestions</Badge> : null}
-                  </div>
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button type="button" variant="secondary" onClick={() => setActiveIngredientId(item.ingredientId)}>
-                    Resolve
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      <div className="rounded-[24px] border border-border/60 bg-secondary/20 p-5">
+        <p className="font-medium">{items.length} ingredient{items.length === 1 ? "" : "s"} waiting on this page</p>
+        <p className="mt-1 text-sm text-muted-foreground">Review one at a time. Accept a good parse, adjust it, or mark it as not an ingredient.</p>
+        <Button className="mt-4" onClick={() => setOpen(true)}>Review next ingredient</Button>
+        {isRefreshing ? <p className="mt-3 text-sm text-muted-foreground">Loading more ingredients…</p> : null}
       </div>
-
-      <Dialog open={Boolean(activeItem)} onOpenChange={(open) => setActiveIngredientId(open ? activeIngredientId : null)}>
-        {activeItem ? (
-          <DialogContent className="w-[min(92vw,52rem)] max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Resolve ingredient</DialogTitle>
-              <DialogDescription>
-                Review the important context for `{activeItem.originalText}` and save the right ingredient mapping.
-              </DialogDescription>
-            </DialogHeader>
-            <IngredientReviewForm
-              item={activeItem}
-              canonicalOptions={canonicalOptions}
-              onResolved={() => {
-                setHiddenIngredientIds((current) =>
-                  current.includes(activeItem.ingredientId) ? current : current.concat(activeItem.ingredientId),
-                );
-                setActiveIngredientId(null);
-                startTransition(() => {
-                  router.refresh();
-                });
-              }}
-            />
-          </DialogContent>
-        ) : null}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="w-[min(94vw,44rem)] max-h-[88vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Review ingredient {index + 1} of {items.length}</DialogTitle>
+            <DialogDescription>{item.recipeTitle}</DialogDescription>
+          </DialogHeader>
+          <IngredientReviewForm item={item} canonicalOptions={canonicalOptions} onDone={() => {
+            if (index + 1 < items.length) setIndex(index + 1);
+            else { setOpen(false); startTransition(() => router.refresh()); }
+          }} />
+        </DialogContent>
       </Dialog>
     </>
   );
 }
 
-function IngredientReviewForm({
-  item,
-  canonicalOptions,
-  onResolved,
-}: {
+function IngredientReviewForm({ item, canonicalOptions, onDone }: {
   item: IngredientReviewItemView;
   canonicalOptions: CanonicalIngredientOption[];
-  onResolved: () => void;
+  onDone: () => void;
 }) {
-  const [reviewMode, setReviewMode] = useState<ReviewMode>(
-    item.suggestedAction === "create_new" ? "create_new" : "match_existing",
-  );
+  const [amountText, setAmountText] = useState(item.amountText ?? "");
+  const [unit, setUnit] = useState(item.unit ?? "");
+  const [ingredientText, setIngredientText] = useState(item.parsedIngredientText ?? "");
+  const [notes, setNotes] = useState(item.notes ?? "");
   const [canonicalSearch, setCanonicalSearch] = useState("");
-  const [canonicalIngredientId, setCanonicalIngredientId] = useState(item.suggestedCanonicalIngredientId ?? "");
-  const [newCanonicalName, setNewCanonicalName] = useState(
-    item.suggestedAction === "create_new" ? item.suggestedCanonicalName ?? item.normalizedIngredientPhrase ?? "" : "",
-  );
-  const [parentCanonicalIngredientId, setParentCanonicalIngredientId] = useState(item.suggestedParentCanonicalIngredientId ?? "");
-  const [ingredientKind, setIngredientKind] = useState<"family" | "base" | "leaf">(item.suggestedIngredientKind ?? "leaf");
-  const [aliasText, setAliasText] = useState(item.originalText);
-  const [attributes, setAttributes] = useState(item.suggestedAttributes.join(", "));
-  const [didResolve, setDidResolve] = useState(false);
+  const [canonicalIngredientId, setCanonicalIngredientId] = useState("");
   const [state, formAction] = useActionState(reviewIngredientAction, initialState);
 
   useEffect(() => {
-    setReviewMode(item.suggestedAction === "create_new" ? "create_new" : "match_existing");
-    setCanonicalSearch("");
-    setCanonicalIngredientId(item.suggestedCanonicalIngredientId ?? "");
-    setNewCanonicalName(item.suggestedAction === "create_new" ? item.suggestedCanonicalName ?? item.normalizedIngredientPhrase ?? "" : "");
-    setParentCanonicalIngredientId(item.suggestedParentCanonicalIngredientId ?? "");
-    setIngredientKind(item.suggestedIngredientKind ?? "leaf");
-    setAliasText(item.originalText);
-    setAttributes(item.suggestedAttributes.join(", "));
-    setDidResolve(false);
+    setAmountText(item.amountText ?? ""); setUnit(item.unit ?? ""); setIngredientText(item.parsedIngredientText ?? "");
+    setNotes(item.notes ?? ""); setCanonicalSearch(""); setCanonicalIngredientId("");
   }, [item]);
-
-  const filteredCanonicalOptions = useMemo(() => {
+  useEffect(() => { if (state.status === "success") { toast.success(state.message); onDone(); } else if (state.status === "error") toast.error(state.message); }, [state, onDone]);
+  const matchingOptions = useMemo(() => {
     const query = canonicalSearch.trim().toLowerCase();
-
-    if (!query) {
-      return canonicalOptions;
-    }
-
-    return canonicalOptions.filter((option) => {
-      const haystack = [option.displayName, option.parentDisplayName, option.ingredientKind].filter(Boolean).join(" ").toLowerCase();
-      return haystack.includes(query);
-    });
+    return query ? canonicalOptions.filter((option) => `${option.displayName} ${option.parentDisplayName ?? ""}`.toLowerCase().includes(query)).slice(0, 12) : [];
   }, [canonicalOptions, canonicalSearch]);
 
-  const familyOptions = useMemo(
-    () => canonicalOptions.filter((option) => option.ingredientKind === "family"),
-    [canonicalOptions],
-  );
-
-  useEffect(() => {
-    if (state.status === "success" && !didResolve) {
-      setDidResolve(true);
-      toast.success(state.message);
-      onResolved();
-    } else if (state.status === "error") {
-      toast.error(state.message);
-    }
-  }, [didResolve, onResolved, state]);
-
-  return (
-    <form action={formAction} className="space-y-5">
-      <input type="hidden" name="ingredientId" value={item.ingredientId} />
-      <input type="hidden" name="recipeId" value={item.recipeId} />
-      <input type="hidden" name="normalizedIngredientPhrase" value={item.normalizedIngredientPhrase ?? ""} />
-      <input type="hidden" name="aiSuggestionsJson" value={JSON.stringify(item.aiSuggestions)} />
-      <input type="hidden" name="reviewMode" value={reviewMode} />
-      <input type="hidden" name="fallbackSuggestedCanonicalIngredientId" value={item.suggestedCanonicalIngredientId ?? ""} />
-      <input type="hidden" name="fallbackSuggestedCanonicalName" value={item.suggestedCanonicalName ?? ""} />
-      <input
-        type="hidden"
-        name="fallbackSuggestedParentCanonicalIngredientId"
-        value={item.suggestedParentCanonicalIngredientId ?? ""}
-      />
-      <input type="hidden" name="fallbackSuggestedIngredientKind" value={item.suggestedIngredientKind ?? ""} />
-      <input type="hidden" name="fallbackSuggestedAttributes" value={item.suggestedAttributes.join(",")} />
-
-      <div className="space-y-3 rounded-[28px] border border-border/70 bg-secondary/20 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{item.recipeTitle}</p>
-            <p className="font-medium">{item.originalText}</p>
-            <p className="text-sm text-muted-foreground">
-              Parsed as: {item.parsedIngredientText ?? item.normalizedIngredientPhrase ?? "unknown"}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {item.matchConfidence ? <Badge variant="outline">{item.matchConfidence}% confidence</Badge> : null}
-            {item.matchedBy ? <Badge variant="secondary">{formatMatchSource(item.matchedBy)}</Badge> : null}
-            {item.occurrenceCount > 1 ? <Badge variant="warning">Shows up {item.occurrenceCount} times</Badge> : null}
-          </div>
-        </div>
-
-        <div className="rounded-[22px] bg-background/80 p-4">
-          <p className="text-sm font-medium">What the app thinks right now</p>
-          <p className="mt-2 text-sm text-muted-foreground">{describeCurrentSuggestion(item)}</p>
-          {item.suggestedParentCanonicalName ? (
-            <p className="mt-2 text-xs text-muted-foreground">Family context: {item.suggestedParentCanonicalName}</p>
-          ) : null}
-          {item.suggestedAction !== "keep_unresolved" ? (
-            <div className="mt-3">
-              <Button type="submit" name="acceptCurrentSuggestion" value="1" variant="outline" size="sm">
-                Accept current suggestion
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {item.aiSuggestions.length > 0 ? (
-        <div className="space-y-3 rounded-[22px] border border-amber-200 bg-amber-50/70 p-4">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-amber-700" />
-            <p className="text-sm font-medium text-amber-950">AI suggestions</p>
-          </div>
-          <p className="text-sm text-amber-900">
-            Accept one of these if it looks right, or use the guided editor below to adjust it.
-          </p>
-          <div className="space-y-3">
-            {item.aiSuggestions.map((suggestion, index) => (
-              <SuggestionCard key={`${item.ingredientId}-${index}`} suggestion={suggestion} index={index} />
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      <Tabs value={reviewMode} onValueChange={(value) => setReviewMode(value as ReviewMode)} className="space-y-4">
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Choose how to resolve this ingredient</p>
-          <TabsList>
-            <TabsTrigger value="match_existing">Match to existing ingredient</TabsTrigger>
-            <TabsTrigger value="create_new">Create new ingredient</TabsTrigger>
-          </TabsList>
-        </div>
-
-        <TabsContent value="match_existing" className="space-y-4">
-          <div className="rounded-[22px] bg-background/80 p-4 text-sm text-muted-foreground">
-            Use this when the phrase is really another name for something you already track, like `scallions` to `green onion`.
-          </div>
-          <div className="grid gap-3 lg:grid-cols-2">
-            <label className="space-y-2">
-              <span className="text-sm font-medium">Search existing ingredients</span>
-              <Input
-                value={canonicalSearch}
-                onChange={(event) => setCanonicalSearch(event.target.value)}
-                placeholder="Filter the ingredient list"
-              />
-            </label>
-            <label className="space-y-2">
-              <span className="text-sm font-medium">Choose the best existing ingredient</span>
-              <select
-                name="canonicalIngredientId"
-                value={canonicalIngredientId}
-                onChange={(event) => setCanonicalIngredientId(event.target.value)}
-                className="h-11 w-full rounded-full border border-border bg-background px-4 text-sm shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">Choose one</option>
-                {filteredCanonicalOptions.map((option) => (
-                  <option key={option.canonicalIngredientId} value={option.canonicalIngredientId}>
-                    {formatCanonicalOption(option)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            If this ingredient is only a close variant, keep the match here and use attributes instead of creating something new.
-          </p>
-        </TabsContent>
-
-        <TabsContent value="create_new" className="space-y-4">
-          <div className="rounded-[22px] bg-background/80 p-4 text-sm text-muted-foreground">
-            Use this when the ingredient is materially distinct and should become its own tracked item, like `chicken breast`.
-          </div>
-          <div className="grid gap-3 lg:grid-cols-3">
-            <label className="space-y-2 lg:col-span-2">
-              <span className="text-sm font-medium">New ingredient name</span>
-              <Input
-                name="newCanonicalName"
-                value={newCanonicalName}
-                onChange={(event) => setNewCanonicalName(event.target.value)}
-                placeholder="Example: chicken breast"
-              />
-            </label>
-            <label className="space-y-2">
-              <span className="text-sm font-medium">Ingredient type</span>
-              <select
-                name="ingredientKind"
-                value={ingredientKind}
-                onChange={(event) => setIngredientKind(event.target.value as "family" | "base" | "leaf")}
-                className="h-11 w-full rounded-full border border-border bg-background px-4 text-sm shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="leaf">Specific ingredient</option>
-                <option value="family">Broader family</option>
-                <option value="base">Base with attribute variants</option>
-              </select>
-            </label>
-          </div>
-          <label className="space-y-2">
-            <span className="text-sm font-medium">Optional parent family</span>
-            <select
-              name="parentCanonicalIngredientId"
-              value={parentCanonicalIngredientId}
-              onChange={(event) => setParentCanonicalIngredientId(event.target.value)}
-              className="h-11 w-full rounded-full border border-border bg-background px-4 text-sm shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="">No parent family</option>
-              {familyOptions.map((option) => (
-                <option key={option.canonicalIngredientId} value={option.canonicalIngredientId}>
-                  {option.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="text-xs text-muted-foreground">
-            Example: create `chicken breast` with parent `chicken`. For a broad family itself, leave the parent empty and set the type to `Broader family`.
-          </p>
-        </TabsContent>
-      </Tabs>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <label className="space-y-2">
-          <span className="text-sm font-medium">Attributes to keep with this ingredient</span>
-          <Input
-            name="attributes"
-            value={attributes}
-            onChange={(event) => setAttributes(event.target.value)}
-            placeholder="light, unsalted, fresh"
-          />
-        </label>
-        <label className="space-y-2">
-          <span className="text-sm font-medium">Alias text to remember for future imports</span>
-          <Input
-            name="aliasText"
-            value={aliasText}
-            onChange={(event) => setAliasText(event.target.value)}
-            placeholder="Usually keep the original wording here"
-          />
-        </label>
-      </div>
-
-      <div className="rounded-[22px] bg-background/80 p-4 text-sm text-muted-foreground">
-        <p className="font-medium text-foreground">Save behavior</p>
-        <label className="mt-3 flex items-start gap-3">
-          <input type="checkbox" name="savePhraseMapping" defaultChecked className="mt-1 h-4 w-4 rounded border border-border" />
-          <span>
-            Save this phrase as a reusable mapping.
-            <span className="block text-xs text-muted-foreground">
-              This will help future imports of `{item.normalizedIngredientPhrase ?? item.originalText}`.
-            </span>
-          </span>
-        </label>
-        <label className="mt-3 flex items-start gap-3">
-          <input type="checkbox" name="saveAlias" defaultChecked className="mt-1 h-4 w-4 rounded border border-border" />
-          <span>
-            Save the alias text too.
-            <span className="block text-xs text-muted-foreground">
-              Use this when the original wording is a useful synonym you want the app to remember.
-            </span>
-          </span>
-        </label>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" variant="secondary">
-          Confirm resolution
-        </Button>
-        {item.sourceUrl ? (
-          <a href={item.sourceUrl} target="_blank" rel="noreferrer" className="text-sm text-muted-foreground underline underline-offset-4">
-            Open source recipe
-          </a>
-        ) : null}
-      </div>
-    </form>
-  );
-}
-
-function SuggestionCard({
-  suggestion,
-  index,
-}: {
-  suggestion: IngredientReviewSuggestionView;
-  index: number;
-}) {
-  return (
-    <div className="rounded-[20px] bg-white/80 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="secondary">{formatSuggestionAction(suggestion.action)}</Badge>
-            <Badge variant="outline">{suggestion.confidence}% confidence</Badge>
-          </div>
-          <p className="text-sm text-foreground">{formatSuggestionLabel(suggestion)}</p>
-          <p className="text-sm text-muted-foreground">{suggestion.reason}</p>
-        </div>
-        <Button type="submit" name="acceptSuggestionIndex" value={String(index)} variant="outline" size="sm">
-          <Wand2 className="h-4 w-4" />
-          Accept this suggestion
-        </Button>
-      </div>
+  return <form action={formAction} className="space-y-5">
+    <input type="hidden" name="ingredientId" value={item.ingredientId} />
+    <input type="hidden" name="recipeId" value={item.recipeId} />
+    <input type="hidden" name="canonicalIngredientId" value={canonicalIngredientId} />
+    <div className="rounded-2xl border border-border bg-secondary/20 p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Original recipe text</p>
+      <p className="mt-2 font-medium">{item.originalText}</p>
+      {item.sourceUrl ? <a className="mt-2 inline-block text-sm underline underline-offset-4" target="_blank" rel="noreferrer" href={item.sourceUrl}>Open recipe source</a> : null}
     </div>
-  );
+    <div className="space-y-3">
+      <div><p className="font-medium">What we extracted</p><p className="text-sm text-muted-foreground">Correct any field that looks wrong, then accept it.</p></div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Amount" name="amountText" value={amountText} onChange={setAmountText} placeholder="e.g. 2" />
+        <Field label="Unit" name="unit" value={unit} onChange={setUnit} placeholder="e.g. cups" />
+      </div>
+      <Field label="What is the ingredient?" name="ingredientText" value={ingredientText} onChange={setIngredientText} placeholder="e.g. yellow onion" required />
+      <Field label="Notes (optional)" name="notes" value={notes} onChange={setNotes} placeholder="e.g. finely chopped" />
+    </div>
+    <details className="rounded-2xl border border-border p-4">
+      <summary className="cursor-pointer font-medium">Optional: use an existing ingredient or see related matches</summary>
+      <p className="mt-2 text-sm text-muted-foreground">Leave this alone to create a provisional ingredient you can organize later.</p>
+      <Input className="mt-3" value={canonicalSearch} onChange={(event) => setCanonicalSearch(event.target.value)} placeholder="Search existing ingredients" />
+      {matchingOptions.length ? <div className="mt-2 space-y-1">{matchingOptions.map((option) => <button key={option.canonicalIngredientId} type="button" onClick={() => { setCanonicalIngredientId(option.canonicalIngredientId); setIngredientText(option.displayName); }} className={`block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-secondary ${canonicalIngredientId === option.canonicalIngredientId ? "bg-secondary" : ""}`}>{option.displayName}{option.parentDisplayName ? ` · ${option.parentDisplayName}` : ""}</button>)}</div> : null}
+      {canonicalIngredientId ? <p className="mt-2 text-sm text-muted-foreground">This will be saved as a synonym of the selected existing ingredient.</p> : null}
+    </details>
+    <div className="flex flex-wrap gap-3">
+      <Button type="submit" name="action" value="accept">Accept{item.parsedIngredientText !== ingredientText || (item.amountText ?? "") !== amountText || (item.unit ?? "") !== unit || (item.notes ?? "") !== notes ? " with changes" : ""}</Button>
+      <Button type="submit" name="action" value="reject" variant="outline">Not an ingredient</Button>
+    </div>
+  </form>;
 }
 
-function formatCanonicalOption(option: CanonicalIngredientOption) {
-  const suffix = option.parentDisplayName ? ` -> ${option.parentDisplayName}` : "";
-  return `${option.displayName} (${formatIngredientKind(option.ingredientKind)})${suffix}`;
-}
-
-function formatIngredientKind(value: "family" | "base" | "leaf" | null) {
-  switch (value) {
-    case "family":
-      return "family";
-    case "base":
-      return "base";
-    case "leaf":
-      return "specific";
-    default:
-      return "ingredient";
-  }
-}
-
-function describeCurrentSuggestion(item: IngredientReviewItemView) {
-  if (item.suggestedAction === "create_new" && item.suggestedCanonicalName) {
-    return `Create a new ingredient named ${item.suggestedCanonicalName}${item.suggestedParentCanonicalName ? ` under ${item.suggestedParentCanonicalName}` : ""}.`;
-  }
-
-  if (item.suggestedCanonicalName) {
-    return `Match this to ${item.suggestedCanonicalName}${item.suggestedAttributes.length > 0 ? ` with attributes ${item.suggestedAttributes.join(", ")}` : ""}.`;
-  }
-
-  return "No trustworthy existing match was found yet. You can match it manually or create a new ingredient.";
-}
-
-function formatSuggestionAction(action: IngredientReviewSuggestionView["action"]) {
-  switch (action) {
-    case "match_existing":
-      return "Match existing";
-    case "create_new":
-      return "Create new";
-    case "keep_unresolved":
-      return "Needs review";
-  }
-}
-
-function formatSuggestionLabel(suggestion: IngredientReviewSuggestionView) {
-  if (suggestion.action === "match_existing") {
-    return `Use existing ingredient: ${suggestion.canonicalName ?? "unknown"}`;
-  }
-
-  if (suggestion.action === "create_new") {
-    return `Create ${suggestion.newCanonicalName ?? "new ingredient"}${suggestion.parentCanonicalName ? ` under ${suggestion.parentCanonicalName}` : ""}`;
-  }
-
-  return "Keep unresolved for manual review";
-}
-
-function formatMatchSource(value: string) {
-  return value.replaceAll("_", " ");
+function Field({ label, name, value, onChange, placeholder, required = false }: { label: string; name: string; value: string; onChange: (value: string) => void; placeholder: string; required?: boolean }) {
+  return <label className="space-y-2"><span className="text-sm font-medium">{label}</span><Input name={name} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} required={required} /></label>;
 }
