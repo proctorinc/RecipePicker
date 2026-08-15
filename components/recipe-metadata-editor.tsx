@@ -18,7 +18,12 @@ const initialActionState: ActionState = {
   message: "",
 };
 
-export const RecipeEditingContext = createContext({ isEditing: false, formId: "", setHasContentChanges: (_hasChanges: boolean) => {} });
+export const RecipeEditingContext = createContext({
+  isEditing: false,
+  formId: "",
+  contentResetVersion: 0,
+  setHasContentChanges: (_hasChanges: boolean) => {},
+});
 
 type RecipeMetadataEditorProps = {
   recipeId: string;
@@ -53,6 +58,7 @@ export function RecipeMetadataEditor({
   const [displayTitle, setDisplayTitle] = useState(title);
   const [displayDescription, setDisplayDescription] = useState(description ?? "");
   const [hasContentChanges, setHasContentChanges] = useState(false);
+  const [contentResetVersion, setContentResetVersion] = useState(0);
   const [saveChoiceOpen, setSaveChoiceOpen] = useState(false);
   const [state, formAction, pending] = useActionState(saveRecipeMetadataAction, initialActionState);
   const formId = `recipe-metadata-${recipeId}`;
@@ -109,8 +115,17 @@ export function RecipeMetadataEditor({
     setSaveChoiceOpen(false);
   }
 
+  function cancelEditing() {
+    setDraftTitle(displayTitle);
+    setDraftDescription(displayDescription);
+    setHasContentChanges(false);
+    setContentResetVersion((version) => version + 1);
+    setSaveChoiceOpen(false);
+    setIsEditing(false);
+  }
+
   return (
-    <RecipeEditingContext.Provider value={{ isEditing, formId, setHasContentChanges }}>
+    <RecipeEditingContext.Provider value={{ isEditing, formId, contentResetVersion, setHasContentChanges }}>
       <div className="contents">
         <form
           id={formId}
@@ -135,6 +150,7 @@ export function RecipeMetadataEditor({
                 pending={pending}
                 hasChanges={hasChanges}
                 onSave={() => setSaveChoiceOpen(true)}
+                onCancel={cancelEditing}
                 onEnableEditing={() => {
                   setDraftTitle(displayTitle);
                   setDraftDescription(displayDescription);
@@ -217,29 +233,37 @@ function EditSubmitButton({
   pending,
   hasChanges,
   onSave,
+  onCancel,
   onEnableEditing,
 }: {
   isEditing: boolean;
   pending: boolean;
   hasChanges: boolean;
   onSave: () => void;
+  onCancel: () => void;
   onEnableEditing: () => void;
 }) {
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-2">
+        <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>Cancel</Button>
+        <Button type="button" disabled={pending || !hasChanges} onClick={onSave}>
+          {pending ? "Saving..." : "Save"}
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <Button
       type="button"
-      disabled={pending || (isEditing && !hasChanges)}
+      disabled={pending}
       onClick={() => {
-        if (isEditing) {
-          onSave();
-          return;
-        }
-
         onEnableEditing();
       }}
     >
-      {!isEditing ? <Pencil className="size-4" /> : null}
-      {pending ? "Saving..." : isEditing ? "Save" : "Edit"}
+      <Pencil className="size-4" />
+      {pending ? "Saving..." : "Edit"}
     </Button>
   );
 }

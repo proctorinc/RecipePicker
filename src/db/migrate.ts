@@ -1,11 +1,79 @@
 import process from "node:process";
 
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { migrate as migrateSqlite } from "drizzle-orm/better-sqlite3/migrator";
 import { migrate as migrateLibsql } from "drizzle-orm/libsql/migrator";
+import { readMigrationFiles } from "drizzle-orm/migrator";
+import { sql } from "drizzle-orm";
 
 import { logInfo, maybeWithSqliteTarget, runScriptWithLogging } from "@/lib/server/logger";
 import type { DatabaseClient } from "./client.js";
 import { createDatabase } from "./client.js";
+
+type AppliedMigration = {
+  hash: string;
+};
+
+/**
+ * Drizzle's SQLite migrators select only the greatest `created_at` value from
+ * __drizzle_migrations. That makes a bad future journal timestamp skip every
+ * later migration whose timestamp is lower, even if it has never been run.
+ *
+ * The migration content hash is the stable identity of a migration, so use it
+ * to determine which files still need to run. Keep recording `created_at` for
+ * compatibility with Drizzle tooling, but never use it to decide whether a
+ * migration has been applied.
+ */
+async function migrateByHash(
+  db: DatabaseClient,
+  driver: "sqlite" | "turso",
+) {
+  const migrations = readMigrationFiles({ migrationsFolder: "drizzle" });
+
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS __drizzle_migrations (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at numeric
+    )
+  `);
+
+  const appliedMigrations = await db.all<AppliedMigration>(
+    sql`SELECT hash FROM __drizzle_migrations`,
+  );
+  const appliedHashes = new Set(appliedMigrations.map(({ hash }) => hash));
+
+  for (const migration of migrations) {
+    if (appliedHashes.has(migration.hash)) {
+      continue;
+    }
+
+    if (driver === "sqlite") {
+      const sqliteDb = db as Parameters<typeof migrateSqlite>[0];
+      sqliteDb.transaction((tx) => {
+        for (const statement of migration.sql) {
+          tx.run(sql.raw(statement));
+        }
+
+        tx.run(sql`
+          INSERT INTO __drizzle_migrations (hash, created_at)
+          VALUES (${migration.hash}, ${migration.folderMillis})
+        `);
+      });
+    } else {
+      const libsqlDb = db as Parameters<typeof migrateLibsql>[0];
+      await libsqlDb.transaction(async (tx) => {
+        for (const statement of migration.sql) {
+          await tx.run(sql.raw(statement));
+        }
+
+        await tx.run(sql`
+          INSERT INTO __drizzle_migrations (hash, created_at)
+          VALUES (${migration.hash}, ${migration.folderMillis})
+        `);
+      });
+    }
+  }
+}
 
 async function main() {
   const { db, driver, sqlite, targetLabel } = createDatabase();
@@ -17,18 +85,7 @@ async function main() {
       },
       ...maybeWithSqliteTarget(targetLabel),
     });
-    if (driver === "sqlite") {
-      migrate(db as DatabaseClient & Parameters<typeof migrate>[0], {
-        migrationsFolder: "drizzle",
-      });
-    } else {
-      await migrateLibsql(
-        db as DatabaseClient & Parameters<typeof migrateLibsql>[0],
-        {
-          migrationsFolder: "drizzle",
-        },
-      );
-    }
+    await migrateByHash(db, driver);
 
     logInfo("db.manual_migration.completed", {
       result: {

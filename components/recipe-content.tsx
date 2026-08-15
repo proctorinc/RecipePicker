@@ -1,7 +1,7 @@
 "use client";
 
 import { useContext, useEffect, useState, type DragEvent, type ReactNode } from "react";
-import { GripVertical, Plus, Trash2 } from "lucide-react";
+import { GripVertical, Plus, RotateCcw, Trash2 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,20 +25,20 @@ export function RecipeContent({
   emptySteps = <UnavailableContent />,
   showEmptySteps = true,
 }: RecipeContentProps) {
-  const { isEditing, formId, setHasContentChanges } = useContext(RecipeEditingContext);
-  const [ingredients, setIngredients] = useState(recipe.ingredients);
-  const [steps, setSteps] = useState(recipe.steps);
+  const { isEditing, formId, contentResetVersion, setHasContentChanges } = useContext(RecipeEditingContext);
+  const [ingredients, setIngredients] = useState<Array<RecipeIngredientDraft>>(recipe.ingredients);
+  const [steps, setSteps] = useState<Array<RecipeStepDraft>>(recipe.steps);
   const [draggedStepId, setDraggedStepId] = useState<string | null>(null);
 
   useEffect(() => {
     setIngredients(recipe.ingredients);
     setSteps(recipe.steps);
-  }, [recipe.ingredients, recipe.steps]);
+  }, [contentResetVersion, recipe.ingredients, recipe.steps]);
 
   useEffect(() => {
-    const ingredientsChanged = JSON.stringify(ingredients.map(({ id, originalText, notes }) => ({ id, originalText, notes })))
+    const ingredientsChanged = JSON.stringify(ingredients.map(({ id, originalText, notes, isPendingDeletion }) => ({ id, originalText, notes, isPendingDeletion })))
       !== JSON.stringify(recipe.ingredients.map(({ id, originalText, notes }) => ({ id, originalText, notes })));
-    const stepsChanged = JSON.stringify(steps.map(({ id, section, text }) => ({ id, section, text })))
+    const stepsChanged = JSON.stringify(steps.map(({ id, section, text, isPendingDeletion }) => ({ id, section, text, isPendingDeletion })))
       !== JSON.stringify(recipe.steps.map(({ id, section, text }) => ({ id, section, text })));
 
     setHasContentChanges(isEditing && (ingredientsChanged || stepsChanged));
@@ -100,22 +100,25 @@ export function RecipeContent({
           <CardContent className="px-10">
             {isEditing ? (
               <section className="space-y-3">
-                <input form={formId} type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.map(({ id, originalText, notes }) => ({ id, originalText, notes })))} />
+                <input form={formId} type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.filter((ingredient) => !ingredient.isPendingDeletion).map(({ id, originalText, notes }) => ({ id, originalText, notes })))} />
                 {ingredients.map((ingredient, index) => (
-                  <div key={ingredient.id} className="flex items-center gap-2">
+                  <div key={ingredient.id} className={`flex items-center gap-2 ${ingredient.isPendingDeletion ? "opacity-50" : ""}`}>
                       <Input
                         value={ingredient.originalText}
+                        disabled={ingredient.isPendingDeletion}
                         onChange={(event) => setIngredients((current) => current.map((item) => item.id === ingredient.id ? { ...item, originalText: event.target.value } : item))}
                         aria-label={`Ingredient ${index + 1}`}
+                        className={ingredient.isPendingDeletion ? "line-through" : undefined}
                       />
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      onClick={() => setIngredients((current) => current.filter((item) => item.id !== ingredient.id))}
-                      aria-label={`Delete ingredient ${index + 1}`}
+                      className="h-12 w-12 shrink-0"
+                      onClick={() => setIngredients((current) => current.map((item) => item.id === ingredient.id ? { ...item, isPendingDeletion: !item.isPendingDeletion } : item))}
+                      aria-label={`${ingredient.isPendingDeletion ? "Restore" : "Remove"} ingredient ${index + 1}`}
                     >
-                      <Trash2 className="size-4" />
+                      {ingredient.isPendingDeletion ? <RotateCcw className="size-5" /> : <Trash2 className="size-5" />}
                     </Button>
                   </div>
                 ))}
@@ -134,7 +137,7 @@ export function RecipeContent({
         <CardContent>
           {isEditing ? (
               <section className="space-y-4">
-                <input form={formId} type="hidden" name="stepsJson" value={JSON.stringify(steps)} />
+                <input form={formId} type="hidden" name="stepsJson" value={JSON.stringify(steps.filter((step) => !step.isPendingDeletion).map(({ id, section, text }) => ({ id, section, text })))} />
                 {steps.map((step, index) => (
                   <div
                     key={step.id}
@@ -143,11 +146,12 @@ export function RecipeContent({
                       if (draggedStepId) moveStep(draggedStepId, step.id);
                       setDraggedStepId(null);
                     }}
-                    className="flex gap-2 rounded-[24px] bg-secondary/40 p-4"
+                    className={`flex gap-2 rounded-[24px] bg-secondary/40 p-4 ${step.isPendingDeletion ? "opacity-50" : ""}`}
                   >
                     <button
                       type="button"
-                      draggable
+                      draggable={!step.isPendingDeletion}
+                      disabled={step.isPendingDeletion}
                       onDragStart={() => setDraggedStepId(step.id)}
                       onDragEnd={() => setDraggedStepId(null)}
                       aria-label={`Reorder step ${index + 1}`}
@@ -162,14 +166,15 @@ export function RecipeContent({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        onClick={() => setSteps((current) => current.filter((item) => item.id !== step.id))}
-                        aria-label={`Delete step ${index + 1}`}
+                        onClick={() => setSteps((current) => current.map((item) => item.id === step.id ? { ...item, isPendingDeletion: !item.isPendingDeletion } : item))}
+                        aria-label={`${step.isPendingDeletion ? "Restore" : "Remove"} step ${index + 1}`}
                       >
-                        <Trash2 className="size-4" />
+                        {step.isPendingDeletion ? <RotateCcw className="size-4" /> : <Trash2 className="size-4" />}
                       </Button>
                     </div>
                     <Textarea
                       value={step.text}
+                      disabled={step.isPendingDeletion}
                       onChange={(event) => setSteps((current) => current.map((item) => item.id === step.id ? { ...item, text: event.target.value } : item))}
                       aria-label={`Step ${index + 1}`}
                       className="min-h-32 bg-white"
@@ -200,6 +205,14 @@ export function RecipeContent({
     </div>
   );
 }
+
+type RecipeIngredientDraft = PublicRecipeDetailView["ingredients"][number] & {
+  isPendingDeletion?: boolean;
+};
+
+type RecipeStepDraft = PublicRecipeDetailView["steps"][number] & {
+  isPendingDeletion?: boolean;
+};
 
 function createDraftId() {
   return `new-${crypto.randomUUID()}`;

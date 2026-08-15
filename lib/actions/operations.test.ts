@@ -99,6 +99,7 @@ import {
   cancelRecipeParseJobAction,
   createRecipeEventAction,
   createRecipeEventsAction,
+  removeUnusedProvisionalIngredientsAction,
   rerunRecipesAction,
   resumeRecipeParseJobAction,
   saveAiConnectionAction,
@@ -151,6 +152,48 @@ describe("saveAiConnectionAction", () => {
     expect(mockGetStoredHouseholdAiKey).not.toHaveBeenCalled();
     expect(mockTestHouseholdAiConnection).not.toHaveBeenCalled();
     expect(mockUpsertHouseholdAiConnection).not.toHaveBeenCalled();
+  });
+});
+
+describe("removeUnusedProvisionalIngredientsAction", () => {
+  it("keeps a provisional ingredient used by a recipe alternative", async () => {
+    mockRequireHouseholdContext.mockResolvedValue({
+      householdId: "household_123",
+      householdName: "Test kitchen",
+      role: "owner",
+      clerkUserId: "user_123",
+    });
+    const deleteFromCatalog = vi.fn();
+
+    vi.mocked(openDatabase).mockResolvedValue({
+      db: {
+        query: {
+          householdCanonicalIngredients: {
+            findMany: vi.fn().mockResolvedValue([{ canonicalIngredientId: "ingredient_123" }]),
+            findFirst: vi.fn().mockResolvedValue(null),
+          },
+          householdRecipeIngredients: {
+            findFirst: vi.fn().mockResolvedValue(null),
+          },
+          householdRecipeIngredientAlternatives: {
+            findFirst: vi.fn().mockResolvedValue({ alternativeId: "alternative_123" }),
+          },
+          householdAlwaysHaveIngredients: {
+            findFirst: vi.fn().mockResolvedValue(null),
+          },
+        },
+        delete: deleteFromCatalog,
+      },
+      sqlite: {
+        close: vi.fn().mockResolvedValue(undefined),
+      },
+    } as unknown as Awaited<ReturnType<typeof openDatabase>>);
+
+    await expect(removeUnusedProvisionalIngredientsAction()).resolves.toEqual({
+      status: "success",
+      message: "No unused provisional ingredients to remove.",
+    });
+    expect(deleteFromCatalog).not.toHaveBeenCalled();
   });
 });
 

@@ -1183,10 +1183,14 @@ export const removeUnusedProvisionalIngredientsAction = withActionLogging(
 
         for (const candidate of candidates) {
           const canonicalIngredientId = candidate.canonicalIngredientId;
-          const [recipeUse, alwaysHaveUse, child] = await Promise.all([
+          const [recipeUse, alternativeUse, alwaysHaveUse, child] = await Promise.all([
             db.query.householdRecipeIngredients.findFirst({
               where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.canonicalIngredientId, canonicalIngredientId)),
               columns: { ingredientId: true },
+            }),
+            db.query.householdRecipeIngredientAlternatives.findFirst({
+              where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.canonicalIngredientId, canonicalIngredientId)),
+              columns: { alternativeId: true },
             }),
             db.query.householdAlwaysHaveIngredients.findFirst({
               where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.canonicalIngredientId, canonicalIngredientId)),
@@ -1197,7 +1201,7 @@ export const removeUnusedProvisionalIngredientsAction = withActionLogging(
               columns: { canonicalIngredientId: true },
             }),
           ]);
-          if (recipeUse || alwaysHaveUse || child) continue;
+          if (recipeUse || alternativeUse || alwaysHaveUse || child) continue;
 
           await db.delete(householdIngredientAliases).where(and(eq(householdIngredientAliases.householdId, context.householdId), eq(householdIngredientAliases.canonicalIngredientId, canonicalIngredientId))).run();
           await db.delete(householdIngredientPhraseMappings).where(and(eq(householdIngredientPhraseMappings.householdId, context.householdId), eq(householdIngredientPhraseMappings.canonicalIngredientId, canonicalIngredientId))).run();
