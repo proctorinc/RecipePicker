@@ -733,6 +733,13 @@ export const householdRecipeIngredients = sqliteTable(
       table.recipeId,
       table.position,
     ),
+    householdReviewQueueIdx: index("idx_household_recipe_ingredients_review_queue").on(
+      table.householdId,
+      table.reviewDisposition,
+      table.normalizationStatus,
+      table.recipeId,
+      table.position,
+    ),
     canonicalIngredientIdx: index("idx_household_recipe_ingredients_canonical_ingredient_id").on(table.canonicalIngredientId),
   }),
 );
@@ -763,6 +770,29 @@ export const householdCanonicalIngredients = sqliteTable(
     parentCanonicalIngredientIdx: index("idx_household_canonical_ingredients_parent_canonical_ingredient_id").on(
       table.parentCanonicalIngredientId,
     ),
+  }),
+);
+
+export const householdAlwaysHaveIngredients = sqliteTable(
+  "household_always_have_ingredients",
+  {
+    alwaysHaveIngredientId: generatedId("always_have_ingredient_id"),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.householdId),
+    canonicalIngredientId: text("canonical_ingredient_id")
+      .notNull()
+      .references(() => householdCanonicalIngredients.canonicalIngredientId),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    householdCanonicalUniqueIdx: uniqueIndex("idx_always_have_household_canonical_unique").on(
+      table.householdId,
+      table.canonicalIngredientId,
+    ),
+    householdIdx: index("idx_always_have_household_id").on(table.householdId),
   }),
 );
 
@@ -1143,6 +1173,18 @@ export const householdCanonicalIngredientsRelations = relations(householdCanonic
   aliases: many(householdIngredientAliases),
   phraseMappings: many(householdIngredientPhraseMappings),
   recipeIngredients: many(householdRecipeIngredients),
+  alwaysHaveIngredients: many(householdAlwaysHaveIngredients),
+}));
+
+export const householdAlwaysHaveIngredientsRelations = relations(householdAlwaysHaveIngredients, ({ one }) => ({
+  household: one(households, {
+    fields: [householdAlwaysHaveIngredients.householdId],
+    references: [households.householdId],
+  }),
+  canonicalIngredient: one(householdCanonicalIngredients, {
+    fields: [householdAlwaysHaveIngredients.canonicalIngredientId],
+    references: [householdCanonicalIngredients.canonicalIngredientId],
+  }),
 }));
 
 export const householdIngredientAliasesRelations = relations(householdIngredientAliases, ({ one }) => ({

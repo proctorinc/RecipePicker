@@ -2,6 +2,7 @@
 
 import {
   Calendar,
+  ShoppingCart,
   LayoutDashboard,
   Settings2,
   Sparkles,
@@ -13,6 +14,12 @@ import { AppTransitionLink } from "@/components/app-transition-link";
 import { cn } from "@/lib/utils";
 
 const navItems = [
+  {
+    href: "/shopping-cart",
+    label: "Shopping cart",
+    icon: ShoppingCart,
+    matches: (pathname: string) => pathname.startsWith("/shopping-cart"),
+  },
   {
     href: "/recipe/new",
     label: "Create recipe",

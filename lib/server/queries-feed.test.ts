@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as schema from "@/lib/server/db";
 import {
   householdBoards,
+  householdRecipeIngredients,
+  householdRecipeInstructions,
   householdPins,
   householdRecipes,
   householdRecipeReviews,
@@ -56,6 +58,7 @@ vi.mock("@/lib/server/database", async () => {
 });
 
 import { getFeedPinsPage } from "@/lib/server/queries";
+import { normalizeIngredientForHousehold } from "@/lib/server/ingredient-normalization";
 
 let tempDir: string;
 let sqlitePath: string;
@@ -113,7 +116,7 @@ beforeEach(async () => {
       recipeId: "recipe_a",
       pinId: "pin_a",
       pinterestPinId: "pinterest_a",
-      title: "Aardvark Pasta",
+      title: "Scallion Pasta",
       updatedAt: "2026-06-11T10:00:00.000Z",
     });
     await seedFeedRecipe({
@@ -121,7 +124,7 @@ beforeEach(async () => {
       recipeId: "recipe_b",
       pinId: "pin_b",
       pinterestPinId: "pinterest_b",
-      title: "Basil Pasta",
+      title: "Weeknight Pasta",
       updatedAt: "2026-06-11T10:00:00.000Z",
     });
     await seedFeedRecipe({
@@ -130,6 +133,7 @@ beforeEach(async () => {
       pinId: "pin_c",
       pinterestPinId: "pinterest_c",
       title: "Curry Soup",
+      description: "Weeknight favorite",
       updatedAt: "2026-06-10T10:00:00.000Z",
     });
   } finally {
@@ -201,6 +205,89 @@ describe("getFeedPinsPage", () => {
     expect(nextPage.hasMore).toBe(false);
   });
 
+  it("describes the fields that matched a search", async () => {
+    const page = await getFeedPinsPage({
+      searchText: "pasta",
+      pageSize: 2,
+    });
+
+    expect(page.items.map((item) => item.searchMatches)).toEqual([
+      [{ tier: 1, field: "title", matchedText: null, relatedText: null }],
+      [{ tier: 1, field: "title", matchedText: null, relatedText: null }],
+    ]);
+  });
+
+  it("ranks title matches above saved ingredient aliases and explains both", async () => {
+    await seedRecipeIngredient({
+      recipeId: "recipe_c",
+      ingredientId: "ingredient_green_onion",
+      originalText: "2 green onions",
+      ingredientText: "green onion",
+    });
+
+    const page = await getFeedPinsPage({ searchText: "scallion", pageSize: 3 });
+    const firstPage = await getFeedPinsPage({ searchText: "scallion", pageSize: 1 });
+    const secondPage = await getFeedPinsPage({
+      searchText: "scallion",
+      cursor: firstPage.nextCursor,
+      pageSize: 1,
+    });
+
+    expect(page.items.map((item) => item.recipeId)).toEqual([
+      "recipe_a",
+      "recipe_c",
+    ]);
+    expect(page.items[0]?.searchMatches[0]).toMatchObject({
+      tier: 1,
+      field: "title",
+    });
+    expect(page.items[1]?.searchMatches[0]).toEqual({
+      tier: 2,
+      field: "alias",
+      matchedText: "scallion",
+      relatedText: "green onion",
+    });
+    expect(firstPage.items.map((item) => item.recipeId)).toEqual(["recipe_a"]);
+    expect(secondPage.items.map((item) => item.recipeId)).toEqual(["recipe_c"]);
+  });
+
+  it("expands family searches downward while keeping child searches specific", async () => {
+    await seedRecipeIngredient({
+      recipeId: "recipe_c",
+      ingredientId: "ingredient_chicken_breast",
+      originalText: "2 chicken breasts",
+      ingredientText: "chicken breast",
+    });
+
+    const familyPage = await getFeedPinsPage({ searchText: "chicken", pageSize: 3 });
+    const childPage = await getFeedPinsPage({ searchText: "chicken breast", pageSize: 3 });
+
+    expect(familyPage.items).toHaveLength(1);
+    expect(familyPage.items[0]?.searchMatches[0]).toEqual({
+      tier: 3,
+      field: "family",
+      matchedText: "Chicken",
+      relatedText: "chicken breast",
+    });
+    expect(childPage.items[0]?.searchMatches[0]).toEqual({
+      tier: 1,
+      field: "ingredient",
+      matchedText: "chicken breast",
+      relatedText: null,
+    });
+  });
+
+  it("keeps supporting-text matches below exact title matches", async () => {
+    const page = await getFeedPinsPage({ searchText: "weeknight", pageSize: 3 });
+
+    expect(page.items.map((item) => item.recipeId)).toEqual([
+      "recipe_b",
+      "recipe_c",
+    ]);
+    expect(page.items[0]?.searchMatches[0]?.field).toBe("title");
+    expect(page.items[1]?.searchMatches[0]?.field).toBe("description");
+  });
+
   it("prefers rated recipes first, then higher average ratings, then unrated recipes", async () => {
     await seedRecipeReviews([
       createReview({
@@ -263,6 +350,7 @@ async function seedFeedRecipe({
   pinId,
   pinterestPinId,
   title,
+  description,
   updatedAt,
 }: {
   db: ReturnType<typeof drizzle<typeof schema>>;
@@ -270,6 +358,7 @@ async function seedFeedRecipe({
   pinId: string;
   pinterestPinId: string;
   title: string;
+  description?: string;
   updatedAt: string;
 }) {
   await db.insert(householdPins)
@@ -280,6 +369,7 @@ async function seedFeedRecipe({
       boardId: "board_1",
       pinterestBoardId: "pinterest_board_1",
       title,
+      description,
       rawJson: JSON.stringify({
         images: {
           "236x": {
@@ -300,10 +390,61 @@ async function seedFeedRecipe({
       householdId: "household_1",
       pinId,
       title,
+      description,
       createdAt: updatedAt,
       updatedAt,
     })
     .run();
+}
+
+async function seedRecipeIngredient({
+  recipeId,
+  ingredientId,
+  originalText,
+  ingredientText,
+}: {
+  recipeId: string;
+  ingredientId: string;
+  originalText: string;
+  ingredientText: string;
+}) {
+  const { db, sqlite } = await createTestDatabaseHandle(sqlitePath);
+  const timestamp = "2026-06-12T10:00:00.000Z";
+
+  try {
+    const normalized = await normalizeIngredientForHousehold(db, "household_1", {
+      originalText,
+      ingredientText,
+    });
+    await db.insert(householdRecipeInstructions)
+      .values({
+        recipeId,
+        householdId: "household_1",
+        title: null,
+        rawRecipeJson: "{}",
+        updatedAt: timestamp,
+        createdAt: timestamp,
+      })
+      .run();
+    await db.insert(householdRecipeIngredients)
+      .values({
+        ingredientId,
+        householdId: "household_1",
+        recipeId,
+        position: 0,
+        originalText,
+        ingredientText,
+        normalizedIngredientPhrase: normalized.normalizedIngredientPhrase,
+        canonicalIngredientId: normalized.canonicalIngredientId,
+        attributesJson: JSON.stringify(normalized.attributes),
+        matchConfidence: normalized.matchConfidence,
+        matchedBy: normalized.matchedBy,
+        normalizationStatus: normalized.normalizationStatus,
+      })
+      .run();
+  } finally {
+    await sqlite.close();
+  }
 }
 
 async function seedRecipeReviews(

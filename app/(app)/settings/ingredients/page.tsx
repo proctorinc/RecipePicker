@@ -3,11 +3,12 @@ import { IngredientReviewTable } from "@/components/ingredient-review-table";
 import { IngredientCatalog } from "@/components/ingredient-catalog";
 import { SettingsNav } from "@/components/settings-nav";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getCanonicalIngredientOptions, getIngredientCatalog, getIngredientReviewQueue } from "@/lib/server/queries";
+import { getIngredientCatalog, getIngredientReviewQueue } from "@/lib/server/queries";
 
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 20;
+const CATALOG_PAGE_SIZE = 25;
 
 export default async function IngredientSettingsPage({
   searchParams,
@@ -17,11 +18,13 @@ export default async function IngredientSettingsPage({
   const params = (await searchParams) ?? {};
   const rawPage = typeof params.page === "string" ? Number.parseInt(params.page, 10) : 1;
   const requestedPage = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+  const rawCatalogPage = typeof params.catalogPage === "string" ? Number.parseInt(params.catalogPage, 10) : 1;
+  const requestedCatalogPage = Number.isInteger(rawCatalogPage) && rawCatalogPage > 0 ? rawCatalogPage : 1;
+  const catalogQuery = typeof params.catalogQuery === "string" ? params.catalogQuery : "";
   const recipeId = typeof params.recipeId === "string" ? params.recipeId : undefined;
-  const [queue, canonicalOptions, catalog] = await Promise.all([
+  const [queue, catalog] = await Promise.all([
     getIngredientReviewQueue(requestedPage, PAGE_SIZE, recipeId),
-    getCanonicalIngredientOptions(),
-    getIngredientCatalog(),
+    getIngredientCatalog(requestedCatalogPage, CATALOG_PAGE_SIZE, catalogQuery),
   ]);
   const startItem = queue.totalCount === 0 ? 0 : (queue.page - 1) * queue.pageSize + 1;
   const endItem = queue.totalCount === 0 ? 0 : startItem + queue.items.length - 1;
@@ -72,12 +75,12 @@ export default async function IngredientSettingsPage({
               ) : null}
             </div>
           ) : null}
-          <IngredientReviewTable items={queue.items} canonicalOptions={canonicalOptions} />
+          <IngredientReviewTable items={queue.items} />
         </CardContent>
       </Card>
       <Card>
         <CardHeader><CardTitle>Ingredient catalog</CardTitle><CardDescription>Provisional ingredients are safe to keep now and organize later. Merge duplicates or assign a family here.</CardDescription></CardHeader>
-        <CardContent><IngredientCatalog items={catalog} /></CardContent>
+        <CardContent><IngredientCatalog catalog={catalog} recipeId={recipeId} /></CardContent>
       </Card>
     </div>
   );

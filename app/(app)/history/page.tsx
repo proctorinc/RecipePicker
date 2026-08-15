@@ -7,14 +7,15 @@ export const dynamic = "force-dynamic";
 export default async function HistoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; recipeId?: string; from?: string }>;
+  searchParams: Promise<{ month?: string; recipeId?: string; from?: string; date?: string | string[] }>;
 }) {
-  const { month, recipeId, from } = await searchParams;
+  const { month, recipeId, from, date } = await searchParams;
   const history = await getRecipeHistoryPage(month, recipeId);
+  const initialCartDates = Array.isArray(date) ? date : date ? [date] : [];
 
   return (
     <PageShell>
-      <RecipeHistoryCalendar history={history} fromRecipe={from === "recipe"} />
+      <RecipeHistoryCalendar history={history} fromRecipe={from === "recipe"} initialCartDates={initialCartDates} />
     </PageShell>
   );
 }

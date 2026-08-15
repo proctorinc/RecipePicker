@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -13,9 +13,8 @@ import type { CanonicalIngredientOption, IngredientReviewItemView } from "@/type
 
 const initialState: ActionState = { status: "idle", message: "" };
 
-export function IngredientReviewTable({ items, canonicalOptions }: {
+export function IngredientReviewTable({ items }: {
   items: IngredientReviewItemView[];
-  canonicalOptions: CanonicalIngredientOption[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(items.length > 0);
@@ -40,7 +39,7 @@ export function IngredientReviewTable({ items, canonicalOptions }: {
             <DialogTitle>Review ingredient {index + 1} of {items.length}</DialogTitle>
             <DialogDescription>{item.recipeTitle}</DialogDescription>
           </DialogHeader>
-          <IngredientReviewForm item={item} canonicalOptions={canonicalOptions} onDone={() => {
+          <IngredientReviewForm item={item} onDone={() => {
             if (index + 1 < items.length) setIndex(index + 1);
             else { setOpen(false); startTransition(() => router.refresh()); }
           }} />
@@ -50,9 +49,8 @@ export function IngredientReviewTable({ items, canonicalOptions }: {
   );
 }
 
-function IngredientReviewForm({ item, canonicalOptions, onDone }: {
+function IngredientReviewForm({ item, onDone }: {
   item: IngredientReviewItemView;
-  canonicalOptions: CanonicalIngredientOption[];
   onDone: () => void;
 }) {
   const [amountText, setAmountText] = useState(item.amountText ?? "");
@@ -61,17 +59,30 @@ function IngredientReviewForm({ item, canonicalOptions, onDone }: {
   const [notes, setNotes] = useState(item.notes ?? "");
   const [canonicalSearch, setCanonicalSearch] = useState("");
   const [canonicalIngredientId, setCanonicalIngredientId] = useState("");
+  const [matchingOptions, setMatchingOptions] = useState<CanonicalIngredientOption[]>([]);
   const [state, formAction] = useActionState(reviewIngredientAction, initialState);
 
   useEffect(() => {
     setAmountText(item.amountText ?? ""); setUnit(item.unit ?? ""); setIngredientText(item.parsedIngredientText ?? "");
-    setNotes(item.notes ?? ""); setCanonicalSearch(""); setCanonicalIngredientId("");
+    setNotes(item.notes ?? ""); setCanonicalSearch(""); setCanonicalIngredientId(""); setMatchingOptions([]);
   }, [item]);
   useEffect(() => { if (state.status === "success") { toast.success(state.message); onDone(); } else if (state.status === "error") toast.error(state.message); }, [state, onDone]);
-  const matchingOptions = useMemo(() => {
-    const query = canonicalSearch.trim().toLowerCase();
-    return query ? canonicalOptions.filter((option) => `${option.displayName} ${option.parentDisplayName ?? ""}`.toLowerCase().includes(query)).slice(0, 12) : [];
-  }, [canonicalOptions, canonicalSearch]);
+  useEffect(() => {
+    const query = canonicalSearch.trim();
+    if (!query) { setMatchingOptions([]); return; }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/ingredients/search?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+        if (!response.ok) throw new Error("Unable to search ingredients.");
+        const data = await response.json() as { items: CanonicalIngredientOption[] };
+        setMatchingOptions(data.items);
+      } catch (error) {
+        if ((error as { name?: string }).name !== "AbortError") setMatchingOptions([]);
+      }
+    }, 200);
+    return () => { controller.abort(); window.clearTimeout(timeout); };
+  }, [canonicalSearch]);
 
   return <form action={formAction} className="space-y-5">
     <input type="hidden" name="ingredientId" value={item.ingredientId} />

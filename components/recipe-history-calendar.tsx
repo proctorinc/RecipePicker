@@ -14,6 +14,7 @@ import {
   CookingPot,
   Plus,
   Search,
+  ShoppingCart,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -65,9 +66,11 @@ type ReviewDialogTarget = {
 export function RecipeHistoryCalendar({
   history,
   fromRecipe = false,
+  initialCartDates = [],
 }: {
   history: RecipeHistoryPageView;
   fromRecipe?: boolean;
+  initialCartDates?: string[];
 }) {
   const [dayDialogDate, setDayDialogDate] = useState<string | null>(null);
   const [recipePickerOpen, setRecipePickerOpen] = useState(false);
@@ -82,6 +85,8 @@ export function RecipeHistoryCalendar({
     RecipeHistoryRecipeOption[] | null
   >(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
+  const [cartSelectionMode, setCartSelectionMode] = useState(false);
+  const [cartSelectedDates, setCartSelectedDates] = useState<string[]>(initialCartDates);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
@@ -112,6 +117,7 @@ export function RecipeHistoryCalendar({
     () => new Set(selectedDates),
     [selectedDates],
   );
+  const cartSelectedDateSet = useMemo(() => new Set(cartSelectedDates), [cartSelectedDates]);
   const selectedRecipe = history.selectedRecipe;
   const loadingSkeletonColumns = useMemo(
     () => buildFeedLoadingSkeletons(3),
@@ -125,6 +131,10 @@ export function RecipeHistoryCalendar({
   useEffect(() => {
     setSelectedDates([]);
   }, [history.month, history.selectedRecipe?.recipeId]);
+
+  useEffect(() => {
+    setCartSelectedDates(initialCartDates);
+  }, [initialCartDates]);
 
   useEffect(() => {
     if (!isSelectionMode) {
@@ -218,6 +228,12 @@ export function RecipeHistoryCalendar({
   }, [deferredSearchValue, history.recipeOptions, searchedRecipeOptions]);
 
   function openDay(day: RecipeHistoryDayView) {
+    if (cartSelectionMode) {
+      if (day.events.length > 0) {
+        setCartSelectedDates((current) => current.includes(day.date) ? current.filter((entry) => entry !== day.date) : [...current, day.date]);
+      }
+      return;
+    }
     if (isSelectionMode) {
       toggleSelectedDate(day.date);
       return;
@@ -253,9 +269,14 @@ export function RecipeHistoryCalendar({
   }
 
   function buildHistoryHref(month: string) {
+    const cartParams = cartSelectedDates.length ? [...cartSelectedDates].sort().map((date) => `&date=${encodeURIComponent(date)}`).join("") : "";
     return history.selectedRecipe
-      ? `/history?month=${encodeURIComponent(month)}&recipeId=${encodeURIComponent(history.selectedRecipe.recipeId)}${fromRecipe ? "&from=recipe" : ""}`
-      : `/history?month=${encodeURIComponent(month)}`;
+      ? `/history?month=${encodeURIComponent(month)}&recipeId=${encodeURIComponent(history.selectedRecipe.recipeId)}${fromRecipe ? "&from=recipe" : ""}${cartParams}`
+      : `/history?month=${encodeURIComponent(month)}${cartParams}`;
+  }
+
+  function shoppingCartHref() {
+    return `/shopping-cart?${[...cartSelectedDates].sort().map((date) => `date=${encodeURIComponent(date)}`).join("&")}`;
   }
 
   function buildRecipeHref(recipeId: string) {
@@ -364,9 +385,17 @@ export function RecipeHistoryCalendar({
           </div>
         </div>
       ) : null}
+      {cartSelectionMode && cartSelectedDates.length > 0 ? (
+        <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur">
+          <div className="flex items-center gap-3"><Button type="button" variant="ghost" size="sm" onClick={() => setCartSelectedDates([])}>Clear</Button><Button asChild className="flex-1"><AppTransitionLink href={shoppingCartHref()}><ShoppingCart className="h-4 w-4" />Build cart for {cartSelectedDates.length} {cartSelectedDates.length === 1 ? "day" : "days"}</AppTransitionLink></Button></div>
+        </div>
+      ) : null}
 
       <section className="rounded-[24px] border border-white/70 bg-white/90 p-2 shadow-soft sm:rounded-[32px] sm:p-6">
         <div className="gap-2 mb-4 flex items-center justify-end sm:mb-6">
+          <Button type="button" variant={cartSelectionMode ? "outline" : "default"} size="sm" onClick={() => { setCartSelectionMode((current) => !current); setSelectedDates([]); }} disabled={isSelectionMode}>
+            <ShoppingCart className="h-4 w-4" />{cartSelectionMode ? "Done selecting" : "Build cart"}
+          </Button>
           {selectedRecipe && (
             <Button asChild type="button" variant="ghost" size="sm">
               <AppTransitionLink
@@ -381,6 +410,7 @@ export function RecipeHistoryCalendar({
             variant={isSelectionMode ? "outline" : "default"}
             size="sm"
             onClick={openRecipePicker}
+            disabled={cartSelectionMode}
           >
             <CookingPot className="h-4 w-4" />
             {isSelectionMode ? "Change recipe" : "Find recipe"}
@@ -503,6 +533,9 @@ export function RecipeHistoryCalendar({
                 isSelectionMode &&
                   selectedDateSet.has(day.date) &&
                   "border-primary bg-primary/10 ring-2 ring-primary/35 sm:border-primary/70",
+                cartSelectionMode && day.events.length > 0 && cartSelectedDateSet.has(day.date) &&
+                  "border-primary bg-primary/10 ring-2 ring-primary/35 sm:border-primary/70",
+                cartSelectionMode && day.events.length === 0 && "cursor-not-allowed opacity-55",
                 day.isToday && "border-primary/40 ring-1 ring-primary/25",
               )}
             >
@@ -526,7 +559,7 @@ export function RecipeHistoryCalendar({
                     {day.events.length}
                   </span>
                 ) : null}
-                {isSelectionMode && selectedDateSet.has(day.date) ? (
+                {(isSelectionMode && selectedDateSet.has(day.date)) || (cartSelectionMode && cartSelectedDateSet.has(day.date)) ? (
                   <span className="absolute right-1 top-1 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm sm:right-2 sm:top-2">
                     <Check className="h-3.5 w-3.5" />
                   </span>

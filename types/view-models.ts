@@ -17,8 +17,23 @@ export type FeedPinCard = {
   status: PinStatus;
   hasRecipe: boolean;
   searchText: string;
+  searchMatches: FeedSearchMatch[];
   averageRating: number | null;
   reviewCount: number;
+};
+
+export type FeedSearchMatch = {
+  tier: 1 | 2 | 3 | 4;
+  field:
+    | "title"
+    | "ingredient"
+    | "alias"
+    | "family"
+    | "description"
+    | "site"
+    | "website";
+  matchedText: string | null;
+  relatedText: string | null;
 };
 
 export type FeedPinsPage = {
@@ -254,6 +269,15 @@ export type IngredientCatalogItemView = CanonicalIngredientOption & {
   usageCount: number;
 };
 
+export type IngredientCatalogPageView = {
+  items: IngredientCatalogItemView[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  query: string;
+};
+
 export type BoardSyncSummary = {
   boardId: string;
   name: string | null;
@@ -471,6 +495,7 @@ export type DashboardSummary = {
 
 export type HouseholdMemberView = {
   clerkUserId: string;
+  name: string;
   role: "owner" | "member";
   joinedAt: string;
   isCurrentUser: boolean;
@@ -484,4 +509,34 @@ export type RecipeHistoryPageView = {
   days: RecipeHistoryDayView[];
   recipeOptions: RecipeHistoryRecipeOption[];
   selectedRecipe: RecipeHistoryRecipeOption | null;
+};
+
+export type ShoppingCartSourceMealView = {
+  eventId: string;
+  date: string;
+  recipeId: string;
+  recipeTitle: string;
+};
+
+export type ShoppingCartItemView = {
+  itemId: string;
+  canonicalIngredientId: string | null;
+  displayName: string;
+  amountText: string | null;
+  unit: string | null;
+  sourceMeals: ShoppingCartSourceMealView[];
+  isAlwaysHave: boolean;
+};
+
+export type AlwaysHaveIngredientView = {
+  canonicalIngredientId: string;
+  displayName: string;
+  enabled: boolean;
+};
+
+export type ShoppingCartPageView = {
+  selectedDates: string[];
+  sourceMeals: ShoppingCartSourceMealView[];
+  items: ShoppingCartItemView[];
+  alwaysHaves: AlwaysHaveIngredientView[];
 };

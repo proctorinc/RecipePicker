@@ -1,5 +1,5 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { and, asc, desc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import { getCurrentUserAccess, resolveFeedCardHref } from "@/lib/server/access";
 import {
@@ -10,6 +10,9 @@ import { openDatabase } from "@/lib/server/database";
 import {
   boardSyncSubscriptions,
   householdBoards,
+  householdAlwaysHaveIngredients,
+  householdCanonicalIngredients,
+  householdIngredientAliases,
   householdInvites,
   householdRecipeParseJobItems,
   householdRecipeParseJobs,
@@ -24,10 +27,12 @@ import {
 } from "@/lib/server/db";
 import {
   getCanonicalIngredientOptionsForHousehold,
+  normalizeIngredientKey,
   resolveIngredientSearchQuery,
 } from "@/lib/server/ingredient-normalization";
 import { getPinImageSources, getPinImageUrl } from "@/lib/server/media";
 import { listRemotePinterestBoards } from "@/lib/server/pinterest";
+import { buildShoppingCartItems } from "@/lib/shopping-cart";
 import { summarizeRecipeOps } from "@/lib/server/recipe-ops-summary";
 import { derivePinStatus } from "@/lib/server/status";
 import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
@@ -38,6 +43,7 @@ import {
   getTodayDayString,
   getTodayMonthString,
   isValidMonthString,
+  isValidDayString,
   parseJsonArray,
   parseJsonRecord,
   shiftMonth,
@@ -48,9 +54,11 @@ import type {
   DashboardSummary,
   FeedPinCard,
   FeedPinsPage,
+  FeedSearchMatch,
   HouseholdMemberView,
   IngredientReviewItemView,
   IngredientReviewQueuePageView,
+  IngredientCatalogPageView,
   IngredientReviewSuggestionView,
   RecipeDetailView,
   RecipeFolderTreeNode,
@@ -66,12 +74,13 @@ import type {
   PublicRecipeVersionDetailView,
   RecipeReviewView,
   RecipeVersionView,
+  ShoppingCartPageView,
 } from "@/types/view-models";
 
 type DatabaseHandle = Awaited<ReturnType<typeof openDatabase>>["db"];
 type RecipeGraph = Awaited<ReturnType<typeof getFeedRecipeRows>>[number];
 type FeedCardRow = FeedPinCard & {
-  ingredientMatchScore: number;
+  searchMatchTier: number;
   pin: RecipeGraph["pin"];
   updatedAt: string;
 };
@@ -97,7 +106,7 @@ export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
       subscriptionTier: appAccess.subscriptionTier,
     });
 
-    return cards.map(({ updatedAt: _updatedAt, ingredientMatchScore: _score, ...card }) => card);
+    return cards.map(({ updatedAt: _updatedAt, searchMatchTier: _tier, ...card }) => card);
   } finally {
     await sqlite.close();
   }
@@ -669,6 +678,60 @@ export async function getRecipeHistoryPage(
       days,
       recipeOptions,
       selectedRecipe,
+    };
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function getShoppingCartPage(selectedDateParams: string[]): Promise<ShoppingCartPageView> {
+  const selectedDates = [...new Set(selectedDateParams.filter(isValidDayString))].sort();
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const [events, alwaysHaves] = await Promise.all([
+      selectedDates.length > 0
+        ? db.query.householdRecipeEvents.findMany({
+            where: (table, { and, eq: equals }) => and(equals(table.householdId, context.householdId), inArray(table.date, selectedDates)),
+            orderBy: (table, { asc: orderAsc }) => [orderAsc(table.date), orderAsc(table.createdAt)],
+            with: { recipe: { with: { pin: true, recipeInstructions: { with: { ingredients: { orderBy: (table, { asc: orderAsc }) => [orderAsc(table.position)], with: { canonicalIngredient: true } } } } } } },
+          })
+        : Promise.resolve([]),
+      db.query.householdAlwaysHaveIngredients.findMany({
+        where: (table, { eq: equals }) => equals(table.householdId, context.householdId),
+        with: { canonicalIngredient: true },
+        orderBy: (table, { asc: orderAsc }) => [orderAsc(table.createdAt)],
+      }),
+    ]);
+    const sourceMeals = events.map((event) => ({
+      eventId: event.eventId,
+      date: event.date,
+      recipeId: event.recipeId,
+      recipeTitle: event.recipe.title ?? event.recipe.pin.title ?? event.recipe.recipeInstructions?.title ?? "Untitled recipe",
+    }));
+    const allItems = buildShoppingCartItems(events.flatMap((event) => {
+      const sourceMeal = sourceMeals.find((meal) => meal.eventId === event.eventId)!;
+      return (event.recipe.recipeInstructions?.ingredients ?? []).map((ingredient) => ({
+        ingredientId: ingredient.ingredientId,
+        canonicalIngredientId: ingredient.canonicalIngredientId,
+        canonicalName: ingredient.canonicalIngredient?.displayName ?? null,
+        originalText: ingredient.originalText,
+        ingredientText: ingredient.ingredientText,
+        amountText: ingredient.amountText,
+        amountValue: ingredient.amountValue,
+        amountMaxValue: ingredient.amountMaxValue,
+        unit: ingredient.unit,
+        normalizationStatus: ingredient.normalizationStatus,
+        sourceMeal,
+      }));
+    }));
+    const enabledAlwaysHaveIds = new Set(alwaysHaves.filter((item) => item.enabled).map((item) => item.canonicalIngredientId));
+    return {
+      selectedDates,
+      sourceMeals,
+      items: allItems.filter((item) => !item.canonicalIngredientId || !enabledAlwaysHaveIds.has(item.canonicalIngredientId)).map((item) => ({ ...item, isAlwaysHave: item.canonicalIngredientId ? alwaysHaves.some((alwaysHave) => alwaysHave.canonicalIngredientId === item.canonicalIngredientId) : false })),
+      alwaysHaves: alwaysHaves.map((item) => ({ canonicalIngredientId: item.canonicalIngredientId, displayName: item.canonicalIngredient.displayName, enabled: item.enabled })),
     };
   } finally {
     await sqlite.close();
@@ -1278,9 +1341,22 @@ export async function getHouseholdMembersView(): Promise<
 > {
   const context = await requireHouseholdContext();
   const members = await listHouseholdMembers(context.householdId);
+  const client = await clerkClient();
 
-  return members.map((member) => ({
+  const memberNames = await Promise.all(
+    members.map(async (member) => {
+      try {
+        const user = await client.users.getUser(member.clerkUserId);
+        return formatReviewerName(user.firstName, user.lastName, user.username);
+      } catch {
+        return "Household member";
+      }
+    }),
+  );
+
+  return members.map((member, index) => ({
     clerkUserId: member.clerkUserId,
+    name: memberNames[index],
     role: member.role as "owner" | "member",
     joinedAt: member.joinedAt,
     isCurrentUser: member.clerkUserId === context.clerkUserId,
@@ -1320,22 +1396,102 @@ export async function getCanonicalIngredientOptions(): Promise<
   }
 }
 
-export async function getIngredientCatalog(): Promise<import("@/types/view-models").IngredientCatalogItemView[]> {
+export async function getIngredientCatalog(
+  page = 1,
+  pageSize = 25,
+  query = "",
+): Promise<IngredientCatalogPageView> {
   const context = await requireHouseholdContext();
   const { db, sqlite } = await openDatabase();
   try {
+    const normalizedPageSize = Number.isInteger(pageSize) ? Math.min(Math.max(pageSize, 1), 100) : 25;
+    const normalizedQuery = query.trim().slice(0, 100);
+    const searchPattern = `%${normalizedQuery}%`;
+    const where = and(
+      eq(householdCanonicalIngredients.householdId, context.householdId),
+      normalizedQuery
+        ? sql`(
+            ${householdCanonicalIngredients.displayName} LIKE ${searchPattern} COLLATE NOCASE
+            OR EXISTS (
+              SELECT 1 FROM ${householdIngredientAliases}
+              WHERE ${householdIngredientAliases.canonicalIngredientId} = ${householdCanonicalIngredients.canonicalIngredientId}
+                AND ${householdIngredientAliases.householdId} = ${context.householdId}
+                AND ${householdIngredientAliases.aliasText} LIKE ${searchPattern} COLLATE NOCASE
+            )
+            OR EXISTS (
+              SELECT 1 FROM ${householdCanonicalIngredients} AS parent_ingredient
+              WHERE parent_ingredient.canonical_ingredient_id = ${householdCanonicalIngredients.parentCanonicalIngredientId}
+                AND parent_ingredient.display_name LIKE ${searchPattern} COLLATE NOCASE
+            )
+          )`
+        : undefined,
+    );
+    const totalCount = await db.$count(householdCanonicalIngredients, where);
+    const totalPages = totalCount === 0 ? 0 : Math.ceil(totalCount / normalizedPageSize);
+    const currentPage = totalPages === 0 ? 1 : Math.min(Math.max(Math.trunc(page) || 1, 1), totalPages);
     const rows = await db.query.householdCanonicalIngredients.findMany({
-      where: (table, { eq }) => eq(table.householdId, context.householdId),
+      where,
       orderBy: (table, { asc }) => [asc(table.displayName)],
-      with: { parentCanonicalIngredient: true, aliases: true, recipeIngredients: { columns: { ingredientId: true } } },
+      limit: normalizedPageSize,
+      offset: (currentPage - 1) * normalizedPageSize,
+      with: { parentCanonicalIngredient: true, aliases: true },
     });
-    return rows.map((row) => ({
+    const ids = rows.map((row) => row.canonicalIngredientId);
+    const usageRows = ids.length === 0
+      ? []
+      : await db.all<{ canonicalIngredientId: string; count: number }>(sql`
+          SELECT ${householdRecipeIngredients.canonicalIngredientId} AS canonicalIngredientId, count(*) AS count
+          FROM ${householdRecipeIngredients}
+          WHERE ${and(
+            eq(householdRecipeIngredients.householdId, context.householdId),
+            inArray(householdRecipeIngredients.canonicalIngredientId, ids),
+          )}
+          GROUP BY ${householdRecipeIngredients.canonicalIngredientId}
+        `);
+    const usageCountById = new Map(usageRows.map((row) => [row.canonicalIngredientId, Number(row.count)]));
+    const items: IngredientCatalogPageView["items"] = rows.map((row) => ({
       canonicalIngredientId: row.canonicalIngredientId, displayName: row.displayName,
-      ingredientKind: row.ingredientKind === "family" || row.ingredientKind === "base" ? row.ingredientKind : "leaf",
+      ingredientKind: row.ingredientKind === "family" || row.ingredientKind === "base" ? row.ingredientKind as "family" | "base" : "leaf",
       catalogStatus: row.catalogStatus === "provisional" ? "provisional" : "confirmed",
       parentCanonicalIngredientId: row.parentCanonicalIngredientId,
       parentDisplayName: row.parentCanonicalIngredient?.displayName ?? null,
-      aliases: row.aliases.map((alias) => alias.aliasText), usageCount: row.recipeIngredients.length,
+      aliases: row.aliases.map((alias) => alias.aliasText), usageCount: usageCountById.get(row.canonicalIngredientId) ?? 0,
+    }));
+    return { items, page: currentPage, pageSize: normalizedPageSize, totalCount, totalPages, query: normalizedQuery };
+  } finally { await sqlite.close(); }
+}
+
+export async function searchCanonicalIngredients(query: string, limit = 12): Promise<CanonicalIngredientOption[]> {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+  try {
+    const normalizedQuery = query.trim().slice(0, 100);
+    if (!normalizedQuery) return [];
+    const searchPattern = `%${normalizedQuery}%`;
+    const rows = await db.query.householdCanonicalIngredients.findMany({
+      where: and(
+        eq(householdCanonicalIngredients.householdId, context.householdId),
+        sql`(
+          ${householdCanonicalIngredients.displayName} LIKE ${searchPattern} COLLATE NOCASE
+          OR EXISTS (
+            SELECT 1 FROM ${householdIngredientAliases}
+            WHERE ${householdIngredientAliases.canonicalIngredientId} = ${householdCanonicalIngredients.canonicalIngredientId}
+              AND ${householdIngredientAliases.householdId} = ${context.householdId}
+              AND ${householdIngredientAliases.aliasText} LIKE ${searchPattern} COLLATE NOCASE
+          )
+        )`,
+      ),
+      orderBy: (table, { asc }) => [asc(table.displayName)],
+      limit: Math.min(Math.max(Math.trunc(limit) || 12, 1), 20),
+      with: { parentCanonicalIngredient: true },
+    });
+    return rows.map((ingredient) => ({
+      canonicalIngredientId: ingredient.canonicalIngredientId,
+      displayName: ingredient.displayName,
+      ingredientKind: ingredient.ingredientKind === "family" || ingredient.ingredientKind === "base" ? ingredient.ingredientKind : "leaf",
+      catalogStatus: ingredient.catalogStatus === "provisional" ? "provisional" : "confirmed",
+      parentCanonicalIngredientId: ingredient.parentCanonicalIngredientId,
+      parentDisplayName: ingredient.parentCanonicalIngredient?.displayName ?? null,
     }));
   } finally { await sqlite.close(); }
 }
@@ -1352,20 +1508,13 @@ export async function getIngredientReviewQueue(
     const normalizedPageSize = Number.isInteger(pageSize)
       ? Math.min(Math.max(pageSize, 1), 100)
       : 20;
-    const totalCount = (
-      await db.query.householdRecipeIngredients.findMany({
-        where: (table, { and, eq }) =>
-          and(
-            eq(table.householdId, context.householdId),
-            eq(table.normalizationStatus, "needs_review"),
-            eq(table.reviewDisposition, "pending"),
-            recipeId ? eq(table.recipeId, recipeId) : undefined,
-          ),
-        columns: {
-          ingredientId: true,
-        },
-      })
-    ).length;
+    const reviewWhere = and(
+      eq(householdRecipeIngredients.householdId, context.householdId),
+      eq(householdRecipeIngredients.normalizationStatus, "needs_review"),
+      eq(householdRecipeIngredients.reviewDisposition, "pending"),
+      recipeId ? eq(householdRecipeIngredients.recipeId, recipeId) : undefined,
+    );
+    const totalCount = await db.$count(householdRecipeIngredients, reviewWhere);
     const totalPages =
       totalCount === 0 ? 0 : Math.ceil(totalCount / normalizedPageSize);
     const currentPage =
@@ -1375,13 +1524,7 @@ export async function getIngredientReviewQueue(
     const offset = (currentPage - 1) * normalizedPageSize;
     const rows = await db.query.householdRecipeIngredients
       .findMany({
-        where: (table, { and, eq }) =>
-          and(
-            eq(table.householdId, context.householdId),
-            eq(table.normalizationStatus, "needs_review"),
-            eq(table.reviewDisposition, "pending"),
-            recipeId ? eq(table.recipeId, recipeId) : undefined,
-          ),
+        where: reviewWhere,
         orderBy: (table, { asc }) => [asc(table.recipeId), asc(table.position)],
         limit: normalizedPageSize,
         offset,
@@ -1580,28 +1723,30 @@ async function prepareFeedCards({
   return rows
     .map((row) => {
       const card = toFeedCard(row, subscriptionTier);
-      const ingredientMatchScore = ingredientQuery
-        ? getIngredientMatchScore(row, ingredientQuery)
-        : 0;
+      const searchMatches = getFeedSearchMatches(
+        row,
+        normalizedQuery,
+        ingredientQuery,
+      );
 
       return {
         ...card,
-        ingredientMatchScore,
+        searchMatches,
+        searchMatchTier: getBestSearchMatchTier(searchMatches),
         updatedAt: row.pin.updatedAt ?? "",
       };
     })
     .filter(
       (row) =>
         !normalizedQuery ||
-        row.searchText.includes(normalizedQuery) ||
-        row.ingredientMatchScore > 0,
+        row.searchMatches.length > 0,
     )
     .sort(compareFeedRows);
 }
 
 function compareFeedRows(left: FeedCardRow, right: FeedCardRow) {
-  if (right.ingredientMatchScore !== left.ingredientMatchScore) {
-    return right.ingredientMatchScore - left.ingredientMatchScore;
+  if (left.searchMatchTier !== right.searchMatchTier) {
+    return left.searchMatchTier - right.searchMatchTier;
   }
 
   const leftHasAverageRating = left.averageRating !== null;
@@ -1625,7 +1770,7 @@ function compareFeedRows(left: FeedCardRow, right: FeedCardRow) {
 function encodeFeedCursor(row: FeedCardRow) {
   return Buffer.from(
     JSON.stringify({
-      ingredientMatchScore: row.ingredientMatchScore,
+      searchMatchTier: row.searchMatchTier,
       averageRating: row.averageRating,
       updatedAt: row.updatedAt,
       recipeId: row.recipeId,
@@ -1767,14 +1912,14 @@ function decodeFeedCursor(cursor: string | null | undefined) {
     const parsed = JSON.parse(
       Buffer.from(cursor, "base64url").toString("utf8"),
     ) as {
-      ingredientMatchScore?: unknown;
+      searchMatchTier?: unknown;
       averageRating?: unknown;
       updatedAt?: unknown;
       recipeId?: unknown;
     };
 
     if (
-      typeof parsed.ingredientMatchScore !== "number"
+      typeof parsed.searchMatchTier !== "number"
       || (parsed.averageRating !== null && typeof parsed.averageRating !== "number")
       || typeof parsed.updatedAt !== "string"
       || typeof parsed.recipeId !== "string"
@@ -1783,7 +1928,7 @@ function decodeFeedCursor(cursor: string | null | undefined) {
     }
 
     return {
-      ingredientMatchScore: parsed.ingredientMatchScore,
+      searchMatchTier: parsed.searchMatchTier,
       averageRating: parsed.averageRating,
       updatedAt: parsed.updatedAt,
       recipeId: parsed.recipeId,
@@ -1796,14 +1941,14 @@ function decodeFeedCursor(cursor: string | null | undefined) {
 function isAfterCursor(
   row: FeedCardRow,
   cursor: {
-    ingredientMatchScore: number;
+    searchMatchTier: number;
     averageRating: number | null;
     updatedAt: string;
     recipeId: string;
   },
 ) {
-  if (row.ingredientMatchScore !== cursor.ingredientMatchScore) {
-    return row.ingredientMatchScore < cursor.ingredientMatchScore;
+  if (row.searchMatchTier !== cursor.searchMatchTier) {
+    return row.searchMatchTier > cursor.searchMatchTier;
   }
 
   const rowHasAverageRating = row.averageRating !== null;
@@ -1826,14 +1971,14 @@ function isAfterCursor(
 function matchesCursor(
   row: FeedCardRow,
   cursor: {
-    ingredientMatchScore: number;
+    searchMatchTier: number;
     averageRating: number | null;
     updatedAt: string;
     recipeId: string;
   },
 ) {
   return (
-    row.ingredientMatchScore === cursor.ingredientMatchScore
+    row.searchMatchTier === cursor.searchMatchTier
     && row.averageRating === cursor.averageRating
     && row.updatedAt === cursor.updatedAt
     && row.recipeId === cursor.recipeId
@@ -1905,46 +2050,126 @@ function describeExtractionSummary(
   return `${status.replaceAll("_", " ")}${method ? ` via ${method}` : ""}`;
 }
 
-function getIngredientMatchScore(
+function getFeedSearchMatches(
   row: RecipeGraph,
-  query: Awaited<ReturnType<typeof resolveIngredientSearchQuery>>,
-) {
-  if (!query?.searchCanonicalIngredientIds.length) {
-    return 0;
+  normalizedQuery: string,
+  ingredientQuery: Awaited<ReturnType<typeof resolveIngredientSearchQuery>>,
+): FeedSearchMatch[] {
+  if (!normalizedQuery) {
+    return [];
   }
 
-  let bestScore = 0;
-
-  for (const ingredient of row.recipeInstructions?.ingredients ?? []) {
+  const matches: FeedSearchMatch[] = [];
+  const matchesPhrase = (values: Array<string | null | undefined>) =>
+    values.some((value) => hasNormalizedPhrase(value, normalizedQuery));
+  const addMatch = (match: FeedSearchMatch) => {
     if (
-      !ingredient.canonicalIngredientId ||
-      !query.searchCanonicalIngredientIds.includes(
-        ingredient.canonicalIngredientId,
+      !matches.some(
+        (existing) =>
+          existing.field === match.field &&
+          existing.matchedText === match.matchedText &&
+          existing.relatedText === match.relatedText,
       )
     ) {
+      matches.push(match);
+    }
+  };
+
+  if (matchesPhrase([row.title, row.pin.title, row.recipeInstructions?.title])) {
+    addMatch({
+      tier: 1,
+      field: "title",
+      matchedText: null,
+      relatedText: null,
+    });
+  }
+
+  for (const ingredient of row.recipeInstructions?.ingredients ?? []) {
+    const ingredientLabel =
+      ingredient.ingredientText ??
+      ingredient.canonicalIngredient?.displayName ??
+      ingredient.originalText;
+    const attributeMatch = ingredientQuery?.attributes.every((attribute) =>
+      parseJsonArray(ingredient.attributesJson).includes(attribute),
+    );
+    const hasResolvedCanonicalMatch = Boolean(
+      ingredientQuery &&
+        ingredient.canonicalIngredientId === ingredientQuery.canonicalIngredientId &&
+        attributeMatch,
+    );
+    const isFamilyDescendant = Boolean(
+      ingredientQuery?.ingredientKind === "family" &&
+        ingredient.canonicalIngredientId &&
+        ingredient.canonicalIngredientId !== ingredientQuery.canonicalIngredientId &&
+        ingredientQuery.descendantCanonicalIngredientIds.includes(
+          ingredient.canonicalIngredientId,
+        ),
+    );
+
+    if (isFamilyDescendant) {
+      addMatch({
+        tier: 3,
+        field: "family",
+        matchedText: ingredientQuery?.canonicalDisplayName ?? normalizedQuery,
+        relatedText: ingredientLabel,
+      });
       continue;
     }
 
-    const ingredientAttributes = parseJsonArray(ingredient.attributesJson);
-    const attributeMatch = query.attributes.every((attribute) =>
-      ingredientAttributes.includes(attribute),
-    );
-    const exactCanonicalMatch =
-      ingredient.canonicalIngredientId === query.canonicalIngredientId;
-    const score = exactCanonicalMatch
-      ? query.attributes.length === 0 || attributeMatch
-        ? 4
-        : 2
-      : query.attributes.length === 0 || attributeMatch
-        ? 3
-        : 1;
+    const hasExactIngredientText = matchesPhrase([
+      ingredient.originalText,
+      ingredient.ingredientText,
+      ingredient.canonicalIngredient?.displayName,
+    ]);
+    if (
+      hasExactIngredientText ||
+      (hasResolvedCanonicalMatch && ingredientQuery?.matchedBy !== "alias")
+    ) {
+      addMatch({
+        tier: 1,
+        field: "ingredient",
+        matchedText: ingredientLabel,
+        relatedText: null,
+      });
+      continue;
+    }
 
-    if (score > bestScore) {
-      bestScore = score;
+    if (hasResolvedCanonicalMatch && ingredientQuery?.matchedBy === "alias") {
+      addMatch({
+        tier: 2,
+        field: "alias",
+        matchedText: ingredientQuery.normalizedIngredientPhrase,
+        relatedText: ingredientLabel,
+      });
     }
   }
 
-  return bestScore;
+  if (matchesPhrase([row.description, row.pin.description, row.recipeInstructions?.description])) {
+    addMatch({ tier: 4, field: "description", matchedText: null, relatedText: null });
+  }
+
+  if (matchesPhrase([row.recipeInstructions?.siteName])) {
+    addMatch({ tier: 4, field: "site", matchedText: null, relatedText: null });
+  }
+
+  if (matchesPhrase([row.pin.link, row.recipeInstructions?.canonicalUrl])) {
+    addMatch({ tier: 4, field: "website", matchedText: null, relatedText: null });
+  }
+
+  return matches.sort((left, right) => left.tier - right.tier);
+}
+
+function getBestSearchMatchTier(matches: FeedSearchMatch[]) {
+  return matches[0]?.tier ?? Number.MAX_SAFE_INTEGER;
+}
+
+function hasNormalizedPhrase(value: string | null | undefined, normalizedQuery: string) {
+  if (!value || !normalizedQuery) {
+    return false;
+  }
+
+  const normalizedValue = normalizeIngredientKey(value);
+  return ` ${normalizedValue} `.includes(` ${normalizedQuery} `);
 }
 
 function getRecipeReviewAggregate(

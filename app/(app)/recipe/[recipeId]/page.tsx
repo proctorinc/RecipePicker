@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Clock3, ExternalLink, ListChecks, Sparkles } from "lucide-react";
+import { CalendarPlus, Clock3, ExternalLink, ListChecks, Sparkles } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { ActionForm } from "@/components/action-form";
@@ -120,6 +120,15 @@ export default async function RecipePage({
       </RecipeMetadataEditor>
 
       <div className="flex flex-wrap gap-2 w-full">
+        <Button asChild variant="secondary">
+          <AppTransitionLink
+            href={`/history?recipeId=${encodeURIComponent(recipe.recipeId)}&from=recipe`}
+            prefetch
+          >
+            <CalendarPlus className="size-4" />
+            Add to calendar
+          </AppTransitionLink>
+        </Button>
         <CopyPublicRecipeLink
           url={getPublicRecipeUrl(recipe.recipeId, recipe.primaryVersionNumber)}
         />

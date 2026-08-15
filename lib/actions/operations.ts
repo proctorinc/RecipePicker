@@ -24,6 +24,7 @@ import {
   householdRecipeEvents,
   householdRecipeFeedback,
   householdRecipeIngredients,
+  householdAlwaysHaveIngredients,
   householdCanonicalIngredients,
   householdIngredientAliases,
   householdIngredientPhraseMappings,
@@ -733,6 +734,76 @@ export const joinHouseholdInviteAction = withActionLogging(
 },
 );
 
+export const addAlwaysHaveIngredientAction = withActionLogging(
+  "action.add_always_have_ingredient",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const canonicalIngredientId = String(formData.get("canonicalIngredientId") ?? "").trim();
+    const dates = parseShoppingCartDates(formData.get("dates"));
+    if (!canonicalIngredientId || dates.length === 0) return { status: "error", message: "Choose an ingredient from a shopping cart first." };
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+      try {
+        const events = await db.query.householdRecipeEvents.findMany({
+          where: (table, { and, eq, inArray: datesIn }) => and(eq(table.householdId, context.householdId), datesIn(table.date, dates)),
+          with: { recipe: { with: { recipeInstructions: { with: { ingredients: true } } } } },
+        });
+        const isInCart = events.some((event) => event.recipe.recipeInstructions?.ingredients.some((ingredient) => ingredient.canonicalIngredientId === canonicalIngredientId));
+        if (!isInCart) return { status: "error", message: "That ingredient is not in the selected shopping cart." };
+        const now = new Date().toISOString();
+        await db.insert(householdAlwaysHaveIngredients).values({ householdId: context.householdId, canonicalIngredientId, enabled: true, createdAt: now, updatedAt: now }).onConflictDoUpdate({
+          target: [householdAlwaysHaveIngredients.householdId, householdAlwaysHaveIngredients.canonicalIngredientId],
+          set: { enabled: true, updatedAt: now },
+        }).run();
+      } finally { await sqlite.close(); }
+      revalidateAll(["/shopping-cart"]);
+      return { status: "success", message: "Added to always haves." };
+    } catch (error) { return toErrorState(error, "Unable to update always haves."); }
+  },
+);
+
+export const setAlwaysHaveIngredientEnabledAction = withActionLogging(
+  "action.set_always_have_ingredient_enabled",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const canonicalIngredientId = String(formData.get("canonicalIngredientId") ?? "").trim();
+    const enabled = String(formData.get("enabled") ?? "") === "true";
+    if (!canonicalIngredientId) return { status: "error", message: "Ingredient details are incomplete." };
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+      try {
+        await db.update(householdAlwaysHaveIngredients).set({ enabled, updatedAt: new Date().toISOString() }).where(and(eq(householdAlwaysHaveIngredients.householdId, context.householdId), eq(householdAlwaysHaveIngredients.canonicalIngredientId, canonicalIngredientId))).run();
+      } finally { await sqlite.close(); }
+      revalidateAll(["/shopping-cart"]);
+      return { status: "success", message: enabled ? "Always have enabled." : "Always have disabled." };
+    } catch (error) { return toErrorState(error, "Unable to update always haves."); }
+  },
+);
+
+export const removeAlwaysHaveIngredientAction = withActionLogging(
+  "action.remove_always_have_ingredient",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const canonicalIngredientId = String(formData.get("canonicalIngredientId") ?? "").trim();
+    if (!canonicalIngredientId) return { status: "error", message: "Ingredient details are incomplete." };
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+      try {
+        await db.delete(householdAlwaysHaveIngredients).where(and(eq(householdAlwaysHaveIngredients.householdId, context.householdId), eq(householdAlwaysHaveIngredients.canonicalIngredientId, canonicalIngredientId))).run();
+      } finally { await sqlite.close(); }
+      revalidateAll(["/shopping-cart"]);
+      return { status: "success", message: "Removed from always haves." };
+    } catch (error) { return toErrorState(error, "Unable to update always haves."); }
+  },
+);
+
+function parseShoppingCartDates(value: FormDataEntryValue | null) {
+  try {
+    const parsed = JSON.parse(String(value ?? ""));
+    return Array.isArray(parsed) ? [...new Set(parsed.filter((date): date is string => typeof date === "string" && isValidDayString(date)))].slice(0, 180) : [];
+  } catch { return []; }
+}
+
 export const reviewIngredientAction = withActionLogging(
   "action.review_ingredient",
   async (_: ActionState, formData: FormData): Promise<ActionState> => {
@@ -857,10 +928,19 @@ export const mergeCanonicalIngredientsAction = withActionLogging(
         await db.update(householdRecipeIngredients).set({ canonicalIngredientId: targetId }).where(and(eq(householdRecipeIngredients.householdId, context.householdId), eq(householdRecipeIngredients.canonicalIngredientId, sourceId))).run();
         await db.update(householdIngredientAliases).set({ canonicalIngredientId: targetId }).where(and(eq(householdIngredientAliases.householdId, context.householdId), eq(householdIngredientAliases.canonicalIngredientId, sourceId))).run();
         await db.update(householdIngredientPhraseMappings).set({ canonicalIngredientId: targetId }).where(and(eq(householdIngredientPhraseMappings.householdId, context.householdId), eq(householdIngredientPhraseMappings.canonicalIngredientId, sourceId))).run();
+        const targetAlwaysHave = await db.query.householdAlwaysHaveIngredients.findFirst({
+          where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.canonicalIngredientId, targetId)),
+          columns: { alwaysHaveIngredientId: true },
+        });
+        if (targetAlwaysHave) {
+          await db.delete(householdAlwaysHaveIngredients).where(and(eq(householdAlwaysHaveIngredients.householdId, context.householdId), eq(householdAlwaysHaveIngredients.canonicalIngredientId, sourceId))).run();
+        } else {
+          await db.update(householdAlwaysHaveIngredients).set({ canonicalIngredientId: targetId, updatedAt: new Date().toISOString() }).where(and(eq(householdAlwaysHaveIngredients.householdId, context.householdId), eq(householdAlwaysHaveIngredients.canonicalIngredientId, sourceId))).run();
+        }
         await db.update(householdCanonicalIngredients).set({ parentCanonicalIngredientId: targetId, updatedAt: new Date().toISOString() }).where(and(eq(householdCanonicalIngredients.householdId, context.householdId), eq(householdCanonicalIngredients.parentCanonicalIngredientId, sourceId))).run();
         await db.delete(householdCanonicalIngredients).where(and(eq(householdCanonicalIngredients.householdId, context.householdId), eq(householdCanonicalIngredients.canonicalIngredientId, sourceId))).run();
       } finally { await sqlite.close(); }
-      revalidateAll(["/settings/ingredients"]); return { status: "success", message: "Ingredients merged." };
+      revalidateAll(["/settings/ingredients", "/shopping-cart"]); return { status: "success", message: "Ingredients merged." };
     } catch (error) { return toErrorState(error, "Unable to merge ingredients."); }
   },
 );

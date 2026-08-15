@@ -3,6 +3,7 @@ import {
   Sparkles,
   Soup,
   Calendar,
+  ShoppingCart,
   Settings2,
   LayoutDashboard,
   Plus,
@@ -15,6 +16,12 @@ import { Button } from "@/components/ui/button";
 import { MobileNav } from "@/components/mobile-nav";
 
 const baseLinks = [
+  {
+    href: "/shopping-cart",
+    label: "Shopping cart",
+    icon: ShoppingCart,
+    matches: (pathname: string) => pathname.startsWith("/shopping-cart"),
+  },
   {
     href: "/history",
     label: "History",

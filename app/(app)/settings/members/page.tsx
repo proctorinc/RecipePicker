@@ -1,9 +1,11 @@
 import { ActionForm } from "@/components/action-form";
 import { SettingsNav } from "@/components/settings-nav";
+import { ShareInviteLink } from "@/components/share-invite-link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { createInviteAction } from "@/lib/actions/operations";
+import { getHouseholdInviteUrl } from "@/lib/household-invite-url";
 import { requireHouseholdContext } from "@/lib/server/auth";
 import { getHouseholdMembersView, getLatestInvite } from "@/lib/server/queries";
 import { formatDate } from "@/lib/utils";
@@ -16,6 +18,7 @@ export default async function MembersPage() {
     getHouseholdMembersView(),
     getLatestInvite(),
   ]);
+  const inviteUrl = latestInvite ? getHouseholdInviteUrl(latestInvite.inviteToken) : null;
 
   return (
     <div className="space-y-6">
@@ -34,10 +37,13 @@ export default async function MembersPage() {
               <ActionForm action={createInviteAction} buttonVariant="default">
                 Create invite link
               </ActionForm>
-              {latestInvite ? (
-                <code className="rounded-full bg-secondary px-4 py-2 text-xs">
-                  /join/{latestInvite.inviteToken}
-                </code>
+              {inviteUrl ? (
+                <>
+                  <ShareInviteLink householdName={context.householdName} inviteUrl={inviteUrl} />
+                  <code className="max-w-full truncate rounded-full bg-secondary px-4 py-2 text-xs">
+                    {inviteUrl}
+                  </code>
+                </>
               ) : null}
             </div>
           ) : (
@@ -72,7 +78,7 @@ export default async function MembersPage() {
                 <TableRow key={member.clerkUserId}>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium">{member.clerkUserId}</span>
+                      <span className="font-medium">{member.name}</span>
                       {member.isCurrentUser ? <Badge variant="outline">You</Badge> : null}
                     </div>
                   </TableCell>

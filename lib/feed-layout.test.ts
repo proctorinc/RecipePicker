@@ -139,6 +139,7 @@ function makeCard(recipeId: string, pinId: string): FeedPinCard {
     status: "recipe_ready",
     hasRecipe: true,
     searchText: recipeId,
+    searchMatches: [],
     averageRating: null,
     reviewCount: 0,
   };
