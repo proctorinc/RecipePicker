@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { CheckCircle2, ChevronDown, Circle, Dot, MessageSquarePlus, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import {
   saveRecipeFeedbackAction,
 } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
+import { formatIngredientUnit } from "@/lib/ingredient-units";
 import { formatStatusLabel } from "@/lib/server/status";
 import { formatDate } from "@/lib/utils";
 import type { RecipeExtractionFeedbackCategory, RecipeOpsDetail } from "@/types/view-models";
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const initialActionState: ActionState = {
   status: "idle",
@@ -97,6 +99,8 @@ export function RecipeSettingsWorkspace({ detail }: { detail: RecipeOpsDetail })
 
 function RecipeContentEditor({ detail }: { detail: RecipeOpsDetail }) {
   const [steps, setSteps] = useState(detail.steps);
+  const [saveChoiceOpen, setSaveChoiceOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction] = useActionState(saveRecipeContentAction, initialActionState);
 
   useEffect(() => {
@@ -221,7 +225,8 @@ function RecipeContentEditor({ detail }: { detail: RecipeOpsDetail }) {
         </section>
 
         {hasContent ? (
-          <form action={formAction} className="space-y-8">
+          <>
+          <form ref={formRef} onSubmit={(event) => { event.preventDefault(); setSaveChoiceOpen(true); }} className="space-y-8">
             <input type="hidden" name="recipeId" value={detail.recipeId} />
             <input type="hidden" name="stepsJson" value={JSON.stringify(steps)} />
 
@@ -275,6 +280,16 @@ function RecipeContentEditor({ detail }: { detail: RecipeOpsDetail }) {
 
             <FormSubmitButton>Save recipe edits</FormSubmitButton>
           </form>
+          <Dialog open={saveChoiceOpen} onOpenChange={setSaveChoiceOpen}>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Save recipe edits</DialogTitle><DialogDescription>Choose whether these instruction changes update the current version or start a new version.</DialogDescription></DialogHeader>
+              <div className="grid gap-3">
+                <Button type="button" variant="outline" onClick={() => { const form = formRef.current; if (!form) return; const data = new FormData(form); data.set("versionMode", "update"); formAction(data); setSaveChoiceOpen(false); }}>Update current version</Button>
+                <Button type="button" onClick={() => { const form = formRef.current; if (!form) return; const data = new FormData(form); data.set("versionMode", "new"); formAction(data); setSaveChoiceOpen(false); }}>Create new version</Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+          </>
         ) : (
           <div className="rounded-[24px] border border-dashed border-border/60 bg-secondary/10 p-6">
             <p className="font-medium">No structured recipe content is available yet.</p>
@@ -651,7 +666,7 @@ function formatParsedAmount(amount: string | null, unit: string | null) {
     return "Not parsed";
   }
 
-  return [amount, unit].filter(Boolean).join(" ");
+  return [amount, formatIngredientUnit(unit)].filter(Boolean).join(" ");
 }
 
 function formatIngredientStatus(status: RecipeOpsDetail["ingredients"][number]["normalizationStatus"]) {

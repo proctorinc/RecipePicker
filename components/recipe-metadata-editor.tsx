@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -16,6 +16,8 @@ const initialActionState: ActionState = {
   status: "idle",
   message: "",
 };
+
+export const RecipeEditingContext = createContext(false);
 
 type RecipeMetadataEditorProps = {
   recipeId: string;
@@ -83,6 +85,7 @@ export function RecipeMetadataEditor({
   }, [draftDescription, draftTitle, isEditing]);
 
   return (
+    <RecipeEditingContext.Provider value={isEditing}>
     <form
       ref={formRef}
       className="contents"
@@ -156,6 +159,7 @@ export function RecipeMetadataEditor({
         </section>
       </div>
     </form>
+    </RecipeEditingContext.Provider>
   );
 }
 

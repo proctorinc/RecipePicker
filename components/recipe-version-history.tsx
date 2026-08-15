@@ -1,15 +1,14 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useContext, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { createRecipeVersionAction } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
 import type { RecipeVersionView } from "@/types/view-models";
-import { formatDate } from "@/lib/utils";
+import { RecipeEditingContext } from "@/components/recipe-metadata-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -17,6 +16,7 @@ const initialState: ActionState = { status: "idle", message: "" };
 
 export function RecipeVersionHistory({ recipeId, versions }: { recipeId: string; versions: RecipeVersionView[] }) {
   const primary = versions.at(-1);
+  const isEditing = useContext(RecipeEditingContext);
   const [open, setOpen] = useState(false);
   const [state, formAction] = useActionState(createRecipeVersionAction, initialState);
 
@@ -28,14 +28,10 @@ export function RecipeVersionHistory({ recipeId, versions }: { recipeId: string;
   }, [state]);
 
   return (
-    <Card className="bg-white/85">
-      <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
-        <div>
-          <CardTitle>Recipe versions</CardTitle>
-          <CardDescription>Version {primary?.versionNumber ?? 1} is the recipe shown above and used for new ratings.</CardDescription>
-        </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button variant="outline">Create new version</Button></DialogTrigger>
+    <div className="flex flex-wrap items-center gap-1.5">
+      {versions.map((version) => <Badge key={version.versionNumber} variant="outline" className="border-white/35 bg-black/20 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">v{version.versionNumber}{version.isPrimary ? " · current" : ""}</Badge>)}
+      {isEditing ? <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild><Button type="button" size="sm" variant="secondary" className="h-6 rounded-full px-2 text-xs">New version</Button></DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>Create version {(primary?.versionNumber ?? 1) + 1}</DialogTitle><DialogDescription>Start from the current recipe and change ingredient lines as needed. This keeps every prior version unchanged.</DialogDescription></DialogHeader>
             <form action={formAction} className="space-y-4">
@@ -45,21 +41,7 @@ export function RecipeVersionHistory({ recipeId, versions }: { recipeId: string;
               <Button type="submit">Save as new version</Button>
             </form>
           </DialogContent>
-        </Dialog>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {[...versions].reverse().map((version) => (
-          <article key={version.versionNumber} className="rounded-[20px] border border-border/60 bg-secondary/15 p-4">
-            <div className="flex flex-wrap items-center gap-2"><p className="font-medium">Version {version.versionNumber}</p>{version.isPrimary ? <Badge>Primary</Badge> : null}{version.createdAt ? <span className="text-sm text-muted-foreground">{formatDate(version.createdAt)}</span> : null}</div>
-            {version.note ? <p className="mt-2 text-sm text-muted-foreground">{version.note}</p> : null}
-            {version.versionNumber > 1 ? <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2"><ChangeList label="Added" values={version.changes.added} tone="text-emerald-700" /><ChangeList label="Removed" values={version.changes.removed} tone="text-rose-700" /></div> : <p className="mt-2 text-sm text-muted-foreground">Original version</p>}
-          </article>
-        ))}
-      </CardContent>
-    </Card>
+        </Dialog> : null}
+    </div>
   );
-}
-
-function ChangeList({ label, values, tone }: { label: string; values: string[]; tone: string }) {
-  return <div><p className={`font-medium ${tone}`}>{label}</p>{values.length ? <ul className="mt-1 list-disc pl-5 text-muted-foreground">{values.map((value) => <li key={value}>{value}</li>)}</ul> : <p className="text-muted-foreground">None</p>}</div>;
 }

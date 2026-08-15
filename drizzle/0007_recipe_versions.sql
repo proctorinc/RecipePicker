@@ -5,6 +5,7 @@ CREATE TABLE `household_recipe_versions` (
   `version_number` integer NOT NULL,
   `ingredients_json` text NOT NULL,
   `steps_json` text NOT NULL,
+  `snapshot_json` text NOT NULL,
   `note` text,
   `created_by_clerk_user_id` text,
   `created_at` text NOT NULL

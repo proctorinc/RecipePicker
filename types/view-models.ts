@@ -178,6 +178,12 @@ export type PublicRecipeDetailView = Pick<
   | "steps"
 >;
 
+export type PublicRecipeVersionDetailView = PublicRecipeDetailView & {
+  householdName: string;
+  versionNumber: number;
+  latestVersionNumber: number;
+};
+
 export type RecipeFolderTreeNode = {
   folderId: string;
   name: string | null;

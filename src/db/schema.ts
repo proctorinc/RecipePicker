@@ -375,6 +375,7 @@ export const householdRecipeVersions = sqliteTable(
     versionNumber: integer("version_number").notNull(),
     ingredientsJson: text("ingredients_json").notNull(),
     stepsJson: text("steps_json").notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
     note: text("note"),
     createdByClerkUserId: text("created_by_clerk_user_id"),
     createdAt: text("created_at").notNull(),

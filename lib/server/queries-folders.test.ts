@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as schema from "@/lib/server/db";
 import {
   householdBoards,
+  householdMembers,
   householdPins,
   householdRecipes,
   households,
@@ -20,9 +21,11 @@ import {
 const {
   mockOpenDatabase,
   mockRequireHouseholdContext,
+  mockAuth,
 } = vi.hoisted(() => ({
   mockOpenDatabase: vi.fn(),
   mockRequireHouseholdContext: vi.fn(),
+  mockAuth: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -42,6 +45,7 @@ vi.mock("@/lib/server/database", async () => {
 });
 
 vi.mock("@clerk/nextjs/server", () => ({
+  auth: mockAuth,
   clerkClient: vi.fn().mockResolvedValue({
     users: {
       getUser: vi.fn(),
@@ -53,6 +57,7 @@ import {
   getPinterestRecipeFolderTree,
   getPublicRecipeDetail,
   getRecipeDetail,
+  hasCurrentUserRecipeAccess,
 } from "@/lib/server/queries";
 
 let tempDir: string;
@@ -85,6 +90,7 @@ beforeEach(async () => {
     role: "member",
     clerkUserId: "user_123",
   });
+  mockAuth.mockResolvedValue({ userId: "user_123" });
 
   const { db, sqlite } = await createTestDatabaseHandle(sqlitePath);
 
@@ -96,6 +102,14 @@ beforeEach(async () => {
         name: "Kitchen",
         createdAt: now,
         updatedAt: now,
+      })
+      .run();
+    await db.insert(householdMembers)
+      .values({
+        householdId: "household_1",
+        clerkUserId: "user_123",
+        role: "member",
+        joinedAt: now,
       })
       .run();
     await db.insert(householdBoards)
@@ -218,6 +232,7 @@ afterEach(() => {
   vi.clearAllMocks();
   mockOpenDatabase.mockReset();
   mockRequireHouseholdContext.mockReset();
+  mockAuth.mockReset();
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -277,6 +292,7 @@ describe("getPublicRecipeDetail", () => {
     await expect(getPublicRecipeDetail("recipe_section")).resolves.toMatchObject({
       recipeId: "recipe_section",
       title: "Section meal",
+      householdName: "Kitchen",
       ingredients: [],
       steps: [],
     });
@@ -284,6 +300,19 @@ describe("getPublicRecipeDetail", () => {
 
   it("returns null for a recipe that does not exist", async () => {
     await expect(getPublicRecipeDetail("missing_recipe")).resolves.toBeNull();
+  });
+});
+
+describe("hasCurrentUserRecipeAccess", () => {
+  it("allows members of the recipe household and rejects other recipes", async () => {
+    await expect(hasCurrentUserRecipeAccess("recipe_section")).resolves.toBe(true);
+    await expect(hasCurrentUserRecipeAccess("missing_recipe")).resolves.toBe(false);
+  });
+
+  it("keeps public routes available when the visitor is signed out", async () => {
+    mockAuth.mockResolvedValueOnce({ userId: null });
+
+    await expect(hasCurrentUserRecipeAccess("recipe_section")).resolves.toBe(false);
   });
 });
 

@@ -16,7 +16,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { RecipePageScrollToTop } from "@/app/(app)/recipe/[recipeId]/scroll-to-top";
 import { extractRecipeAction } from "@/lib/actions/operations";
-import { getCustomRecipeBoardOptions, getRecipeDetail } from "@/lib/server/queries";
+import {
+  getCustomRecipeBoardOptions,
+  getRecipeDetail,
+} from "@/lib/server/queries";
 import { formatIso8601Duration } from "@/lib/utils";
 import { getCurrentUserAccess } from "@/lib/server/access";
 import { getPublicRecipeUrl } from "@/lib/public-recipe-url";
@@ -83,6 +86,10 @@ export default async function RecipePage({
             <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
             <div className="absolute inset-x-0 bottom-0 p-2 text-white sm:p-8">
               <div className="mb-3 flex flex-wrap gap-2">
+                <RecipeVersionHistory
+                  recipeId={recipe.recipeId}
+                  versions={recipe.versions}
+                />
                 {recipe.totalTime ? (
                   <MetaChip
                     icon={<Clock3 className="h-4 w-4" />}
@@ -104,27 +111,25 @@ export default async function RecipePage({
         </section>
       </RecipeMetadataEditor>
 
-      <div className="flex gap-2 w-full">
-        <CopyPublicRecipeLink url={getPublicRecipeUrl(recipe.recipeId)} />
+      <div className="flex flex-wrap gap-2 w-full">
+        <CopyPublicRecipeLink
+          url={getPublicRecipeUrl(recipe.recipeId, recipe.primaryVersionNumber)}
+        />
         {recipe.sourceUrl && (
           <Button asChild>
             <a href={recipe.sourceUrl} target="_blank" rel="noreferrer">
               <ExternalLink className="size-4" />
-              View recipe source
+              Original Source
             </a>
           </Button>
         )}
 
-        {recipe.pin?.link && (
-          <Button asChild variant="outline">
-            <a href={recipe.pin.link} target="_blank" rel="noreferrer">
-              View on pinterest
-              <ExternalLink className="h-4 w-4" />
-            </a>
-          </Button>
-        )}
         {recipe.pin.pinterestPinId.startsWith("personal:") ? (
-          <PublishPersonalRecipe recipeId={recipe.recipeId} boards={publishOptions.boards} canPublish={publishOptions.canPublish} />
+          <PublishPersonalRecipe
+            recipeId={recipe.recipeId}
+            boards={publishOptions.boards}
+            canPublish={publishOptions.canPublish}
+          />
         ) : null}
       </div>
 
@@ -136,11 +141,11 @@ export default async function RecipePage({
         reviews={recipe.reviews}
       />
 
-      <RecipeVersionHistory recipeId={recipe.recipeId} versions={recipe.versions} />
-
       <RecipeContent
         recipe={recipe}
-        emptyIngredients={<EmptyRecipeState recipeId={recipe.recipeId} status={recipe.status} />}
+        emptyIngredients={
+          <EmptyRecipeState recipeId={recipe.recipeId} status={recipe.status} />
+        }
         showEmptySteps={false}
       />
 

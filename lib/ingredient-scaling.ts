@@ -1,3 +1,5 @@
+import { formatIngredientUnit } from "@/lib/ingredient-units";
+
 export type ScalableIngredient = {
   originalText: string;
   amount: string | null;
@@ -36,7 +38,7 @@ export function formatScaledIngredient(
   ingredient: ScalableIngredient,
   multiplier: 1 | 2 | 3,
 ) {
-  if (multiplier === 1 || ingredient.amountValue === null || !ingredient.parsedText) {
+  if (ingredient.amountValue === null || !ingredient.parsedText) {
     return ingredient.originalText;
   }
 
@@ -102,6 +104,10 @@ function formatAmount(value: number) {
 }
 
 function formatUnit(unit: string, minimum: number, maximum: number | null) {
+  const abbreviated = formatIngredientUnit(unit);
+  if (abbreviated !== unit) {
+    return abbreviated;
+  }
   const labels = UNIT_LABELS[unit];
   if (!labels) {
     return unit;

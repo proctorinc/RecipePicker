@@ -1,4 +1,4 @@
-import { clerkClient } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { and, asc, desc, eq, gte, lt } from "drizzle-orm";
 
 import { getCurrentUserAccess, resolveFeedCardHref } from "@/lib/server/access";
@@ -63,6 +63,7 @@ import type {
   RecipeParseJobDetail,
   RecipeParseJobSummary,
   PublicRecipeDetailView,
+  PublicRecipeVersionDetailView,
   RecipeReviewView,
   RecipeVersionView,
 } from "@/types/view-models";
@@ -252,10 +253,24 @@ export async function getRecipeDetail(
       return null;
     }
 
-    const versions = await db.query.householdRecipeVersions.findMany({
+    let versions = await db.query.householdRecipeVersions.findMany({
       where: (table, { and, eq }) => and(eq(table.recipeId, row.recipeId), eq(table.householdId, context.householdId)),
       orderBy: (table, { asc }) => [asc(table.versionNumber)],
     });
+    if (versions.length === 0) {
+      const imageSources = resolveRecipeImageSources(row.imageUrl, row.recipeInstructions?.imageUrl, row.pin.mediaJson, row.pin.rawJson);
+      const snapshot = {
+        title: row.title ?? row.pin.title ?? row.recipeInstructions?.title ?? "Untitled recipe",
+        description: row.description ?? row.pin.description ?? row.recipeInstructions?.description ?? null,
+        imageUrl: imageSources.imageUrl, sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link,
+        dominantColor: row.pin.dominantColor, yieldText: row.recipeInstructions?.yieldText ?? null,
+        prepTime: row.recipeInstructions?.prepTime ?? null, cookTime: row.recipeInstructions?.cookTime ?? null, totalTime: row.recipeInstructions?.totalTime ?? null,
+        ingredients: row.recipeInstructions?.ingredients.map((ingredient) => ({ id: ingredient.ingredientId, originalText: ingredient.originalText, displayText: ingredient.originalText, amount: ingredient.amountText, amountValue: ingredient.amountValue, amountMaxValue: ingredient.amountMaxValue, unit: ingredient.unit, parsedText: ingredient.ingredientText, notes: ingredient.notes, canonicalIngredientId: ingredient.canonicalIngredientId, canonicalName: ingredient.canonicalIngredient?.displayName ?? null, attributes: parseJsonArray(ingredient.attributesJson), normalizationStatus: toIngredientStatus(ingredient.normalizationStatus) })) ?? [],
+        steps: row.recipeInstructions?.steps.map((step) => ({ id: step.stepId, section: step.section, text: step.text })) ?? [],
+      };
+      await db.insert(householdRecipeVersions).values({ householdId: context.householdId, recipeId: row.recipeId, versionNumber: 1, ingredientsJson: JSON.stringify(snapshot.ingredients.map((item) => item.originalText)), stepsJson: JSON.stringify(snapshot.steps), snapshotJson: JSON.stringify(snapshot), note: "Original recipe", createdAt: row.createdAt }).run();
+      versions = [{ recipeVersionId: "", householdId: context.householdId, recipeId: row.recipeId, versionNumber: 1, ingredientsJson: JSON.stringify(snapshot.ingredients.map((item) => item.originalText)), stepsJson: JSON.stringify(snapshot.steps), snapshotJson: JSON.stringify(snapshot), note: "Original recipe", createdByClerkUserId: null, createdAt: row.createdAt }];
+    }
     const primaryVersion = versions.at(-1) ?? null;
     const primaryIngredients = primaryVersion ? parseVersionIngredientLines(primaryVersion.ingredientsJson) : null;
     const latestExtraction = row.pin.recipeExtractions[0];
@@ -347,74 +362,99 @@ export async function getRecipeDetail(
  */
 export async function getPublicRecipeDetail(
   recipeId: string,
-): Promise<PublicRecipeDetailView | null> {
+  versionNumber = 1,
+): Promise<PublicRecipeVersionDetailView | null> {
   const { db, sqlite } = await openDatabase();
 
   try {
-    const row = await db.query.householdRecipes.findFirst({
+    const versions = await db.query.householdRecipeVersions.findMany({
       where: (table, { eq }) => eq(table.recipeId, recipeId),
-      with: {
-        pin: true,
-        recipeInstructions: {
-          with: {
-            ingredients: {
-              orderBy: (table, { asc }) => [asc(table.position)],
-              with: { canonicalIngredient: true },
-            },
-            steps: {
-              orderBy: (table, { asc }) => [asc(table.position)],
-            },
-          },
-        },
-      },
+      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.versionNumber)],
+    });
+    const selected = versions.find((version) => version.versionNumber === versionNumber);
+    if (!selected && versions.length === 0 && versionNumber === 1) {
+      const row = await db.query.householdRecipes.findFirst({
+        where: (table, { eq }) => eq(table.recipeId, recipeId),
+        with: { pin: true, recipeInstructions: { with: { ingredients: { orderBy: (table, { asc }) => [asc(table.position)], with: { canonicalIngredient: true } }, steps: { orderBy: (table, { asc }) => [asc(table.position)] } } } },
+      });
+      if (!row) return null;
+      const household = await db.query.households.findFirst({
+        where: (table, { eq }) => eq(table.householdId, row.householdId),
+        columns: { name: true },
+      });
+      const imageSources = resolveRecipeImageSources(row.imageUrl, row.recipeInstructions?.imageUrl, row.pin.mediaJson, row.pin.rawJson);
+      return {
+        recipeId: row.recipeId, title: row.title ?? row.pin.title ?? row.recipeInstructions?.title ?? "Untitled recipe", imageUrl: imageSources.imageUrl, previewImageUrl: imageSources.previewImageUrl,
+        householdName: household?.name ?? "A Food Picker household",
+        description: row.description ?? row.pin.description ?? row.recipeInstructions?.description ?? null, sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link, dominantColor: row.pin.dominantColor,
+        yieldText: row.recipeInstructions?.yieldText ?? null, prepTime: row.recipeInstructions?.prepTime ?? null, cookTime: row.recipeInstructions?.cookTime ?? null, totalTime: row.recipeInstructions?.totalTime ?? null,
+        ingredients: row.recipeInstructions?.ingredients.map((ingredient) => ({ id: ingredient.ingredientId, originalText: ingredient.originalText, displayText: ingredient.originalText, amount: ingredient.amountText, amountValue: ingredient.amountValue, amountMaxValue: ingredient.amountMaxValue, unit: ingredient.unit, parsedText: ingredient.ingredientText, notes: ingredient.notes, canonicalIngredientId: ingredient.canonicalIngredientId, canonicalName: ingredient.canonicalIngredient?.displayName ?? null, attributes: parseJsonArray(ingredient.attributesJson), normalizationStatus: toIngredientStatus(ingredient.normalizationStatus) })) ?? [],
+        steps: row.recipeInstructions?.steps.map((step) => ({ id: step.stepId, section: step.section, text: step.text })) ?? [], versionNumber: 1, latestVersionNumber: 1,
+      };
+    }
+    if (!selected) return null;
+    const snapshot = parseJsonRecord(selected.snapshotJson) as PublicRecipeDetailView | null;
+    if (!snapshot || typeof snapshot.title !== "string" || !Array.isArray(snapshot.ingredients) || !Array.isArray(snapshot.steps)) return null;
+    const household = await db.query.households.findFirst({
+      where: (table, { eq }) => eq(table.householdId, selected.householdId),
+      columns: { name: true },
+    });
+    return { ...snapshot, recipeId, previewImageUrl: null, householdName: household?.name ?? "A Food Picker household", versionNumber: selected.versionNumber, latestVersionNumber: versions[0]?.versionNumber ?? selected.versionNumber };
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function getLatestPublicRecipeVersion(recipeId: string): Promise<number | null> {
+  const { db, sqlite } = await openDatabase();
+  try {
+    const version = await db.query.householdRecipeVersions.findFirst({
+      where: (table, { eq }) => eq(table.recipeId, recipeId),
+      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.versionNumber)],
+      columns: { versionNumber: true },
+    });
+    if (version) return version.versionNumber;
+    const recipe = await db.query.householdRecipes.findFirst({
+      where: (table, { eq }) => eq(table.recipeId, recipeId),
+      columns: { recipeId: true },
+    });
+    return recipe ? 1 : null;
+  } finally { await sqlite.close(); }
+}
+
+/**
+ * Checks access without provisioning a household, so public URLs remain safe
+ * for visitors who are signed out or have not joined the recipe's household.
+ */
+export async function hasCurrentUserRecipeAccess(recipeId: string): Promise<boolean> {
+  const { userId } = await auth();
+
+  if (!userId) {
+    return false;
+  }
+
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const membership = await db.query.householdMembers.findFirst({
+      where: (table, { eq }) => eq(table.clerkUserId, userId),
+      columns: { householdId: true },
     });
 
-    if (!row) {
-      return null;
+    if (!membership) {
+      return false;
     }
 
-    const imageSources = resolveRecipeImageSources(
-      row.imageUrl,
-      row.recipeInstructions?.imageUrl,
-      row.pin.mediaJson,
-      row.pin.rawJson,
-    );
-    const rawRecipe = parseJsonRecord(row.recipeInstructions?.rawRecipeJson);
-    const isCreatedInApp = rawRecipe?.createdInApp === true;
+    const recipe = await db.query.householdRecipes.findFirst({
+      where: (table, { and, eq }) =>
+        and(
+          eq(table.recipeId, recipeId),
+          eq(table.householdId, membership.householdId),
+        ),
+      columns: { recipeId: true },
+    });
 
-    return {
-      recipeId: row.recipeId,
-      title: row.title ?? row.pin.title ?? row.recipeInstructions?.title ?? "Untitled recipe",
-      imageUrl: imageSources.imageUrl,
-      previewImageUrl: imageSources.previewImageUrl,
-      description: row.description ?? row.pin.description ?? row.recipeInstructions?.description ?? null,
-      sourceUrl: row.recipeInstructions?.canonicalUrl ?? (isCreatedInApp ? null : row.pin.link),
-      dominantColor: row.pin.dominantColor,
-      yieldText: row.recipeInstructions?.yieldText ?? null,
-      prepTime: row.recipeInstructions?.prepTime ?? null,
-      cookTime: row.recipeInstructions?.cookTime ?? null,
-      totalTime: row.recipeInstructions?.totalTime ?? null,
-      ingredients: row.recipeInstructions?.ingredients.map((ingredient) => ({
-        id: ingredient.ingredientId,
-        originalText: ingredient.originalText,
-        displayText: ingredient.originalText,
-        amount: ingredient.amountText,
-        amountValue: ingredient.amountValue,
-        amountMaxValue: ingredient.amountMaxValue,
-        unit: ingredient.unit,
-        parsedText: ingredient.ingredientText,
-        notes: ingredient.notes,
-        canonicalIngredientId: ingredient.canonicalIngredientId,
-        canonicalName: ingredient.canonicalIngredient?.displayName ?? null,
-        attributes: parseJsonArray(ingredient.attributesJson),
-        normalizationStatus: toIngredientStatus(ingredient.normalizationStatus),
-      })) ?? [],
-      steps: row.recipeInstructions?.steps.map((step) => ({
-        id: step.stepId,
-        section: step.section,
-        text: step.text,
-      })) ?? [],
-    };
+    return Boolean(recipe);
   } finally {
     await sqlite.close();
   }

@@ -1,6 +1,6 @@
 const LOCAL_APP_URL = "http://localhost:3000";
 
-export function getPublicRecipeUrl(recipeId: string): string {
+export function getPublicRecipeUrl(recipeId: string, versionNumber?: number): string {
   const configuredUrl = process.env.APP_URL?.trim();
   const appUrl = configuredUrl || (process.env.NODE_ENV === "production" ? null : LOCAL_APP_URL);
 
@@ -9,7 +9,9 @@ export function getPublicRecipeUrl(recipeId: string): string {
   }
 
   const url = new URL(appUrl);
-  url.pathname = `/r/${encodeURIComponent(recipeId)}`;
+  url.pathname = versionNumber === undefined
+    ? `/r/${encodeURIComponent(recipeId)}`
+    : `/r/${encodeURIComponent(recipeId)}/v/${encodeURIComponent(String(versionNumber))}`;
   url.search = "";
   url.hash = "";
   return url.toString();

@@ -48,6 +48,7 @@ import {
   upsertHouseholdAiConnection,
 } from "@/lib/server/ai-provider";
 import { logAudit, withActionLogging } from "@/lib/server/logger";
+import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
 import {
   disconnectPinterestConnection,
   setPinterestConnectionAutoSyncEnabled,
@@ -905,6 +906,7 @@ export const createRecipeVersionAction = withActionLogging(
         const recipe = await db.query.householdRecipes.findFirst({
           where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
           with: {
+            pin: true,
             recipeInstructions: { with: { ingredients: { orderBy: (table, { asc }) => [asc(table.position)] }, steps: { orderBy: (table, { asc }) => [asc(table.position)] } } },
           },
         });
@@ -917,6 +919,7 @@ export const createRecipeVersionAction = withActionLogging(
           orderBy: (table, { asc }) => [asc(table.versionNumber)],
         });
         const steps = recipe.recipeInstructions.steps.map((step) => ({ section: step.section, text: step.text }));
+        const snapshot = buildRecipeVersionSnapshot(recipe);
 
         // Existing recipes are implicitly v1. Persist that snapshot before adding v2.
         if (versions.length === 0) {
@@ -926,6 +929,7 @@ export const createRecipeVersionAction = withActionLogging(
             versionNumber: 1,
             ingredientsJson: JSON.stringify(recipe.recipeInstructions.ingredients.map((item) => item.originalText)),
             stepsJson: JSON.stringify(steps),
+            snapshotJson: JSON.stringify(snapshot),
             note: "Original recipe",
             createdByClerkUserId: context.clerkUserId,
             createdAt: recipe.createdAt,
@@ -938,6 +942,7 @@ export const createRecipeVersionAction = withActionLogging(
           versionNumber: nextNumber,
           ingredientsJson: JSON.stringify(ingredientLines),
           stepsJson: JSON.stringify(steps),
+          snapshotJson: JSON.stringify({ ...snapshot, ingredients: ingredientLines.map((originalText, index) => ({ ...snapshot.ingredients[index], id: snapshot.ingredients[index]?.id ?? `version-ingredient-${index}`, originalText, displayText: originalText })) }),
           note,
           createdByClerkUserId: context.clerkUserId,
           createdAt: now,
@@ -957,11 +962,15 @@ export const saveRecipeContentAction = withActionLogging(
   "action.save_recipe_content",
   async (_: ActionState, formData: FormData): Promise<ActionState> => {
   const recipeId = String(formData.get("recipeId") ?? "").trim();
+  const versionMode = String(formData.get("versionMode") ?? "").trim();
   const ingredients = parseRecipeContentItems(formData.get("ingredientsJson"), isRecipeIngredientInput);
   const steps = parseRecipeContentItems(formData.get("stepsJson"), isRecipeStepInput);
 
   if (!recipeId) {
     return { status: "error", message: "Recipe ID is required." };
+  }
+  if (versionMode !== "update" && versionMode !== "new") {
+    return { status: "error", message: "Choose whether to update this version or create a new one." };
   }
 
   try {
@@ -971,20 +980,13 @@ export const saveRecipeContentAction = withActionLogging(
 
     try {
       const recipe = await db.query.householdRecipes.findFirst({
-        where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
-        with: {
-          recipeInstructions: {
+          where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+          with: {
+            pin: true,
+            recipeInstructions: {
             with: {
-              ingredients: {
-                columns: {
-                  ingredientId: true,
-                },
-              },
-              steps: {
-                columns: {
-                  stepId: true,
-                },
-              },
+              ingredients: true,
+              steps: true,
             },
           },
         },
@@ -996,6 +998,7 @@ export const saveRecipeContentAction = withActionLogging(
 
       const knownIngredientIds = new Set(recipe.recipeInstructions.ingredients.map((ingredient) => ingredient.ingredientId));
       const knownStepIds = new Set(recipe.recipeInstructions.steps.map((step) => step.stepId));
+      const priorSnapshot = buildRecipeVersionSnapshot(recipe);
 
       for (const ingredient of ingredients) {
         if (!knownIngredientIds.has(ingredient.id) || !ingredient.originalText.trim()) {
@@ -1043,14 +1046,41 @@ export const saveRecipeContentAction = withActionLogging(
         where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
         orderBy: (table, { desc }) => [desc(table.versionNumber)],
       });
-      if (primaryVersion) {
+      const updatedSnapshot = {
+        ...priorSnapshot,
+        ingredients: ingredients.length > 0
+          ? priorSnapshot.ingredients.map((ingredient) => ({ ...ingredient, originalText: ingredients.find((item) => item.id === ingredient.id)?.originalText.trim() ?? ingredient.originalText, displayText: ingredients.find((item) => item.id === ingredient.id)?.originalText.trim() ?? ingredient.displayText }))
+          : priorSnapshot.ingredients,
+        steps: steps.length > 0
+          ? priorSnapshot.steps.map((step) => ({ ...step, section: steps.find((item) => item.id === step.id)?.section?.trim() || null, text: steps.find((item) => item.id === step.id)?.text.trim() ?? step.text }))
+          : priorSnapshot.steps,
+      };
+      if (primaryVersion && versionMode === "update") {
         await db.update(householdRecipeVersions)
           .set({
             ingredientsJson: ingredients.length > 0 ? JSON.stringify(ingredients.map((item) => item.originalText.trim())) : primaryVersion.ingredientsJson,
             stepsJson: steps.length > 0 ? JSON.stringify(steps.map((item) => ({ section: item.section?.trim() || null, text: item.text.trim() }))) : primaryVersion.stepsJson,
+            snapshotJson: JSON.stringify(updatedSnapshot),
           })
           .where(eq(householdRecipeVersions.recipeVersionId, primaryVersion.recipeVersionId))
           .run();
+      } else if (versionMode === "new") {
+        if (!primaryVersion) {
+          await db.insert(householdRecipeVersions).values({
+            householdId: context.householdId, recipeId, versionNumber: 1,
+            ingredientsJson: JSON.stringify(priorSnapshot.ingredients.map((item) => item.originalText)),
+            stepsJson: JSON.stringify(priorSnapshot.steps.map((item) => ({ section: item.section, text: item.text }))),
+            snapshotJson: JSON.stringify(priorSnapshot), note: "Original recipe",
+            createdByClerkUserId: context.clerkUserId, createdAt: recipe.createdAt,
+          }).run();
+        }
+        await db.insert(householdRecipeVersions).values({
+          householdId: context.householdId, recipeId, versionNumber: (primaryVersion?.versionNumber ?? 1) + 1,
+          ingredientsJson: JSON.stringify(updatedSnapshot.ingredients.map((item) => item.originalText)),
+          stepsJson: JSON.stringify(updatedSnapshot.steps.map((item) => ({ section: item.section, text: item.text }))),
+          snapshotJson: JSON.stringify(updatedSnapshot), note: null,
+          createdByClerkUserId: context.clerkUserId, createdAt: now,
+        }).run();
       }
     } finally {
       await sqlite.close();
@@ -1059,7 +1089,7 @@ export const saveRecipeContentAction = withActionLogging(
     revalidateAll(recipeScopedPaths(undefined, recipeId));
     return {
       status: "success",
-      message: "Saved the recipe content updates.",
+      message: versionMode === "new" ? "New recipe version created." : "Updated the current recipe version.",
     };
   } catch (error) {
     return toErrorState(error, "Unable to save the recipe content.");
@@ -2124,6 +2154,42 @@ function parseRatingValue(value: FormDataEntryValue | null) {
   }
 
   return Math.round(parsed * 2) === parsed * 2 ? parsed : null;
+}
+
+function buildRecipeVersionSnapshot(recipe: {
+  title: string | null;
+  description: string | null;
+  imageUrl: string | null;
+  pin: { title: string | null; description: string | null; dominantColor: string | null; link: string | null; mediaJson: string | null; rawJson: string };
+  recipeInstructions: {
+    title: string | null; description: string | null; imageUrl: string | null;
+    canonicalUrl: string | null; yieldText: string | null; prepTime: string | null; cookTime: string | null; totalTime: string | null;
+    ingredients: Array<{ ingredientId: string; originalText: string; amountText: string | null; amountValue: number | null; amountMaxValue: number | null; unit: string | null; ingredientText: string | null; notes: string | null; canonicalIngredientId: string | null; attributesJson: string | null; normalizationStatus: string }>;
+    steps: Array<{ stepId: string; section: string | null; text: string }>;
+  } | null;
+}) {
+  const instructions = recipe.recipeInstructions;
+  const imageSources = resolveRecipeImageSources(recipe.imageUrl, instructions?.imageUrl, recipe.pin.mediaJson, recipe.pin.rawJson);
+  return {
+    title: recipe.title ?? recipe.pin.title ?? instructions?.title ?? "Untitled recipe",
+    description: recipe.description ?? recipe.pin.description ?? instructions?.description ?? null,
+    imageUrl: imageSources.imageUrl,
+    sourceUrl: instructions?.canonicalUrl ?? recipe.pin.link,
+    dominantColor: recipe.pin.dominantColor,
+    yieldText: instructions?.yieldText ?? null,
+    prepTime: instructions?.prepTime ?? null,
+    cookTime: instructions?.cookTime ?? null,
+    totalTime: instructions?.totalTime ?? null,
+    ingredients: (instructions?.ingredients ?? []).map((ingredient) => ({
+      id: ingredient.ingredientId, originalText: ingredient.originalText, displayText: ingredient.originalText,
+      amount: ingredient.amountText, amountValue: ingredient.amountValue, amountMaxValue: ingredient.amountMaxValue,
+      unit: ingredient.unit, parsedText: ingredient.ingredientText, notes: ingredient.notes,
+      canonicalIngredientId: ingredient.canonicalIngredientId, canonicalName: null,
+      attributes: ingredient.attributesJson ? JSON.parse(ingredient.attributesJson) : [],
+      normalizationStatus: ingredient.normalizationStatus === "confirmed" ? "confirmed" : ingredient.normalizationStatus === "auto_matched" ? "auto_matched" : "needs_review",
+    })),
+    steps: (instructions?.steps ?? []).map((step) => ({ id: step.stepId, section: step.section, text: step.text })),
+  };
 }
 
 function parseCustomRecipeLines(value: FormDataEntryValue | null) {
