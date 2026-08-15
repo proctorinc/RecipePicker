@@ -720,6 +720,8 @@ export const householdRecipeIngredients = sqliteTable(
     matchConfidence: integer("match_confidence"),
     matchedBy: text("matched_by"),
     aiSuggestionsJson: text("ai_suggestions_json"),
+    aiParseOutcome: text("ai_parse_outcome"),
+    aiParseReason: text("ai_parse_reason"),
     normalizationStatus: text("normalization_status").notNull(),
     reviewDisposition: text("review_disposition").notNull().default("pending"),
   },
@@ -741,6 +743,35 @@ export const householdRecipeIngredients = sqliteTable(
       table.position,
     ),
     canonicalIngredientIdx: index("idx_household_recipe_ingredients_canonical_ingredient_id").on(table.canonicalIngredientId),
+  }),
+);
+
+export const householdRecipeIngredientAlternatives = sqliteTable(
+  "household_recipe_ingredient_alternatives",
+  {
+    alternativeId: generatedId("alternative_id"),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.householdId),
+    recipeId: text("recipe_id")
+      .notNull()
+      .references(() => householdRecipeInstructions.recipeId),
+    ingredientId: text("ingredient_id")
+      .notNull()
+      .references(() => householdRecipeIngredients.ingredientId),
+    position: integer("position").notNull(),
+    ingredientText: text("ingredient_text").notNull(),
+    normalizedIngredientPhrase: text("normalized_ingredient_phrase"),
+    canonicalIngredientId: text("canonical_ingredient_id").references(() => householdCanonicalIngredients.canonicalIngredientId),
+    attributesJson: text("attributes_json"),
+    matchConfidence: integer("match_confidence"),
+    matchedBy: text("matched_by"),
+    aiSuggestionsJson: text("ai_suggestions_json"),
+    normalizationStatus: text("normalization_status").notNull(),
+  },
+  (table) => ({
+    ingredientPositionIdx: uniqueIndex("idx_recipe_ingredient_alternatives_ingredient_position").on(table.ingredientId, table.position),
+    householdNormalizationIdx: index("idx_recipe_ingredient_alternatives_household_normalization").on(table.householdId, table.normalizationStatus),
   }),
 );
 
@@ -1146,13 +1177,25 @@ export const householdRecipeStepsRelations = relations(householdRecipeSteps, ({ 
   }),
 }));
 
-export const householdRecipeIngredientsRelations = relations(householdRecipeIngredients, ({ one }) => ({
+export const householdRecipeIngredientsRelations = relations(householdRecipeIngredients, ({ one, many }) => ({
   recipeInstructions: one(householdRecipeInstructions, {
     fields: [householdRecipeIngredients.recipeId],
     references: [householdRecipeInstructions.recipeId],
   }),
   canonicalIngredient: one(householdCanonicalIngredients, {
     fields: [householdRecipeIngredients.canonicalIngredientId],
+    references: [householdCanonicalIngredients.canonicalIngredientId],
+  }),
+  alternatives: many(householdRecipeIngredientAlternatives),
+}));
+
+export const householdRecipeIngredientAlternativesRelations = relations(householdRecipeIngredientAlternatives, ({ one }) => ({
+  recipeIngredient: one(householdRecipeIngredients, {
+    fields: [householdRecipeIngredientAlternatives.ingredientId],
+    references: [householdRecipeIngredients.ingredientId],
+  }),
+  canonicalIngredient: one(householdCanonicalIngredients, {
+    fields: [householdRecipeIngredientAlternatives.canonicalIngredientId],
     references: [householdCanonicalIngredients.canonicalIngredientId],
   }),
 }));

@@ -1,12 +1,28 @@
 import { z } from "zod";
 
-import { generateIngredientSuggestionsWithHouseholdAi } from "@/lib/server/ai-provider";
+import {
+  generateIngredientParsesWithHouseholdAi,
+  generateIngredientSuggestionsWithHouseholdAi,
+} from "@/lib/server/ai-provider";
+import type { DatabaseClient } from "@/src/db/client";
 import type {
   CanonicalIngredientOption,
   IngredientReviewSuggestionView,
 } from "@/types/view-models";
 
 type IngredientAiCatalogEntry = CanonicalIngredientOption;
+
+export type IngredientAiParseOutcome = "parsed" | "not_ingredient" | "unresolved";
+
+export type IngredientAiParse = {
+  ingredientId: string;
+  outcome: IngredientAiParseOutcome;
+  ingredientText: string | null;
+  amountText: string | null;
+  unit: string | null;
+  notes: string | null;
+  reason: string | null;
+};
 
 type IngredientAiRequest = {
   householdId: string;
@@ -30,6 +46,80 @@ const ingredientSuggestionSchema = z.object({
     }),
   ).min(1).max(3),
 });
+
+const ingredientParseSchema = z.object({
+  results: z.array(z.discriminatedUnion("outcome", [
+    z.object({
+      ingredientId: z.string(),
+      outcome: z.literal("parsed"),
+      ingredientText: z.string().nullable(),
+      amountText: z.string().nullable(),
+      unit: z.string().nullable(),
+      notes: z.string().nullable(),
+      reason: z.string().nullable().optional(),
+    }),
+    z.object({
+      ingredientId: z.string(),
+      outcome: z.literal("not_ingredient"),
+      ingredientText: z.string().nullable(),
+      amountText: z.string().nullable(),
+      unit: z.string().nullable(),
+      notes: z.string().nullable(),
+      reason: z.string().trim().min(1),
+    }),
+    z.object({
+      ingredientId: z.string(),
+      outcome: z.literal("unresolved"),
+      ingredientText: z.string().nullable(),
+      amountText: z.string().nullable(),
+      unit: z.string().nullable(),
+      notes: z.string().nullable(),
+      reason: z.string().trim().min(1),
+    }),
+  ])).max(20),
+});
+
+export async function getIngredientAiParses(args: {
+  householdId: string;
+  ingredients: Array<{ ingredientId: string; originalText: string }>;
+  database?: DatabaseClient;
+}): Promise<IngredientAiParse[] | null> {
+  if (args.ingredients.length === 0) {
+    return [];
+  }
+
+  const parsed = await generateIngredientParsesWithHouseholdAi({
+    householdId: args.householdId,
+    database: args.database,
+    schema: ingredientParseSchema,
+    prompt: buildIngredientParsePrompt(args.ingredients),
+  });
+
+  const validated = ingredientParseSchema.safeParse(parsed);
+  if (!validated.success) {
+    return null;
+  }
+
+  const requestedIds = new Set(args.ingredients.map((ingredient) => ingredient.ingredientId));
+  const seenIds = new Set<string>();
+
+  return validated.data.results.flatMap((result) => {
+    if (!requestedIds.has(result.ingredientId) || seenIds.has(result.ingredientId)) {
+      return [];
+    }
+
+    seenIds.add(result.ingredientId);
+    return [{
+      ingredientId: result.ingredientId,
+      outcome: result.outcome,
+      ingredientText: cleanOptionalText(result.ingredientText),
+      amountText: cleanOptionalText(result.amountText),
+      unit: cleanOptionalText(result.unit),
+      notes: cleanOptionalText(result.notes),
+      reason: cleanOptionalText(result.reason ?? null),
+    }];
+  });
+}
 
 export async function getIngredientAiSuggestions(
   request: IngredientAiRequest,
@@ -78,6 +168,28 @@ function buildPrompt(request: IngredientAiRequest) {
     "Available canonical ingredients:",
     catalogSummary || "(none)",
   ].join("\n");
+}
+
+function buildIngredientParsePrompt(
+  ingredients: Array<{ ingredientId: string; originalText: string }>,
+) {
+  return [
+    "You extract recipe ingredient lines into a small, reviewable schema.",
+    "Return exactly one result for every input ingredient ID, preserving that ID.",
+    "For outcome=parsed, extract ingredientText, amountText, unit, and notes. Use null for fields that do not exist.",
+    "Do not calculate numeric quantities, normalize units, match a catalog, or invent values.",
+    "Use outcome=not_ingredient only when the line is not an ingredient. Give a concise reason that helps a human understand why.",
+    "Use outcome=unresolved when the line is an ingredient-related instruction or format that cannot be faithfully represented by these fields. Give a concise reason describing what does not fit.",
+    "Do not automatically reject anything; your outcome and reason are advisory feedback for a human reviewer.",
+    "",
+    "Input ingredients:",
+    ...ingredients.map((ingredient) => `${ingredient.ingredientId} | ${ingredient.originalText}`),
+  ].join("\n");
+}
+
+function cleanOptionalText(value: string | null) {
+  const cleaned = value?.trim();
+  return cleaned || null;
 }
 
 function validateSuggestions(

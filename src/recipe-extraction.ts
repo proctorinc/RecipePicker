@@ -119,6 +119,7 @@ export type ExtractedIngredientLine = {
   unit: string | null;
   ingredientText: string | null;
   notes: string | null;
+  alternativeIngredientTexts: string[] | null;
 };
 
 export type ExtractedStep = {
@@ -1323,6 +1324,7 @@ function parseIngredientLine(rawLine: string): ExtractedIngredientLine {
   );
 
   if (!match) {
+    const alternativeIngredientTexts = parseIngredientAlternatives(normalized);
     return {
       originalText: normalized,
       amountText: null,
@@ -1331,6 +1333,7 @@ function parseIngredientLine(rawLine: string): ExtractedIngredientLine {
       unit: null,
       ingredientText: normalized || null,
       notes: null,
+      alternativeIngredientTexts,
     };
   }
 
@@ -1342,6 +1345,7 @@ function parseIngredientLine(rawLine: string): ExtractedIngredientLine {
   const noteText = parts.length > 0 ? parts.join(", ") : null;
   const tokens = mainPart.split(/\s+/);
   const unit = normalizeUnit(tokens[0] ?? "");
+  const ingredientText = unit ? tokens.slice(1).join(" ") || null : mainPart || null;
 
   return {
     originalText: normalized,
@@ -1349,9 +1353,33 @@ function parseIngredientLine(rawLine: string): ExtractedIngredientLine {
     amountValue: parsedAmount.amountValue,
     amountMaxValue: parsedAmount.amountMaxValue,
     unit,
-    ingredientText: unit ? tokens.slice(1).join(" ") || null : mainPart || null,
+    ingredientText,
     notes: noteText,
+    alternativeIngredientTexts: parseIngredientAlternatives(ingredientText),
   };
+}
+
+function parseIngredientAlternatives(ingredientText: string | null): string[] | null {
+  if (!ingredientText || !/\s+or\s+/i.test(ingredientText)) {
+    return null;
+  }
+
+  const alternatives = ingredientText
+    .split(/\s+or\s+/i)
+    .map((value) => normalizeWhitespace(value))
+    .filter(Boolean);
+
+  // Only split complete, share-the-quantity choices. Lines such as
+  // "red or green bell pepper" need contextual rewriting and remain a single
+  // ingredient until we can model that form without losing meaning.
+  if (
+    alternatives.length < 2 ||
+    alternatives.some((value) => /\d|\b(?:cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|oz|ounce|ounces|lb|lbs|pound|pounds)\b/i.test(value))
+  ) {
+    return null;
+  }
+
+  return alternatives;
 }
 
 function normalizeUnit(token: string) {

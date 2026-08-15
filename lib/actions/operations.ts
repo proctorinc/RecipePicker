@@ -43,11 +43,13 @@ import {
 import {
   disconnectHouseholdAiConnection,
   getAiModelCatalog,
+  getStoredHouseholdAiConfig,
   getStoredHouseholdAiKey,
   testHouseholdAiConnection,
   type AiProvider,
   upsertHouseholdAiConnection,
 } from "@/lib/server/ai-provider";
+import { getIngredientAiParses } from "@/lib/server/ingredient-ai";
 import { logAudit, withActionLogging } from "@/lib/server/logger";
 import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
 import {
@@ -841,6 +843,8 @@ export const reviewIngredientAction = withActionLogging(
           reviewDisposition: "rejected",
           matchedBy: "review_rejected",
           aiSuggestionsJson: null,
+          aiParseOutcome: null,
+          aiParseReason: null,
         }).where(and(eq(householdRecipeIngredients.householdId, context.householdId), eq(householdRecipeIngredients.ingredientId, ingredientId))).run();
         return { status: "success", message: "Marked as not an ingredient." };
       }
@@ -877,7 +881,8 @@ export const reviewIngredientAction = withActionLogging(
         ingredientText, notes, normalizedIngredientPhrase: normalizedPhrase,
         canonicalIngredientId: canonicalIngredient.canonicalIngredientId,
         attributesJson: "[]", matchConfidence: 100, matchedBy: "confirmed_review",
-        aiSuggestionsJson: null, normalizationStatus: "confirmed", reviewDisposition: "accepted",
+        aiSuggestionsJson: null, aiParseOutcome: null, aiParseReason: null,
+        normalizationStatus: "confirmed", reviewDisposition: "accepted",
       }).where(and(eq(householdRecipeIngredients.householdId, context.householdId), eq(householdRecipeIngredients.ingredientId, ingredientId))).run();
     } finally {
       await sqlite.close();
@@ -902,6 +907,121 @@ export const reviewIngredientAction = withActionLogging(
         reviewMode: String(formData.get("reviewMode") ?? "").trim() || null,
         savePhraseMapping: toChecked(formData.get("savePhraseMapping")),
         saveAlias: toChecked(formData.get("saveAlias")),
+      },
+    }),
+  },
+);
+
+export const parseIngredientReviewPageWithAiAction = withActionLogging(
+  "action.parse_ingredient_review_page_with_ai",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const rawPage = Number.parseInt(String(formData.get("page") ?? "1"), 10);
+    const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+    const recipeId = toOptionalString(formData.get("recipeId"));
+
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+
+      try {
+        const config = await getStoredHouseholdAiConfig(context.householdId, db);
+        if (!config) {
+          return {
+            status: "error",
+            message: "Set up an active AI connection in Settings → AI before parsing ingredients.",
+          };
+        }
+
+        const ingredients = await db.query.householdRecipeIngredients.findMany({
+          where: (table, { and, eq }) => and(
+            eq(table.householdId, context.householdId),
+            eq(table.normalizationStatus, "needs_review"),
+            eq(table.reviewDisposition, "pending"),
+            recipeId ? eq(table.recipeId, recipeId) : undefined,
+          ),
+          orderBy: (table, { asc }) => [asc(table.recipeId), asc(table.position)],
+          limit: 20,
+          offset: (page - 1) * 20,
+          columns: {
+            ingredientId: true,
+            originalText: true,
+          },
+        });
+
+        if (ingredients.length === 0) {
+          return { status: "error", message: "There are no pending ingredients on this page to parse." };
+        }
+
+        const parses = await getIngredientAiParses({
+          householdId: context.householdId,
+          ingredients,
+          database: db,
+        });
+
+        if (!parses) {
+          return {
+            status: "error",
+            message: "AI could not parse these ingredients. Check the connection and try again.",
+          };
+        }
+
+        const counts = { parsed: 0, notIngredient: 0, unresolved: 0 };
+        for (const parsed of parses) {
+          const sharedValues = {
+            normalizedIngredientPhrase: null,
+            canonicalIngredientId: null,
+            attributesJson: "[]",
+            matchConfidence: null,
+            matchedBy: "ai_parse",
+            aiSuggestionsJson: null,
+            aiParseOutcome: parsed.outcome,
+            aiParseReason: parsed.reason,
+            normalizationStatus: "needs_review",
+            reviewDisposition: "pending",
+          };
+
+          if (parsed.outcome === "parsed") {
+            await db.update(householdRecipeIngredients).set({
+              ...sharedValues,
+              amountText: parsed.amountText,
+              amountValue: null,
+              amountMaxValue: null,
+              unit: parsed.unit,
+              ingredientText: parsed.ingredientText,
+              notes: parsed.notes,
+            }).where(and(
+              eq(householdRecipeIngredients.householdId, context.householdId),
+              eq(householdRecipeIngredients.ingredientId, parsed.ingredientId),
+            )).run();
+            counts.parsed += 1;
+          } else {
+            await db.update(householdRecipeIngredients).set(sharedValues).where(and(
+              eq(householdRecipeIngredients.householdId, context.householdId),
+              eq(householdRecipeIngredients.ingredientId, parsed.ingredientId),
+            )).run();
+            if (parsed.outcome === "not_ingredient") counts.notIngredient += 1;
+            else counts.unresolved += 1;
+          }
+        }
+
+        const unchanged = ingredients.length - parses.length;
+        revalidateAll(recipeScopedPaths(undefined, recipeId ?? undefined).concat("/settings/ingredients"));
+        return {
+          status: "success",
+          message: `AI parsed ${counts.parsed}; flagged ${counts.notIngredient} as not an ingredient; could not fit ${counts.unresolved}; left ${unchanged} unchanged.`,
+        };
+      } finally {
+        await sqlite.close();
+      }
+    } catch (error) {
+      return toErrorState(error, "Unable to parse this page of ingredients with AI.");
+    }
+  },
+  {
+    getStartData: (_state, formData) => ({
+      target: {
+        recipeId: String(formData.get("recipeId") ?? "").trim() || null,
+        page: String(formData.get("page") ?? "1"),
       },
     }),
   },
@@ -961,6 +1081,58 @@ export const reparentCanonicalIngredientAction = withActionLogging(
       } finally { await sqlite.close(); }
       revalidateAll(["/settings/ingredients"]); return { status: "success", message: "Ingredient family updated." };
     } catch (error) { return toErrorState(error, "Unable to update ingredient family."); }
+  },
+);
+
+export const removeUnusedProvisionalIngredientsAction = withActionLogging(
+  "action.remove_unused_provisional_ingredients",
+  async (): Promise<ActionState> => {
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+      let removed = 0;
+
+      try {
+        const candidates = await db.query.householdCanonicalIngredients.findMany({
+          where: (table, { and, eq }) => and(
+            eq(table.householdId, context.householdId),
+            eq(table.catalogStatus, "provisional"),
+          ),
+          columns: { canonicalIngredientId: true },
+        });
+
+        for (const candidate of candidates) {
+          const canonicalIngredientId = candidate.canonicalIngredientId;
+          const [recipeUse, alwaysHaveUse, child] = await Promise.all([
+            db.query.householdRecipeIngredients.findFirst({
+              where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.canonicalIngredientId, canonicalIngredientId)),
+              columns: { ingredientId: true },
+            }),
+            db.query.householdAlwaysHaveIngredients.findFirst({
+              where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.canonicalIngredientId, canonicalIngredientId)),
+              columns: { alwaysHaveIngredientId: true },
+            }),
+            db.query.householdCanonicalIngredients.findFirst({
+              where: (table, { and, eq }) => and(eq(table.householdId, context.householdId), eq(table.parentCanonicalIngredientId, canonicalIngredientId)),
+              columns: { canonicalIngredientId: true },
+            }),
+          ]);
+          if (recipeUse || alwaysHaveUse || child) continue;
+
+          await db.delete(householdIngredientAliases).where(and(eq(householdIngredientAliases.householdId, context.householdId), eq(householdIngredientAliases.canonicalIngredientId, canonicalIngredientId))).run();
+          await db.delete(householdIngredientPhraseMappings).where(and(eq(householdIngredientPhraseMappings.householdId, context.householdId), eq(householdIngredientPhraseMappings.canonicalIngredientId, canonicalIngredientId))).run();
+          await db.delete(householdCanonicalIngredients).where(and(eq(householdCanonicalIngredients.householdId, context.householdId), eq(householdCanonicalIngredients.canonicalIngredientId, canonicalIngredientId))).run();
+          removed += 1;
+        }
+      } finally {
+        await sqlite.close();
+      }
+
+      revalidateAll(["/settings/ingredients", "/shopping-cart"]);
+      return { status: "success", message: removed ? `Removed ${removed} unused provisional ingredient${removed === 1 ? "" : "s"}.` : "No unused provisional ingredients to remove." };
+    } catch (error) {
+      return toErrorState(error, "Unable to clean up the ingredient catalog.");
+    }
   },
 );
 

@@ -252,6 +252,8 @@ export type IngredientReviewItemView = {
   matchConfidence: number | null;
   matchedBy: string | null;
   aiSuggestions: IngredientReviewSuggestionView[];
+  aiParseOutcome: "parsed" | "not_ingredient" | "unresolved" | null;
+  aiParseReason: string | null;
   occurrenceCount: number;
   sourceUrl: string | null;
 };
@@ -526,6 +528,10 @@ export type ShoppingCartItemView = {
   unit: string | null;
   sourceMeals: ShoppingCartSourceMealView[];
   isAlwaysHave: boolean;
+  alternativeOptions: Array<{
+    canonicalIngredientId: string | null;
+    displayName: string;
+  }> | null;
 };
 
 export type AlwaysHaveIngredientView = {

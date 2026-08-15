@@ -326,6 +326,12 @@ export async function generateIngredientSuggestionsWithHouseholdAi<
   return generateHouseholdAiObject(args);
 }
 
+export async function generateIngredientParsesWithHouseholdAi<
+  TSchema extends ZodTypeAny,
+>(args: StructuredGenerationArgs<TSchema>) {
+  return generateHouseholdAiObject(args);
+}
+
 export async function getStoredHouseholdAiConfig(
   householdId: string,
   database?: DatabaseClient,

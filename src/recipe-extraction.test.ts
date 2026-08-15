@@ -88,6 +88,21 @@ describe("recipe extraction", () => {
     expect(result.recipe?.ingredients.map((ingredient) => ingredient.originalText)).toEqual(["2 carrots", "1 onion"]);
   });
 
+  it("parses complete or-ingredients as a shared-quantity choice", () => {
+    const result = extractRecipeFromHtml(
+      `<script type="application/ld+json">{"@context":"https://schema.org","@type":"Recipe","name":"Choice soup","recipeIngredient":["1 cup milk or water"],"recipeInstructions":["Stir."]}</script>`,
+      "https://example.com/choice-soup",
+    );
+
+    expect(result.recipe?.ingredients[0]).toMatchObject({
+      originalText: "1 cup milk or water",
+      amountText: "1",
+      unit: "cup",
+      ingredientText: "milk or water",
+      alternativeIngredientTexts: ["milk", "water"],
+    });
+  });
+
   it("short-circuits after a high-confidence direct fetch", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

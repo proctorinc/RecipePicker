@@ -1,28 +1,50 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useState, useTransition } from "react";
+import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { reviewIngredientAction } from "@/lib/actions/operations";
+import {
+  parseIngredientReviewPageWithAiAction,
+  reviewIngredientAction,
+} from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
 import type { CanonicalIngredientOption, IngredientReviewItemView } from "@/types/view-models";
 
 const initialState: ActionState = { status: "idle", message: "" };
 
-export function IngredientReviewTable({ items }: {
+export function IngredientReviewTable({
+  items,
+  page,
+  recipeId,
+  aiEnabled,
+}: {
   items: IngredientReviewItemView[];
+  page: number;
+  recipeId: string | null;
+  aiEnabled: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
   const [isRefreshing, startTransition] = useTransition();
+  const [parseState, parseAction] = useActionState(parseIngredientReviewPageWithAiAction, initialState);
   const item = items[index] ?? null;
 
   useEffect(() => { setIndex((value) => Math.min(value, Math.max(items.length - 1, 0))); }, [items]);
+  useEffect(() => {
+    if (parseState.status === "success") {
+      toast.success(parseState.message);
+      startTransition(() => router.refresh());
+    } else if (parseState.status === "error") {
+      toast.error(parseState.message);
+    }
+  }, [parseState, router, startTransition]);
   if (!item) return <p className="text-sm text-muted-foreground">No ingredients are waiting for review.</p>;
 
   return (
@@ -30,7 +52,15 @@ export function IngredientReviewTable({ items }: {
       <div className="rounded-[24px] border border-border/60 bg-secondary/20 p-5">
         <p className="font-medium">{items.length} ingredient{items.length === 1 ? "" : "s"} waiting on this page</p>
         <p className="mt-1 text-sm text-muted-foreground">Review one at a time. Accept a good parse, adjust it, or mark it as not an ingredient.</p>
-        <Button className="mt-4" onClick={() => setOpen(true)}>Review next ingredient</Button>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <form action={parseAction}>
+            <input type="hidden" name="page" value={page} />
+            {recipeId ? <input type="hidden" name="recipeId" value={recipeId} /> : null}
+            <ParsePageButton aiEnabled={aiEnabled} refreshing={isRefreshing} />
+          </form>
+          <Button variant="outline" onClick={() => setOpen(true)}>Review next ingredient</Button>
+        </div>
+        {!aiEnabled ? <p className="mt-3 text-sm text-muted-foreground">AI parsing needs an active shared connection. <Link className="underline underline-offset-4" href="/settings/ai">Set up AI</Link></p> : null}
         {isRefreshing ? <p className="mt-3 text-sm text-muted-foreground">Loading more ingredients…</p> : null}
       </div>
       <Dialog open={open} onOpenChange={setOpen}>
@@ -93,6 +123,7 @@ function IngredientReviewForm({ item, onDone }: {
       <p className="mt-2 font-medium">{item.originalText}</p>
       {item.sourceUrl ? <a className="mt-2 inline-block text-sm underline underline-offset-4" target="_blank" rel="noreferrer" href={item.sourceUrl}>Open recipe source</a> : null}
     </div>
+    {item.aiParseOutcome === "not_ingredient" || item.aiParseOutcome === "unresolved" ? <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"><p className="font-medium">AI feedback: {item.aiParseOutcome === "not_ingredient" ? "This may not be an ingredient" : "This does not fit the ingredient fields cleanly"}</p><p className="mt-1 text-muted-foreground">{item.aiParseReason ?? "The AI did not provide a reason."}</p><p className="mt-2 text-muted-foreground">You can correct and accept it, or mark it as not an ingredient.</p></div> : null}
     <div className="space-y-3">
       <div><p className="font-medium">What we extracted</p><p className="text-sm text-muted-foreground">Correct any field that looks wrong, then accept it.</p></div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -118,4 +149,12 @@ function IngredientReviewForm({ item, onDone }: {
 
 function Field({ label, name, value, onChange, placeholder, required = false }: { label: string; name: string; value: string; onChange: (value: string) => void; placeholder: string; required?: boolean }) {
   return <label className="space-y-2"><span className="text-sm font-medium">{label}</span><Input name={name} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} required={required} /></label>;
+}
+
+function ParsePageButton({ aiEnabled, refreshing }: { aiEnabled: boolean; refreshing: boolean }) {
+  const { pending } = useFormStatus();
+
+  return <Button type="submit" disabled={!aiEnabled || pending || refreshing}>
+    {pending ? "Parsing with AI..." : "Parse current page with AI"}
+  </Button>;
 }

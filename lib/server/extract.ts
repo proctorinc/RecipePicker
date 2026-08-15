@@ -6,6 +6,7 @@ import {
   householdRecipes,
   householdRecipeExtractionAttempts,
   householdRecipeExtractions,
+  householdRecipeIngredientAlternatives,
   householdRecipeIngredients,
   householdRecipeInstructions,
   householdRecipeSources,
@@ -469,6 +470,25 @@ async function persistRecipeInstructions(
   let reviewCount = 0;
   const normalizedIngredients = await Promise.all(
     recipe.ingredients.map(async (ingredient) => {
+      if (ingredient.alternativeIngredientTexts) {
+        const alternatives = await Promise.all(
+          ingredient.alternativeIngredientTexts.map(async (ingredientText) => {
+            const normalization = await normalizeIngredientForHousehold(db, householdId, {
+              originalText: ingredient.originalText,
+              ingredientText,
+            });
+
+            if (normalization.normalizationStatus === "needs_review") {
+              reviewCount += 1;
+            }
+
+            return { ingredientText, ...normalization };
+          }),
+        );
+
+        return { ingredient, normalization: null, alternatives };
+      }
+
       const normalization = await normalizeIngredientForHousehold(db, householdId, {
         originalText: ingredient.originalText,
         ingredientText: ingredient.ingredientText,
@@ -478,10 +498,7 @@ async function persistRecipeInstructions(
         reviewCount += 1;
       }
 
-      return {
-        ...ingredient,
-        ...normalization,
-      };
+      return { ingredient, normalization, alternatives: [] };
     }),
   );
 
@@ -494,6 +511,7 @@ async function persistRecipeInstructions(
     });
 
   await db.delete(householdRecipeSteps).where(eq(householdRecipeSteps.recipeId, recipeId)).run();
+  await db.delete(householdRecipeIngredientAlternatives).where(eq(householdRecipeIngredientAlternatives.recipeId, recipeId)).run();
   await db.delete(householdRecipeIngredients).where(eq(householdRecipeIngredients.recipeId, recipeId)).run();
 
   if (existingInstructions) {
@@ -563,9 +581,10 @@ async function persistRecipeInstructions(
   }
 
   if (normalizedIngredients.length > 0) {
-    await db.insert(householdRecipeIngredients)
-      .values(
-        normalizedIngredients.map((ingredient, index) => ({
+    for (const [index, item] of normalizedIngredients.entries()) {
+      const { ingredient, normalization, alternatives } = item;
+      const savedIngredient = await db.insert(householdRecipeIngredients)
+        .values({
           householdId,
           recipeId,
           position: index + 1,
@@ -576,16 +595,36 @@ async function persistRecipeInstructions(
           unit: ingredient.unit,
           ingredientText: ingredient.ingredientText,
           notes: ingredient.notes,
-          normalizedIngredientPhrase: ingredient.normalizedIngredientPhrase,
-          canonicalIngredientId: ingredient.canonicalIngredientId,
-          attributesJson: JSON.stringify(ingredient.attributes),
-          matchConfidence: ingredient.matchConfidence,
-          matchedBy: ingredient.matchedBy,
-          aiSuggestionsJson: ingredient.aiSuggestions.length > 0 ? JSON.stringify(ingredient.aiSuggestions) : null,
-          normalizationStatus: ingredient.normalizationStatus,
-        })),
-      )
-      .run();
+          normalizedIngredientPhrase: normalization?.normalizedIngredientPhrase ?? null,
+          canonicalIngredientId: normalization?.canonicalIngredientId ?? null,
+          attributesJson: JSON.stringify(normalization?.attributes ?? []),
+          matchConfidence: normalization?.matchConfidence ?? null,
+          matchedBy: normalization?.matchedBy ?? "alternative_group",
+          aiSuggestionsJson: normalization && normalization.aiSuggestions.length > 0 ? JSON.stringify(normalization.aiSuggestions) : null,
+          normalizationStatus: normalization?.normalizationStatus ?? "not_ingredient",
+        })
+        .returning()
+        .get();
+
+      if (alternatives.length > 0) {
+        await db.insert(householdRecipeIngredientAlternatives)
+          .values(alternatives.map((alternative, alternativeIndex) => ({
+            householdId,
+            recipeId,
+            ingredientId: savedIngredient.ingredientId,
+            position: alternativeIndex + 1,
+            ingredientText: alternative.ingredientText,
+            normalizedIngredientPhrase: alternative.normalizedIngredientPhrase,
+            canonicalIngredientId: alternative.canonicalIngredientId,
+            attributesJson: JSON.stringify(alternative.attributes),
+            matchConfidence: alternative.matchConfidence,
+            matchedBy: alternative.matchedBy,
+            aiSuggestionsJson: alternative.aiSuggestions.length > 0 ? JSON.stringify(alternative.aiSuggestions) : null,
+            normalizationStatus: alternative.normalizationStatus,
+          })))
+          .run();
+      }
+    }
   }
 
   return reviewCount;

@@ -695,7 +695,27 @@ export async function getShoppingCartPage(selectedDateParams: string[]): Promise
         ? db.query.householdRecipeEvents.findMany({
             where: (table, { and, eq: equals }) => and(equals(table.householdId, context.householdId), inArray(table.date, selectedDates)),
             orderBy: (table, { asc: orderAsc }) => [orderAsc(table.date), orderAsc(table.createdAt)],
-            with: { recipe: { with: { pin: true, recipeInstructions: { with: { ingredients: { orderBy: (table, { asc: orderAsc }) => [orderAsc(table.position)], with: { canonicalIngredient: true } } } } } } },
+            with: {
+              recipe: {
+                with: {
+                  pin: true,
+                  recipeInstructions: {
+                    with: {
+                      ingredients: {
+                        orderBy: (table, { asc: orderAsc }) => [orderAsc(table.position)],
+                        with: {
+                          canonicalIngredient: true,
+                          alternatives: {
+                            orderBy: (table, { asc: orderAsc }) => [orderAsc(table.position)],
+                            with: { canonicalIngredient: true },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           })
         : Promise.resolve([]),
       db.query.householdAlwaysHaveIngredients.findMany({
@@ -723,6 +743,13 @@ export async function getShoppingCartPage(selectedDateParams: string[]): Promise
         amountMaxValue: ingredient.amountMaxValue,
         unit: ingredient.unit,
         normalizationStatus: ingredient.normalizationStatus,
+        alternatives: ingredient.alternatives.map((alternative) => ({
+          alternativeId: alternative.alternativeId,
+          ingredientText: alternative.ingredientText,
+          canonicalIngredientId: alternative.canonicalIngredientId,
+          canonicalName: alternative.canonicalIngredient?.displayName ?? null,
+          normalizationStatus: alternative.normalizationStatus,
+        })),
         sourceMeal,
       }));
     }));
@@ -730,7 +757,11 @@ export async function getShoppingCartPage(selectedDateParams: string[]): Promise
     return {
       selectedDates,
       sourceMeals,
-      items: allItems.filter((item) => !item.canonicalIngredientId || !enabledAlwaysHaveIds.has(item.canonicalIngredientId)).map((item) => ({ ...item, isAlwaysHave: item.canonicalIngredientId ? alwaysHaves.some((alwaysHave) => alwaysHave.canonicalIngredientId === item.canonicalIngredientId) : false })),
+      items: allItems
+        .filter((item) => item.alternativeOptions
+          ? !item.alternativeOptions.some((option) => option.canonicalIngredientId && enabledAlwaysHaveIds.has(option.canonicalIngredientId))
+          : !item.canonicalIngredientId || !enabledAlwaysHaveIds.has(item.canonicalIngredientId))
+        .map((item) => ({ ...item, isAlwaysHave: item.canonicalIngredientId ? alwaysHaves.some((alwaysHave) => alwaysHave.canonicalIngredientId === item.canonicalIngredientId) : false })),
       alwaysHaves: alwaysHaves.map((item) => ({ canonicalIngredientId: item.canonicalIngredientId, displayName: item.canonicalIngredient.displayName, enabled: item.enabled })),
     };
   } finally {
@@ -1611,6 +1642,8 @@ export async function getIngredientReviewQueue(
         matchConfidence: ingredient.matchConfidence,
         matchedBy: ingredient.matchedBy,
         aiSuggestions,
+        aiParseOutcome: toIngredientAiParseOutcome(ingredient.aiParseOutcome),
+        aiParseReason: ingredient.aiParseReason,
         occurrenceCount:
           occurrenceCountByPhrase.get(
             ingredient.normalizedIngredientPhrase ?? ingredient.originalText,
@@ -2517,6 +2550,16 @@ function parseIngredientReviewSuggestions(
   } catch {
     return [];
   }
+}
+
+function toIngredientAiParseOutcome(
+  value: string | null | undefined,
+): "parsed" | "not_ingredient" | "unresolved" | null {
+  if (value === "parsed" || value === "not_ingredient" || value === "unresolved") {
+    return value;
+  }
+
+  return null;
 }
 
 function isIngredientReviewSuggestion(

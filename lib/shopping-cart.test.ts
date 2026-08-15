@@ -4,7 +4,7 @@ import { buildShoppingCartItems } from "@/lib/shopping-cart";
 const meal = { eventId: "event-1", date: "2026-08-14", recipeId: "recipe-1", recipeTitle: "Dinner" };
 const ingredient = (overrides: Partial<Parameters<typeof buildShoppingCartItems>[0][number]> = {}) => ({
   ingredientId: "ingredient-1", canonicalIngredientId: "salt", canonicalName: "Salt", originalText: "salt", ingredientText: "salt",
-  amountText: "1", amountValue: 1, amountMaxValue: null, unit: "teaspoon", normalizationStatus: "confirmed", sourceMeal: meal, ...overrides,
+  amountText: "1", amountValue: 1, amountMaxValue: null, unit: "teaspoon", normalizationStatus: "confirmed", alternatives: [], sourceMeal: meal, ...overrides,
 });
 
 describe("buildShoppingCartItems", () => {
@@ -38,5 +38,31 @@ describe("buildShoppingCartItems", () => {
 
   it("omits ingredients explicitly marked as not ingredients", () => {
     expect(buildShoppingCartItems([ingredient({ normalizationStatus: "not_ingredient" })])).toEqual([]);
+  });
+
+  it("keeps alternatives as one choose-one cart item", () => {
+    const items = buildShoppingCartItems([ingredient({
+      ingredientId: "choice-1",
+      originalText: "1 cup milk or water",
+      ingredientText: "milk or water",
+      canonicalIngredientId: null,
+      canonicalName: null,
+      normalizationStatus: "not_ingredient",
+      unit: "cup",
+      alternatives: [
+        { alternativeId: "alternative-1", ingredientText: "milk", canonicalIngredientId: "milk", canonicalName: "Milk", normalizationStatus: "confirmed" },
+        { alternativeId: "alternative-2", ingredientText: "water", canonicalIngredientId: "water", canonicalName: "Water", normalizationStatus: "confirmed" },
+      ],
+    })]);
+
+    expect(items).toEqual([expect.objectContaining({
+      displayName: "Milk or Water",
+      amountText: "1",
+      unit: "cup",
+      alternativeOptions: [
+        { canonicalIngredientId: "milk", displayName: "Milk" },
+        { canonicalIngredientId: "water", displayName: "Water" },
+      ],
+    })]);
   });
 });

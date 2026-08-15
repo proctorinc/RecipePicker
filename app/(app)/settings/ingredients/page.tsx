@@ -3,6 +3,8 @@ import { IngredientReviewTable } from "@/components/ingredient-review-table";
 import { IngredientCatalog } from "@/components/ingredient-catalog";
 import { SettingsNav } from "@/components/settings-nav";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireHouseholdContext } from "@/lib/server/auth";
+import { getHouseholdAiConnectionStatus } from "@/lib/server/ai-provider";
 import { getIngredientCatalog, getIngredientReviewQueue } from "@/lib/server/queries";
 
 export const dynamic = "force-dynamic";
@@ -22,9 +24,11 @@ export default async function IngredientSettingsPage({
   const requestedCatalogPage = Number.isInteger(rawCatalogPage) && rawCatalogPage > 0 ? rawCatalogPage : 1;
   const catalogQuery = typeof params.catalogQuery === "string" ? params.catalogQuery : "";
   const recipeId = typeof params.recipeId === "string" ? params.recipeId : undefined;
-  const [queue, catalog] = await Promise.all([
+  const context = await requireHouseholdContext();
+  const [queue, catalog, aiConnectionStatus] = await Promise.all([
     getIngredientReviewQueue(requestedPage, PAGE_SIZE, recipeId),
     getIngredientCatalog(requestedCatalogPage, CATALOG_PAGE_SIZE, catalogQuery),
+    getHouseholdAiConnectionStatus(context.householdId),
   ]);
   const startItem = queue.totalCount === 0 ? 0 : (queue.page - 1) * queue.pageSize + 1;
   const endItem = queue.totalCount === 0 ? 0 : startItem + queue.items.length - 1;
@@ -75,11 +79,16 @@ export default async function IngredientSettingsPage({
               ) : null}
             </div>
           ) : null}
-          <IngredientReviewTable items={queue.items} />
+          <IngredientReviewTable
+            items={queue.items}
+            page={queue.page}
+            recipeId={recipeId ?? null}
+            aiEnabled={aiConnectionStatus === "active"}
+          />
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>Ingredient catalog</CardTitle><CardDescription>Provisional ingredients are safe to keep now and organize later. Merge duplicates or assign a family here.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Ingredient catalog</CardTitle><CardDescription>See each ingredient’s family at a glance. Use Edit to organize a family or merge duplicates.</CardDescription></CardHeader>
         <CardContent><IngredientCatalog catalog={catalog} recipeId={recipeId} /></CardContent>
       </Card>
     </div>
