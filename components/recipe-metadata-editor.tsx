@@ -26,6 +26,7 @@ type RecipeMetadataEditorProps = {
   backHref: string;
   backLabel: string;
   children: React.ReactNode;
+  editBanner?: React.ReactNode;
 };
 
 export function RecipeMetadataEditor({
@@ -35,6 +36,7 @@ export function RecipeMetadataEditor({
   backHref,
   backLabel,
   children,
+  editBanner,
 }: RecipeMetadataEditorProps) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -117,6 +119,7 @@ export function RecipeMetadataEditor({
       </div>
 
       {children}
+      {editBanner}
 
       <div className="space-y-2 px-4">
         <section>

@@ -62,6 +62,13 @@ export default async function RecipePage({
         description={recipe.description}
         backHref={backHref}
         backLabel={backLabel}
+        editBanner={
+          <RecipeVersionHistory
+            recipeId={recipe.recipeId}
+            versions={recipe.versions}
+            variant="create"
+          />
+        }
       >
         <section className="overflow-hidden rounded-t-[36px] border border-white/70 bg-white/70 shadow-soft">
           <div className="relative aspect-[16/10] sm:aspect-[16/8]">
@@ -89,6 +96,7 @@ export default async function RecipePage({
                 <RecipeVersionHistory
                   recipeId={recipe.recipeId}
                   versions={recipe.versions}
+                  variant="indicators"
                 />
                 {recipe.totalTime ? (
                   <MetaChip

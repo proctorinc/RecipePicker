@@ -50,6 +50,13 @@
       "when": 1789776000003,
       "tag": "0007_recipe_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789776000005,
+      "tag": "0008_recipe_version_snapshot_backfill",
+      "breakpoints": true
     }
   ]
 }
