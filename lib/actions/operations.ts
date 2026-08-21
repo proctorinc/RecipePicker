@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 
 import { auth } from "@clerk/nextjs/server";
 import { cookies } from "next/headers";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import {
   ADMIN_ROLE_OVERRIDE_COOKIE,
@@ -35,6 +35,8 @@ import {
   householdRecipes,
   householdShoppingCarts,
   householdShoppingCartItemStates,
+  recipeTagMemberships,
+  recipeTags,
 } from "@/lib/server/db";
 import {
   createCanonicalIngredient,
@@ -77,6 +79,64 @@ import type { ActionState } from "@/lib/actions/types";
 import type { IngredientReviewSuggestionView, RecipeExtractionFeedbackCategory } from "@/types/view-models";
 
 type DatabaseHandle = Awaited<ReturnType<typeof openDatabase>>["db"];
+
+function parseRecipeTags(value: FormDataEntryValue | null) {
+  if (value === null) return [];
+  try {
+    const parsed = JSON.parse(String(value));
+    if (!Array.isArray(parsed) || parsed.length > 30) return null;
+    const seen = new Set<string>();
+    const tags: Array<{ name: string; normalizedName: string }> = [];
+    for (const value of parsed) {
+      if (typeof value !== "string") return null;
+      const name = value.trim().replace(/\s+/g, " ");
+      const normalizedName = name.toLocaleLowerCase();
+      if (!name || name.length > 50 || seen.has(normalizedName)) continue;
+      seen.add(normalizedName);
+      tags.push({ name, normalizedName });
+    }
+    return tags;
+  } catch {
+    return null;
+  }
+}
+
+async function replaceRecipeTags(
+  db: DatabaseHandle,
+  input: {
+    householdId: string;
+    recipeId: string;
+    tags: Array<{ name: string; normalizedName: string }>;
+    now: string;
+  },
+) {
+  const transaction = db.transaction as unknown as (
+    callback: (tx: DatabaseHandle) => Promise<void>,
+  ) => Promise<void>;
+  await transaction(async (tx) => {
+    const tagIds: string[] = [];
+    for (const tag of input.tags) {
+      await tx.insert(recipeTags)
+        .values({ householdId: input.householdId, name: tag.name, normalizedName: tag.normalizedName, createdAt: input.now, updatedAt: input.now })
+        .onConflictDoNothing()
+        .run();
+      const storedTag = await tx.query.recipeTags.findFirst({
+        where: (table, { and, eq }) => and(eq(table.householdId, input.householdId), eq(table.normalizedName, tag.normalizedName)),
+        columns: { tagId: true },
+      });
+      if (storedTag) tagIds.push(storedTag.tagId);
+    }
+    await tx.delete(recipeTagMemberships)
+      .where(and(eq(recipeTagMemberships.recipeId, input.recipeId), eq(recipeTagMemberships.householdId, input.householdId)))
+      .run();
+    if (tagIds.length > 0) {
+      await tx.insert(recipeTagMemberships)
+        .values(tagIds.map((tagId) => ({ householdId: input.householdId, recipeId: input.recipeId, tagId, createdAt: input.now, updatedAt: input.now })))
+        .run();
+    }
+    await tx.run(sql`DELETE FROM recipe_tags WHERE household_id = ${input.householdId} AND NOT EXISTS (SELECT 1 FROM recipe_tag_memberships WHERE recipe_tag_memberships.tag_id = recipe_tags.tag_id)`);
+  });
+}
 
 export const createCustomRecipeAction = withActionLogging(
   "action.create_custom_recipe",
@@ -1532,6 +1592,7 @@ export const saveRecipeMetadataAction = withActionLogging(
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const versionMode = String(formData.get("versionMode") ?? "").trim();
+  const submittedTags = parseRecipeTags(formData.get("tagsJson"));
   const hasContentEdits = formData.has("ingredientsJson") || formData.has("stepsJson");
   const ingredients = parseRecipeContentItems(formData.get("ingredientsJson"), isRecipeIngredientInput);
   const steps = parseRecipeContentItems(formData.get("stepsJson"), isRecipeStepInput);
@@ -1546,6 +1607,10 @@ export const saveRecipeMetadataAction = withActionLogging(
 
   if (versionMode !== "update" && versionMode !== "new") {
     return { status: "error", message: "Choose whether to save the current version or create a new one." };
+  }
+
+  if (!submittedTags) {
+    return { status: "error", message: "One or more tags are invalid." };
   }
 
   try {
@@ -1718,11 +1783,13 @@ export const saveRecipeMetadataAction = withActionLogging(
         })
         .where(and(eq(householdRecipes.recipeId, recipeId), eq(householdRecipes.householdId, context.householdId)))
         .run();
+
+      await replaceRecipeTags(db, { householdId: context.householdId, recipeId, tags: submittedTags, now });
     } finally {
       await sqlite.close();
     }
 
-    revalidateAll(recipeScopedPaths(undefined, recipeId));
+    revalidateAll(recipeScopedPaths(undefined, recipeId).concat("/tags"));
     return {
       status: "success",
       message: versionMode === "new" ? "New recipe version created." : "Saved the recipe details.",

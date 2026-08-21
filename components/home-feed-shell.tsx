@@ -11,11 +11,13 @@ const SEARCH_DEBOUNCE_MS = 350;
 type HomeFeedShellProps = {
   initialPage: FeedPinsPage;
   initialQuery: string;
+  tagId?: string;
 };
 
 export function HomeFeedShell({
   initialPage,
   initialQuery,
+  tagId,
 }: HomeFeedShellProps) {
   const normalizedInitialQuery = initialQuery.trim();
   const [inputValue, setInputValue] = useState(initialQuery);
@@ -53,7 +55,7 @@ export function HomeFeedShell({
       setIsSearching(true);
       syncUrl(trimmedValue);
 
-      void fetchSearchPage(trimmedValue, controller.signal)
+      void fetchSearchPage(trimmedValue, controller.signal, tagId)
         .then((nextPage) => {
           if (controller.signal.aborted) {
             return;
@@ -76,7 +78,7 @@ export function HomeFeedShell({
     return () => {
       window.clearTimeout(timeout);
     };
-  }, [activeQuery, inputValue]);
+  }, [activeQuery, inputValue, tagId]);
 
   useEffect(() => {
     return () => {
@@ -91,6 +93,7 @@ export function HomeFeedShell({
         initialCursor={page.nextCursor}
         initialHasMore={page.hasMore}
         query={activeQuery}
+        tagId={tagId}
       />
       <div className="fixed left-0 right-0 bottom-24 z-30 px-3 md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">
@@ -125,11 +128,15 @@ function syncUrl(query: string) {
 async function fetchSearchPage(
   query: string,
   signal: AbortSignal,
+  tagId?: string,
 ): Promise<FeedPinsPage> {
   const params = new URLSearchParams();
 
   if (query) {
     params.set("q", query);
+  }
+  if (tagId) {
+    params.set("tagId", tagId);
   }
 
   const response = await fetch(`/api/feed?${params.toString()}`, {

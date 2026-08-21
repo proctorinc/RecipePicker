@@ -401,6 +401,54 @@ export const householdRecipes = sqliteTable(
   }),
 );
 
+export const recipeTags = sqliteTable(
+  "recipe_tags",
+  {
+    tagId: generatedId("tag_id"),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.householdId),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    householdNormalizedNameUniqueIdx: uniqueIndex("idx_recipe_tags_household_normalized_name_unique").on(
+      table.householdId,
+      table.normalizedName,
+    ),
+    householdNameIdx: index("idx_recipe_tags_household_name").on(table.householdId, table.name),
+  }),
+);
+
+export const recipeTagMemberships = sqliteTable(
+  "recipe_tag_memberships",
+  {
+    membershipId: generatedId("membership_id"),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.householdId),
+    recipeId: text("recipe_id")
+      .notNull()
+      .references(() => householdRecipes.recipeId),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => recipeTags.tagId),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    householdRecipeTagUniqueIdx: uniqueIndex("idx_recipe_tag_memberships_household_recipe_tag_unique").on(
+      table.householdId,
+      table.recipeId,
+      table.tagId,
+    ),
+    tagIdIdx: index("idx_recipe_tag_memberships_tag_id").on(table.tagId),
+    householdRecipeIdx: index("idx_recipe_tag_memberships_household_recipe").on(table.householdId, table.recipeId),
+  }),
+);
+
 /** Immutable, user-created recipe revisions. The highest version is the primary recipe. */
 export const householdRecipeVersions = sqliteTable(
   "household_recipe_versions",
@@ -1008,6 +1056,30 @@ export const householdRecipesRelations = relations(householdRecipes, ({ one, man
   }),
   extractionFeedback: many(householdRecipeExtractionFeedback),
   folderMemberships: many(recipeFolderMemberships),
+  tagMemberships: many(recipeTagMemberships),
+}));
+
+export const recipeTagsRelations = relations(recipeTags, ({ one, many }) => ({
+  household: one(households, {
+    fields: [recipeTags.householdId],
+    references: [households.householdId],
+  }),
+  memberships: many(recipeTagMemberships),
+}));
+
+export const recipeTagMembershipsRelations = relations(recipeTagMemberships, ({ one }) => ({
+  household: one(households, {
+    fields: [recipeTagMemberships.householdId],
+    references: [households.householdId],
+  }),
+  recipe: one(householdRecipes, {
+    fields: [recipeTagMemberships.recipeId],
+    references: [householdRecipes.recipeId],
+  }),
+  tag: one(recipeTags, {
+    fields: [recipeTagMemberships.tagId],
+    references: [recipeTags.tagId],
+  }),
 }));
 
 export const recipeFoldersRelations = relations(recipeFolders, ({ one, many }) => ({

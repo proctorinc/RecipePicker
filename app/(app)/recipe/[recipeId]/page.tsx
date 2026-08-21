@@ -20,6 +20,7 @@ import { RecipePageScrollToTop } from "@/app/(app)/recipe/[recipeId]/scroll-to-t
 import {
   getCustomRecipeBoardOptions,
   getRecipeDetail,
+  getRecipeTags,
 } from "@/lib/server/queries";
 import { formatIso8601Duration } from "@/lib/utils";
 import { getCurrentUserAccess } from "@/lib/server/access";
@@ -36,10 +37,11 @@ export default async function RecipePage({
 }) {
   const { recipeId } = await params;
   const { reviewRecipeId, historyMonth } = await searchParams;
-  const [recipe, access, publishOptions] = await Promise.all([
+  const [recipe, access, publishOptions, availableTags] = await Promise.all([
     getRecipeDetail(recipeId),
     getCurrentUserAccess(),
     getCustomRecipeBoardOptions(),
+    getRecipeTags(),
   ]);
 
   if (!recipe) {
@@ -61,6 +63,8 @@ export default async function RecipePage({
         recipeId={recipe.recipeId}
         title={recipe.title}
         description={recipe.description}
+        tags={recipe.tags}
+        availableTags={availableTags}
         backHref={backHref}
         backLabel={backLabel}
         content={

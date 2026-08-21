@@ -32,6 +32,7 @@ export function toOptionalString(value: FormDataEntryValue | null): string | nul
 export function recipeScopedPaths(boardId?: string, recipeId?: string) {
   return [
     "/",
+    "/tags",
     "/history",
     "/settings",
     "/settings/ai",

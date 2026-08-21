@@ -21,6 +21,7 @@ type HomeFeedProps = {
   initialCursor: string | null;
   initialHasMore: boolean;
   query: string;
+  tagId?: string;
 };
 
 export function HomeFeed({
@@ -28,6 +29,7 @@ export function HomeFeed({
   initialCursor,
   initialHasMore,
   query,
+  tagId,
 }: HomeFeedProps) {
   const [columnCount, setColumnCount] = useState(getInitialColumnCount);
   const [items, setItems] = useState(initialItems);
@@ -108,7 +110,7 @@ export function HomeFeed({
     }
 
     return () => observer.disconnect();
-  }, [cursor, hasMore, items, lastBatchSize, query]);
+  }, [cursor, hasMore, items, lastBatchSize, query, tagId]);
 
   async function loadMore() {
     if (isFetchingRef.current || !hasMore) {
@@ -122,6 +124,9 @@ export function HomeFeed({
       const params = new URLSearchParams();
       if (query.trim()) {
         params.set("q", query.trim());
+      }
+      if (tagId) {
+        params.set("tagId", tagId);
       }
       if (cursor) {
         params.set("cursor", cursor);

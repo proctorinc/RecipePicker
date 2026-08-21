@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, Pencil } from "lucide-react";
+import { ArrowLeft, Pencil, Tag, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -9,6 +9,7 @@ import { AppTransitionLink } from "@/components/app-transition-link";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { saveRecipeMetadataAction } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,8 @@ type RecipeMetadataEditorProps = {
   recipeId: string;
   title: string;
   description: string | null;
+  tags: Array<{ tagId: string; name: string }>;
+  availableTags: Array<{ tagId: string; name: string }>;
   backHref: string;
   backLabel: string;
   children: React.ReactNode;
@@ -41,6 +44,8 @@ export function RecipeMetadataEditor({
   recipeId,
   title,
   description,
+  tags,
+  availableTags,
   backHref,
   backLabel,
   children,
@@ -57,6 +62,8 @@ export function RecipeMetadataEditor({
   const [draftDescription, setDraftDescription] = useState(description ?? "");
   const [displayTitle, setDisplayTitle] = useState(title);
   const [displayDescription, setDisplayDescription] = useState(description ?? "");
+  const [draftTags, setDraftTags] = useState(tags.map((tag) => tag.name));
+  const [displayTags, setDisplayTags] = useState(tags.map((tag) => tag.name));
   const [hasContentChanges, setHasContentChanges] = useState(false);
   const [contentResetVersion, setContentResetVersion] = useState(0);
   const [saveChoiceOpen, setSaveChoiceOpen] = useState(false);
@@ -68,13 +75,16 @@ export function RecipeMetadataEditor({
     setDraftDescription(description ?? "");
     setDisplayTitle(title);
     setDisplayDescription(description ?? "");
+    setDraftTags(tags.map((tag) => tag.name));
+    setDisplayTags(tags.map((tag) => tag.name));
     setHasContentChanges(false);
-  }, [description, title]);
+  }, [description, tags, title]);
 
   useEffect(() => {
     if (state.status === "success") {
       setDisplayTitle(draftTitle.trim());
       setDisplayDescription(draftDescription.trim());
+      setDisplayTags(draftTags);
       setIsEditing(false);
       setHasContentChanges(false);
       toast.success(state.message);
@@ -85,7 +95,7 @@ export function RecipeMetadataEditor({
     if (state.status === "error") {
       toast.error(state.message);
     }
-  }, [draftDescription, draftTitle, router, state]);
+  }, [draftDescription, draftTags, draftTitle, router, state]);
 
   useLayoutEffect(() => {
     if (!isEditing) {
@@ -103,7 +113,8 @@ export function RecipeMetadataEditor({
   }, [draftDescription, draftTitle, isEditing]);
 
   const hasMetadataChanges = draftTitle.trim() !== displayTitle.trim()
-    || draftDescription.trim() !== displayDescription.trim();
+    || draftDescription.trim() !== displayDescription.trim()
+    || draftTags.join("\u0000") !== displayTags.join("\u0000");
   const hasChanges = hasMetadataChanges || hasContentChanges;
 
   function save(versionMode: "update" | "new") {
@@ -118,6 +129,7 @@ export function RecipeMetadataEditor({
   function cancelEditing() {
     setDraftTitle(displayTitle);
     setDraftDescription(displayDescription);
+    setDraftTags(displayTags);
     setHasContentChanges(false);
     setContentResetVersion((version) => version + 1);
     setSaveChoiceOpen(false);
@@ -137,6 +149,7 @@ export function RecipeMetadataEditor({
           }}
         >
           <input type="hidden" name="recipeId" value={recipeId} />
+          <input type="hidden" name="tagsJson" value={JSON.stringify(draftTags)} />
           <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur">
             <div className="flex items-center justify-between gap-3">
               <Button asChild variant="outline">
@@ -154,6 +167,7 @@ export function RecipeMetadataEditor({
                 onEnableEditing={() => {
                   setDraftTitle(displayTitle);
                   setDraftDescription(displayDescription);
+                  setDraftTags(displayTags);
                   setHasContentChanges(false);
                   setIsEditing(true);
                 }}
@@ -201,6 +215,13 @@ export function RecipeMetadataEditor({
             )}
           </section>
 
+          <RecipeTags
+            tags={isEditing ? draftTags : displayTags}
+            availableTags={availableTags}
+            editable={isEditing}
+            onChange={setDraftTags}
+          />
+
           <section>
             {isEditing ? (
               <Textarea
@@ -225,6 +246,74 @@ export function RecipeMetadataEditor({
         </div>
       </div>
     </RecipeEditingContext.Provider>
+  );
+}
+
+function RecipeTags({
+  tags,
+  availableTags,
+  editable,
+  onChange,
+}: {
+  tags: string[];
+  availableTags: Array<{ tagId: string; name: string }>;
+  editable: boolean;
+  onChange: (tags: string[]) => void;
+}) {
+  const [input, setInput] = useState("");
+  const normalizedTags = new Set(tags.map((tag) => tag.toLocaleLowerCase()));
+  const suggestions = availableTags.filter((tag) =>
+    !normalizedTags.has(tag.name.toLocaleLowerCase())
+    && tag.name.toLocaleLowerCase().includes(input.trim().toLocaleLowerCase()),
+  ).slice(0, 6);
+
+  function addTag(raw: string) {
+    const name = raw.trim().replace(/\s+/g, " ");
+    if (!name || normalizedTags.has(name.toLocaleLowerCase())) {
+      setInput("");
+      return;
+    }
+    const existing = availableTags.find((tag) => tag.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    onChange([...tags, existing?.name ?? name]);
+    setInput("");
+  }
+
+  if (!editable && tags.length === 0) return null;
+
+  return (
+    <section aria-label="Recipe tags" className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {tags.map((tag) => editable ? (
+          <button key={tag} type="button" onClick={() => onChange(tags.filter((value) => value !== tag))} className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium transition hover:bg-secondary" aria-label={`Remove ${tag} tag`}>
+            <Tag className="size-3" />{tag}<X className="size-3" />
+          </button>
+        ) : (
+          <span key={tag} className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium"><Tag className="size-3" />{tag}</span>
+        ))}
+      </div>
+      {editable ? (
+        <div className="relative max-w-md">
+          <Input
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === ",") {
+                event.preventDefault();
+                addTag(input);
+              }
+            }}
+            onBlur={() => { if (input.trim()) addTag(input); }}
+            placeholder="Add a tag"
+            aria-label="Add a tag"
+          />
+          {input.trim() && suggestions.length > 0 ? (
+            <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-lg">
+              {suggestions.map((tag) => <button key={tag.tagId} type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-secondary" onMouseDown={(event) => event.preventDefault()} onClick={() => addTag(tag.name)}>{tag.name}</button>)}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

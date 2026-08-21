@@ -1,0 +1,21 @@
+import { ArrowLeft, Tag } from "lucide-react";
+import { notFound } from "next/navigation";
+
+import { AppTransitionLink } from "@/components/app-transition-link";
+import { HomeFeedShell } from "@/components/home-feed-shell";
+import { PageShell } from "@/components/page-shell";
+import { Button } from "@/components/ui/button";
+import { getFeedPinsPage, getRecipeTag } from "@/lib/server/queries";
+
+export const dynamic = "force-dynamic";
+
+export default async function TagPage({ params }: { params: Promise<{ tagId: string }> }) {
+  const { tagId } = await params;
+  const tag = await getRecipeTag(tagId);
+  if (!tag) notFound();
+  const page = await getFeedPinsPage({ tagId });
+  return <PageShell>
+    <div className="flex items-center gap-3 px-2"><Button asChild variant="outline"><AppTransitionLink href="/tags" prefetch><ArrowLeft className="size-4" />Back to tags</AppTransitionLink></Button><div><p className="flex items-center gap-2 font-[family-name:var(--font-serif)] text-3xl font-semibold"><Tag className="size-5" />{tag.name}</p><p className="text-sm text-muted-foreground">Recipes in this collection</p></div></div>
+    <HomeFeedShell initialPage={page} initialQuery="" tagId={tagId} />
+  </PageShell>;
+}

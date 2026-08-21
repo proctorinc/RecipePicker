@@ -26,6 +26,8 @@ import {
   pinterestAccounts,
   recipeFolderMemberships,
   recipeFolders,
+  recipeTagMemberships,
+  recipeTags,
 } from "@/lib/server/db";
 import {
   getCanonicalIngredientOptionsForHousehold,
@@ -76,6 +78,8 @@ import type {
   PublicRecipeDetailView,
   PublicRecipeVersionDetailView,
   RecipeReviewView,
+  RecipeTagCollectionView,
+  RecipeTagView,
   RecipeVersionView,
   ShoppingCartPageView,
 } from "@/types/view-models";
@@ -154,10 +158,12 @@ export async function getFeedPinsPage({
   searchText,
   cursor,
   pageSize = DEFAULT_FEED_PAGE_SIZE,
+  tagId,
 }: {
   searchText?: string;
   cursor?: string | null;
   pageSize?: number;
+  tagId?: string;
 }): Promise<FeedPinsPage> {
   const [context, appAccess] = await Promise.all([
     requireHouseholdContext(),
@@ -166,7 +172,7 @@ export async function getFeedPinsPage({
   const { db, sqlite } = await openDatabase();
 
   try {
-    const rows = await getFeedRecipeRows(db, context.householdId);
+    const rows = await getFeedRecipeRows(db, context.householdId, tagId);
     const cards = await prepareFeedCards({
       rows,
       householdId: context.householdId,
@@ -237,6 +243,11 @@ export async function getRecipeDetail(
                   parentFolder: true,
                 },
               },
+            },
+          },
+          tagMemberships: {
+            with: {
+              tag: true,
             },
           },
           recipeInstructions: {
@@ -318,6 +329,9 @@ export async function getRecipeDetail(
     });
     return {
       recipeId: row.recipeId,
+      tags: row.tagMemberships
+        .map((membership) => ({ tagId: membership.tag.tagId, name: membership.tag.name }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
       folderPath,
       pin: row.pin,
       title:
@@ -2078,10 +2092,73 @@ function matchesCursor(
   );
 }
 
-async function getFeedRecipeRows(db: DatabaseHandle, householdId: string) {
+export async function getRecipeTags(): Promise<RecipeTagView[]> {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const rows = await db.query.recipeTags.findMany({
+      where: (table, { eq }) => eq(table.householdId, context.householdId),
+      orderBy: (table, { asc }) => [asc(table.name)],
+    });
+    return rows.map((tag) => ({ tagId: tag.tagId, name: tag.name }));
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function getRecipeTagCollections(): Promise<RecipeTagCollectionView[]> {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+
+  try {
+    const tags = await db.query.recipeTags.findMany({
+      where: (table, { eq }) => eq(table.householdId, context.householdId),
+      orderBy: (table, { asc }) => [asc(table.name)],
+      with: {
+        memberships: {
+          with: {
+            recipe: {
+              with: { pin: true, recipeInstructions: true },
+            },
+          },
+        },
+      },
+    });
+    return tags.map((tag) => ({
+      tagId: tag.tagId,
+      name: tag.name,
+      recipeCount: tag.memberships.length,
+      previewRecipes: tag.memberships
+        .sort((left, right) => right.recipe.updatedAt.localeCompare(left.recipe.updatedAt))
+        .slice(0, 4)
+        .map(({ recipe }) => {
+          const images = resolveRecipeImageSources(recipe.imageUrl, recipe.recipeInstructions?.imageUrl, recipe.pin.mediaJson, recipe.pin.rawJson);
+          return { recipeId: recipe.recipeId, imageUrl: images.imageUrl, previewImageUrl: images.previewImageUrl, dominantColor: recipe.pin.dominantColor };
+        }),
+    }));
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function getRecipeTag(tagId: string): Promise<RecipeTagView | null> {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+  try {
+    const tag = await db.query.recipeTags.findFirst({
+      where: (table, { and, eq }) => and(eq(table.tagId, tagId), eq(table.householdId, context.householdId)),
+    });
+    return tag ? { tagId: tag.tagId, name: tag.name } : null;
+  } finally {
+    await sqlite.close();
+  }
+}
+
+async function getFeedRecipeRows(db: DatabaseHandle, householdId: string, tagId?: string) {
   return await db.query.householdRecipes
     .findMany({
-      where: (table, { eq }) => eq(table.householdId, householdId),
+      where: (table, { and, eq }) => and(eq(table.householdId, householdId), tagId ? sql`${table.recipeId} IN (SELECT ${recipeTagMemberships.recipeId} FROM ${recipeTagMemberships} WHERE ${recipeTagMemberships.householdId} = ${householdId} AND ${recipeTagMemberships.tagId} = ${tagId})` : undefined),
       with: {
         pin: {
           with: {

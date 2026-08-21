@@ -42,6 +42,21 @@ export type FeedPinsPage = {
   hasMore: boolean;
 };
 
+export type RecipeTagView = {
+  tagId: string;
+  name: string;
+};
+
+export type RecipeTagCollectionView = RecipeTagView & {
+  recipeCount: number;
+  previewRecipes: Array<{
+    recipeId: string;
+    imageUrl: string | null;
+    previewImageUrl: string | null;
+    dominantColor: string | null;
+  }>;
+};
+
 export type RecipeReviewAggregate = {
   averageRating: number | null;
   reviewCount: number;
@@ -109,6 +124,7 @@ export type RecipeHistoryDayView = {
 
 export type RecipeDetailView = {
   recipeId: string;
+  tags: RecipeTagView[];
   folderPath: Array<{
     folderId: string;
     name: string | null;
