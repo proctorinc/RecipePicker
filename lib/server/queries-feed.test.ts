@@ -16,6 +16,8 @@ import {
   householdRecipes,
   householdRecipeReviews,
   households,
+  recipeTagMemberships,
+  recipeTags,
 } from "@/lib/server/db";
 
 const {
@@ -163,6 +165,35 @@ describe("getFeedPinsPage", () => {
     ]);
     expect(page.hasMore).toBe(true);
     expect(page.nextCursor).toBeTruthy();
+  });
+
+  it("filters the feed by tag membership", async () => {
+    const { db, sqlite } = await createTestDatabaseHandle(sqlitePath);
+
+    try {
+      await db.insert(recipeTags).values({
+        tagId: "tag_pasta",
+        householdId: "household_1",
+        name: "Pasta",
+        normalizedName: "pasta",
+        createdAt: "2026-06-12T00:00:00.000Z",
+        updatedAt: "2026-06-12T00:00:00.000Z",
+      }).run();
+      await db.insert(recipeTagMemberships).values({
+        membershipId: "membership_pasta_a",
+        householdId: "household_1",
+        recipeId: "recipe_a",
+        tagId: "tag_pasta",
+        createdAt: "2026-06-12T00:00:00.000Z",
+        updatedAt: "2026-06-12T00:00:00.000Z",
+      }).run();
+    } finally {
+      await sqlite.close();
+    }
+
+    const page = await getFeedPinsPage({ tagId: "tag_pasta" });
+
+    expect(page.items.map((item) => item.recipeId)).toEqual(["recipe_a"]);
   });
 
   it("resumes from the cursor without duplicates or gaps", async () => {

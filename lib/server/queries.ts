@@ -26,7 +26,6 @@ import {
   pinterestAccounts,
   recipeFolderMemberships,
   recipeFolders,
-  recipeTagMemberships,
   recipeTags,
 } from "@/lib/server/db";
 import {
@@ -2131,7 +2130,7 @@ export async function getRecipeTagCollections(): Promise<RecipeTagCollectionView
       recipeCount: tag.memberships.length,
       previewRecipes: tag.memberships
         .sort((left, right) => right.recipe.updatedAt.localeCompare(left.recipe.updatedAt))
-        .slice(0, 4)
+        .slice(0, 5)
         .map(({ recipe }) => {
           const images = resolveRecipeImageSources(recipe.imageUrl, recipe.recipeInstructions?.imageUrl, recipe.pin.mediaJson, recipe.pin.rawJson);
           return { recipeId: recipe.recipeId, imageUrl: images.imageUrl, previewImageUrl: images.previewImageUrl, dominantColor: recipe.pin.dominantColor };
@@ -2158,7 +2157,17 @@ export async function getRecipeTag(tagId: string): Promise<RecipeTagView | null>
 async function getFeedRecipeRows(db: DatabaseHandle, householdId: string, tagId?: string) {
   return await db.query.householdRecipes
     .findMany({
-      where: (table, { and, eq }) => and(eq(table.householdId, householdId), tagId ? sql`${table.recipeId} IN (SELECT ${recipeTagMemberships.recipeId} FROM ${recipeTagMemberships} WHERE ${recipeTagMemberships.householdId} = ${householdId} AND ${recipeTagMemberships.tagId} = ${tagId})` : undefined),
+      where: (table, { and, eq }) => and(
+        eq(table.householdId, householdId),
+        tagId
+          ? sql`${table.recipeId} IN (
+              SELECT "feed_tag_membership"."recipe_id"
+              FROM "recipe_tag_memberships" AS "feed_tag_membership"
+              WHERE "feed_tag_membership"."household_id" = ${householdId}
+                AND "feed_tag_membership"."tag_id" = ${tagId}
+            )`
+          : undefined,
+      ),
       with: {
         pin: {
           with: {
