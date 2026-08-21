@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy } from "lucide-react";
+import { Check, Share2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -30,8 +30,8 @@ export function CopyPublicRecipeLink({ url }: { url: string }) {
 
   return (
     <Button type="button" variant="outline" onClick={shareRecipeUrl}>
-      {shared ? <Check className="size-4" /> : <Copy className="size-4" />}
-      {shared ? "Shared" : "Share recipe"}
+      {shared ? <Check className="size-4" /> : <Share2 className="size-4" />}
+      {shared ? "Shared" : "Share"}
     </Button>
   );
 }

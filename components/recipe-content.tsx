@@ -1,7 +1,7 @@
 "use client";
 
 import { useContext, useEffect, useState, type DragEvent, type ReactNode } from "react";
-import { EyeOff, GripVertical, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { GripVertical, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,10 @@ import { RecipeIngredientList } from "@/components/recipe-ingredient-list";
 import { RecipeEditingContext } from "@/components/recipe-metadata-editor";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatIso8601Duration } from "@/lib/utils";
-import { formatIngredientOriginalText, parseIngredientLines, type ParsedIngredientLine } from "@/lib/ingredient-parsing";
+import { formatIngredientOriginalText, type ParsedIngredientLine } from "@/lib/ingredient-parsing";
+import { formatScaledIngredientParts } from "@/lib/ingredient-scaling";
 import type { PublicRecipeDetailView } from "@/types/view-models";
 
 type RecipeContentProps = {
@@ -30,10 +32,12 @@ export function RecipeContent({
   const [ingredients, setIngredients] = useState<Array<RecipeIngredientDraft>>(recipe.ingredients);
   const [steps, setSteps] = useState<Array<RecipeStepDraft>>(recipe.steps);
   const [draggedStepId, setDraggedStepId] = useState<string | null>(null);
+  const [editingIngredientId, setEditingIngredientId] = useState<string | null>(null);
 
   useEffect(() => {
     setIngredients(recipe.ingredients);
     setSteps(recipe.steps);
+    setEditingIngredientId(null);
   }, [contentResetVersion, recipe.ingredients, recipe.steps]);
 
   useEffect(() => {
@@ -53,7 +57,9 @@ export function RecipeContent({
   ].filter((item): item is { label: string; value: string } => Boolean(item.value));
 
   function addIngredient() {
-    setIngredients((current) => [...current, createIngredientDraft()]);
+    const ingredient = createIngredientDraft();
+    setIngredients((current) => [...current, ingredient]);
+    setEditingIngredientId(ingredient.id);
   }
 
   function updateIngredient(id: string, patch: Partial<RecipeIngredientDraft>) {
@@ -64,17 +70,18 @@ export function RecipeContent({
     }));
   }
 
-  function pasteIngredients(id: string, value: string) {
-    const parsed = parseIngredientLines(value);
-    if (parsed.length < 2) return false;
-    setIngredients((current) => {
-      const index = current.findIndex((item) => item.id === id);
-      if (index < 0) return current;
-      const next = [...current];
-      next.splice(index, 1, ...parsed.map((item, offset) => createIngredientDraft(item, offset === 0 ? id : createDraftId())));
-      return next;
-    });
-    return true;
+  function deleteIngredient(id: string) {
+    setIngredients((current) => current.map((item) => item.id === id ? { ...item, isPendingDeletion: !item.isPendingDeletion } : item));
+  }
+
+  const editingIngredient = ingredients.find((ingredient) => ingredient.id === editingIngredientId) ?? null;
+
+  function closeIngredientEditor(open: boolean) {
+    if (open) return;
+    if (editingIngredient?.id.startsWith("new-") && !editingIngredient.parsedText?.trim()) {
+      setIngredients((current) => current.filter((ingredient) => ingredient.id !== editingIngredient.id));
+    }
+    setEditingIngredientId(null);
   }
 
   function addStep() {
@@ -120,31 +127,36 @@ export function RecipeContent({
               <section className="space-y-3">
                 <input form={formId} type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.filter((ingredient) => !ingredient.isPendingDeletion && ingredient.parsedText?.trim()).map(({ id, originalText, amount, unit, parsedText, notes }) => ({ id, originalText, amountText: amount, unit, ingredientText: parsedText, notes })))} />
                 {ingredients.map((ingredient, index) => (
-                  <div key={ingredient.id} className={`rounded-2xl border border-border/60 bg-secondary/10 p-3 ${ingredient.isPendingDeletion ? "opacity-50" : ""}`}>
-                    <div className="grid gap-3 sm:grid-cols-[8rem_8rem_minmax(0,1fr)]">
-                      <Input value={ingredient.amount ?? ""} disabled={ingredient.isPendingDeletion} onChange={(event) => updateIngredient(ingredient.id, { amount: event.target.value || null })} aria-label={`Amount for ingredient ${index + 1}`} placeholder="Amount" />
-                      <Input value={ingredient.unit ?? ""} disabled={ingredient.isPendingDeletion} onChange={(event) => updateIngredient(ingredient.id, { unit: event.target.value || null })} aria-label={`Unit for ingredient ${index + 1}`} placeholder="Unit" />
-                      <Input
-                        value={ingredient.parsedText ?? ""}
+                  <div key={ingredient.id} className={`flex items-start gap-3 ${ingredient.isPendingDeletion ? "opacity-50" : ""}`}>
+                    {(() => {
+                      const parts = formatScaledIngredientParts(ingredient, 1);
+                      return <>
+                        {parts.amount ? <span className="mt-0.5 shrink-0 rounded-lg bg-secondary px-2 py-1 text-sm font-semibold text-foreground">{parts.amount}</span> : null}
+                        <p className="min-w-0 flex-1 pt-1 font-medium text-foreground">{parts.description || "New ingredient"}</p>
+                      </>;
+                    })()}
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="px-3"
                         disabled={ingredient.isPendingDeletion}
-                        onPaste={(event) => { if (pasteIngredients(ingredient.id, event.clipboardData.getData("text"))) event.preventDefault(); }}
-                        onChange={(event) => updateIngredient(ingredient.id, { parsedText: event.target.value || null })}
-                        aria-label={`Ingredient ${index + 1}`}
-                        placeholder="Ingredient"
-                      />
-                    </div>
-                    <div className="mt-3 flex gap-2">
-                      <Input value={ingredient.notes ?? ""} disabled={ingredient.isPendingDeletion} onChange={(event) => updateIngredient(ingredient.id, { notes: event.target.value || null })} aria-label={`Notes for ingredient ${index + 1}`} placeholder="Notes (optional)" />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-12 w-12 shrink-0"
-                      onClick={() => setIngredients((current) => current.map((item) => item.id === ingredient.id ? { ...item, isPendingDeletion: !item.isPendingDeletion } : item))}
-                      aria-label={`${ingredient.isPendingDeletion ? "Restore" : "Disable"} ingredient ${index + 1}`}
-                    >
-                      {ingredient.isPendingDeletion ? <RotateCcw className="size-5" /> : <EyeOff className="size-5" />}
-                    </Button>
+                        onClick={() => setEditingIngredientId(ingredient.id)}
+                      >
+                        <Pencil className="size-5" />
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-11 w-11 shrink-0"
+                        onClick={() => deleteIngredient(ingredient.id)}
+                        aria-label={`${ingredient.isPendingDeletion ? "Restore" : "Delete"} ingredient ${index + 1}`}
+                      >
+                        {ingredient.isPendingDeletion ? <RotateCcw className="size-6" /> : <Trash2 className="size-6" />}
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -183,7 +195,7 @@ export function RecipeContent({
                       aria-label={`Reorder step ${index + 1}`}
                       className="mt-2 h-fit cursor-grab touch-none text-muted-foreground active:cursor-grabbing"
                     >
-                      <GripVertical className="size-5" />
+                      <GripVertical className="size-6" />
                     </button>
                     <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -192,10 +204,11 @@ export function RecipeContent({
                         type="button"
                         variant="ghost"
                         size="icon"
+                        className="h-11 w-11"
                         onClick={() => setSteps((current) => current.map((item) => item.id === step.id ? { ...item, isPendingDeletion: !item.isPendingDeletion } : item))}
                         aria-label={`${step.isPendingDeletion ? "Restore" : "Remove"} step ${index + 1}`}
                       >
-                        {step.isPendingDeletion ? <RotateCcw className="size-4" /> : <Trash2 className="size-4" />}
+                        {step.isPendingDeletion ? <RotateCcw className="size-6" /> : <Trash2 className="size-6" />}
                       </Button>
                     </div>
                     <Textarea
@@ -228,6 +241,15 @@ export function RecipeContent({
             ) : emptySteps}
         </CardContent>
       </Card> : null}
+      <IngredientEditorDialog
+        ingredient={editingIngredient}
+        open={Boolean(editingIngredient)}
+        onOpenChange={closeIngredientEditor}
+        onSave={(patch) => {
+          if (editingIngredient) updateIngredient(editingIngredient.id, patch);
+          setEditingIngredientId(null);
+        }}
+      />
     </div>
   );
 }
@@ -254,6 +276,57 @@ function createIngredientDraft(parsed?: ParsedIngredientLine, id = createDraftId
     amount, amountValue: parsed?.amountValue ?? null, amountMaxValue: parsed?.amountMaxValue ?? null, unit, parsedText, notes,
     canonicalIngredientId: null, canonicalName: null, attributes: [], normalizationStatus: "needs_review",
   };
+}
+
+function IngredientEditorDialog({ ingredient, open, onOpenChange, onSave }: {
+  ingredient: RecipeIngredientDraft | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (patch: Pick<RecipeIngredientDraft, "amount" | "unit" | "parsedText" | "notes">) => void;
+}) {
+  const [amount, setAmount] = useState("");
+  const [unit, setUnit] = useState("");
+  const [parsedText, setParsedText] = useState("");
+  const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    setAmount(ingredient?.amount ?? "");
+    setUnit(ingredient?.unit ?? "");
+    setParsedText(ingredient?.parsedText ?? "");
+    setNotes(ingredient?.notes ?? "");
+  }, [ingredient]);
+
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="max-h-[88vh] w-[min(94vw,44rem)] overflow-y-auto">
+      <DialogHeader>
+        <DialogTitle>Edit ingredient</DialogTitle>
+        <DialogDescription>Update the amount, ingredient description, and any notes.</DialogDescription>
+      </DialogHeader>
+      <form className="space-y-5" onSubmit={(event) => {
+        event.preventDefault();
+        onSave({ amount: amount || null, unit: unit || null, parsedText: parsedText || null, notes: notes || null });
+      }}>
+        {ingredient?.originalText ? <div className="rounded-2xl border border-border bg-secondary/20 p-4"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Original recipe text</p><p className="mt-2 font-medium">{ingredient.originalText}</p></div> : null}
+        <div className="space-y-3">
+          <div><p className="font-medium">Ingredient details</p><p className="text-sm text-muted-foreground">Correct any field that looks wrong.</p></div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <IngredientField label="Amount" value={amount} onChange={setAmount} placeholder="e.g. 2" />
+            <IngredientField label="Unit" value={unit} onChange={setUnit} placeholder="e.g. cups" />
+          </div>
+          <IngredientField label="What is the ingredient?" value={parsedText} onChange={setParsedText} placeholder="e.g. yellow onion" required />
+          <IngredientField label="Notes (optional)" value={notes} onChange={setNotes} placeholder="e.g. finely chopped" />
+        </div>
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" disabled={!parsedText.trim()}>Save ingredient</Button>
+        </div>
+      </form>
+    </DialogContent>
+  </Dialog>;
+}
+
+function IngredientField({ label, value, onChange, placeholder, required = false }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; required?: boolean }) {
+  return <label className="space-y-2"><span className="text-sm font-medium">{label}</span><Input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} required={required} /></label>;
 }
 
 function UnavailableContent() {

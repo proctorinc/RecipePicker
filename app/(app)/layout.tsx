@@ -21,6 +21,7 @@ export default async function AuthenticatedAppLayout({
       householdName={household.householdName}
       showAiPicker={access.isPremium}
       showSettings={household.role === "owner" || access.isActualAdmin}
+      mobileProfileLinksToSettings={household.role === "owner"}
     >
       {children}
     </AppShell>

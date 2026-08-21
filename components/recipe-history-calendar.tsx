@@ -390,7 +390,7 @@ export function RecipeHistoryCalendar({
       {cartSelectionMode ? <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur"><div className="flex items-center gap-3"><Button type="button" variant="ghost" size="sm" onClick={() => { setCartRangeStart(null); setCartRangeEnd(null); }}>{cartRangeStart ? "Restart" : "Cancel"}</Button><p className="flex-1 text-sm text-muted-foreground">{cartRangeStart ? "Choose an end date" : "Choose a start date"}</p><Button asChild variant="ghost" size="sm"><AppTransitionLink href="/shopping-cart">Back</AppTransitionLink></Button></div></div> : null}
 
       <section className="rounded-[24px] border border-white/70 bg-white/90 p-2 shadow-soft sm:rounded-[32px] sm:p-6">
-        <div className="gap-2 mb-4 flex items-center justify-end sm:mb-6">
+        <div className="mb-6 hidden items-center justify-end gap-2 sm:flex">
           <Button type="button" variant={cartSelectionMode ? "outline" : "default"} size="sm" onClick={() => { if (cartSelectionMode) router.push("/shopping-cart"); else router.push(`/history?month=${encodeURIComponent(history.month)}&cart=select`); }} disabled={isSelectionMode}>
             <ShoppingCart className="h-4 w-4" />{cartSelectionMode ? "Cancel cart" : "Build cart"}
           </Button>
@@ -460,7 +460,7 @@ export function RecipeHistoryCalendar({
           </div>
         ) : null}
 
-        <div className="mb-3 flex flex-col gap-2 sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="mb-6 hidden sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <div className="text-center sm:order-2">
             {/*<p className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground sm:hidden">
               Recipe history
@@ -469,8 +469,8 @@ export function RecipeHistoryCalendar({
               {history.monthLabel}
             </h2>
           </div>
-          <div className="w-full flex justify-center">
-            <div className="flex justify-between max-w-xs gap-2 sm:order-1 sm:flex sm:w-auto sm:items-center">
+          <div className="flex w-auto justify-center">
+            <div className="flex max-w-xs justify-between gap-2 sm:order-1 sm:flex sm:w-auto sm:items-center">
               <Button
                 asChild
                 variant="outline"
@@ -481,18 +481,6 @@ export function RecipeHistoryCalendar({
                   href={buildHistoryHref(history.previousMonth)}
                 >
                   <ChevronLeft className="h-4 w-4" />
-                </AppTransitionLink>
-              </Button>
-              <Button
-                asChild
-                variant="outline"
-                className="h-11 w-48 justify-center px-3 sm:hidden"
-                size="sm"
-              >
-                <AppTransitionLink
-                  href={buildHistoryHref(getTodayDayString().slice(0, 7))}
-                >
-                  Today
                 </AppTransitionLink>
               </Button>
               <Button
@@ -524,7 +512,7 @@ export function RecipeHistoryCalendar({
               type="button"
               onClick={() => openDay(day)}
               className={cn(
-                "group relative flex flex-start w-full h-full aspect-[2/3] shrink-0 sm:aspect-square overflow-hidden sm:border p-1 text-left transition hover:border-primary/40 hover:bg-secondary/15 sm:rounded-[24px] sm:p-2",
+                "group relative flex flex-start h-full w-full shrink-0 aspect-[2/3] overflow-hidden p-1 text-left transition hover:border-primary/40 hover:bg-secondary/15 sm:aspect-square sm:rounded-[24px] sm:border sm:p-2",
                 day.inCurrentMonth
                   ? "sm:border-border/70 bg-white/75"
                   : "sm:border-border/35 bg-muted/95 text-muted-foreground",
@@ -542,17 +530,17 @@ export function RecipeHistoryCalendar({
               <div className="mb-1 flex items-start justify-between sm:mb-2">
                 <span
                   className={cn(
-                    "relative z-10 inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1 text-xs font-semibold sm:h-8 sm:min-w-8 sm:text-sm",
+                    "absolute left-0 top-0 z-10 inline-flex h-8 w-8 items-start justify-start rounded-br-[1.5rem] bg-white/90 px-1.5 pt-1 text-[10px] font-semibold text-foreground sm:relative sm:h-8 sm:min-w-8 sm:w-auto sm:items-center sm:justify-center sm:rounded-full sm:bg-transparent sm:px-1 sm:pt-0 sm:text-sm",
                     day.events.length > 0 &&
                       !day.isToday &&
-                      "bg-white/90 text-foreground",
+                      "sm:bg-white/90",
                     day.isToday && "bg-primary text-primary-foreground",
                   )}
                 >
                   {day.dayNumber}
                 </span>
                 {day.events.length > 1 ? (
-                  <span className="hidden absolute right-1 bottom-1 z-10 sm:inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/90 px-1 text-[10px] font-semibold text-foreground sm:h-6 sm:min-w-6 sm:px-1.5 sm:text-[11px]">
+                  <span className="absolute bottom-1 right-1 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/90 px-1 text-[10px] font-semibold text-foreground sm:h-6 sm:min-w-6 sm:px-1.5 sm:text-[11px]">
                     {day.events.length}
                   </span>
                 ) : null}
@@ -570,6 +558,38 @@ export function RecipeHistoryCalendar({
               ) : null}
             </button>
           ))}
+        </div>
+
+        <div className="mt-4 space-y-3 sm:hidden">
+          <div className="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-2">
+            <Button asChild variant="outline" className="h-11 w-11 justify-center px-3" size="sm">
+              <AppTransitionLink href={buildHistoryHref(history.previousMonth)} aria-label={`Previous month, ${history.monthLabel}`}>
+                <ChevronLeft className="h-4 w-4" />
+              </AppTransitionLink>
+            </Button>
+            <h2 className="text-center font-[family-name:var(--font-serif)] text-xl font-semibold">
+              {history.monthLabel}
+            </h2>
+            <Button asChild variant="outline" className="h-11 w-11 justify-center px-3" size="sm">
+              <AppTransitionLink href={buildHistoryHref(history.nextMonth)} aria-label={`Next month, ${history.monthLabel}`}>
+                <ChevronRight className="h-4 w-4" />
+              </AppTransitionLink>
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant={cartSelectionMode ? "outline" : "default"} size="sm" onClick={() => { if (cartSelectionMode) router.push("/shopping-cart"); else router.push(`/history?month=${encodeURIComponent(history.month)}&cart=select`); }} disabled={isSelectionMode}>
+              <ShoppingCart className="h-4 w-4" />{cartSelectionMode ? "Cancel cart" : "Build cart"}
+            </Button>
+            {selectedRecipe && (
+              <Button asChild type="button" variant="ghost" size="sm">
+                <AppTransitionLink href={`/history?month=${encodeURIComponent(history.month)}`}>Clear</AppTransitionLink>
+              </Button>
+            )}
+            <Button type="button" variant={isSelectionMode ? "outline" : "default"} size="sm" onClick={openRecipePicker} disabled={cartSelectionMode}>
+              <CookingPot className="h-4 w-4" />{isSelectionMode ? "Change recipe" : "Find recipe"}
+            </Button>
+          </div>
         </div>
       </section>
 

@@ -10,7 +10,7 @@ export function RecipeVersionHistory({ versions }: { versions: RecipeVersionView
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {versions.map((version) => <Badge key={version.versionNumber} variant="outline" className="border-0 bg-white/18 px-4 py-2 text-sm font-normal text-white backdrop-blur">v{version.versionNumber}{version.isPrimary ? " · current" : ""}</Badge>)}
+      {versions.map((version) => <Badge key={version.versionNumber} variant="outline" className="border border-white/40 bg-secondary/85 px-2 py-0.5 text-[11px] font-medium text-secondary-foreground backdrop-blur">v{version.versionNumber}{version.isPrimary ? " · current" : ""}</Badge>)}
     </div>
   );
 }

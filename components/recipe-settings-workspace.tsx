@@ -299,9 +299,15 @@ function RecipeContentEditor({ detail }: { detail: RecipeOpsDetail }) {
           <Dialog open={saveChoiceOpen} onOpenChange={setSaveChoiceOpen}>
             <DialogContent>
               <DialogHeader><DialogTitle>Save recipe edits</DialogTitle><DialogDescription>Choose whether these instruction changes update the current version or start a new version.</DialogDescription></DialogHeader>
-              <div className="grid gap-3">
-                <Button type="button" variant="outline" onClick={() => { const form = formRef.current; if (!form) return; const data = new FormData(form); data.set("versionMode", "update"); formAction(data); setSaveChoiceOpen(false); }}>Update current version</Button>
-                <Button type="button" onClick={() => { const form = formRef.current; if (!form) return; const data = new FormData(form); data.set("versionMode", "new"); formAction(data); setSaveChoiceOpen(false); }}>Create new version</Button>
+              <div className="flex flex-col gap-6">
+                <button
+                  type="button"
+                  onClick={() => { const form = formRef.current; if (!form) return; const data = new FormData(form); data.set("versionMode", "new"); formAction(data); setSaveChoiceOpen(false); }}
+                  className="self-center text-sm font-medium text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+                >
+                  Create a new version
+                </button>
+                <Button type="button" onClick={() => { const form = formRef.current; if (!form) return; const data = new FormData(form); data.set("versionMode", "update"); formAction(data); setSaveChoiceOpen(false); }}>Save current version</Button>
               </div>
             </DialogContent>
           </Dialog>

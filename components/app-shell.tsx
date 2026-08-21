@@ -13,6 +13,7 @@ import {
 import { AppShellProgress } from "@/components/app-route-transition";
 import { AppShellUserButton } from "@/components/app-shell-user-button";
 import { AppTransitionLink } from "@/components/app-transition-link";
+import { MobileAwareAppHeader } from "@/components/mobile-aware-app-header";
 import { Button } from "@/components/ui/button";
 import { MobileNav } from "@/components/mobile-nav";
 
@@ -54,11 +55,13 @@ export async function AppShell({
   householdName,
   showAiPicker = false,
   showSettings = true,
+  mobileProfileLinksToSettings = false,
 }: {
   children: ReactNode;
   householdName: string;
   showAiPicker?: boolean;
   showSettings?: boolean;
+  mobileProfileLinksToSettings?: boolean;
 }) {
   const visibleBaseLinks = showSettings
     ? baseLinks
@@ -78,7 +81,7 @@ export async function AppShell({
 
   return (
     <div className="min-h-screen bg-grain pb-16">
-      <header className="sticky top-0 z-40 border-b border-white/50 bg-background/75 backdrop-blur-xl">
+      <MobileAwareAppHeader>
         <AppShellProgress />
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <AppTransitionLink
@@ -129,12 +132,16 @@ export async function AppShell({
 
           <AppShellUserButton />
         </div>
-      </header>
+      </MobileAwareAppHeader>
 
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-2 py-4 pb-24 sm:px-6 md:pb-4 lg:px-8">
         {children}
       </main>
-      <MobileNav showAiPicker={showAiPicker} showSettings={showSettings} />
+      <MobileNav
+        showAiPicker={showAiPicker}
+        showSettings={showSettings}
+        profileLinksToSettings={mobileProfileLinksToSettings}
+      />
     </div>
   );
 }

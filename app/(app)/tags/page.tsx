@@ -6,8 +6,17 @@ export const dynamic = "force-dynamic";
 
 export default async function TagsPage() {
   const collections = await getRecipeTagCollections();
-  return <PageShell>
-    <div className="space-y-1 px-2"><h1 className="font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight">Tags</h1><p className="text-muted-foreground">Browse your recipes by collection.</p></div>
-    <TagCollections collections={collections} />
-  </PageShell>;
+  return (
+    <PageShell>
+      <div className="space-y-1 px-2">
+        <h1 className="font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight">
+          Collections
+        </h1>
+        <p className="text-muted-foreground">
+          Browse your tagged recipe collections.
+        </p>
+      </div>
+      <TagCollections collections={collections} />
+    </PageShell>
+  );
 }

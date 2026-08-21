@@ -52,12 +52,8 @@ export default async function RecipePage({
     reviewRecipeId && reviewRecipeId === recipeId
       ? `/history?recipeId=${encodeURIComponent(recipeId)}&from=recipe${historyMonth ? `&month=${encodeURIComponent(historyMonth)}` : ""}`
       : "/";
-  const backLabel =
-    reviewRecipeId && reviewRecipeId === recipeId
-      ? "Back to review"
-      : "Back to feed";
   return (
-    <PageShell>
+    <PageShell className="max-w-none">
       <RecipePageScrollToTop />
       <RecipeMetadataEditor
         recipeId={recipe.recipeId}
@@ -66,7 +62,6 @@ export default async function RecipePage({
         tags={recipe.tags}
         availableTags={availableTags}
         backHref={backHref}
-        backLabel={backLabel}
         content={
           <RecipeContent
             recipe={recipe}
@@ -83,7 +78,7 @@ export default async function RecipePage({
                   prefetch
                 >
                   <CalendarPlus className="size-4" />
-                  Add to calendar
+                  Add
                 </AppTransitionLink>
               </Button>
               <CopyPublicRecipeLink
@@ -93,7 +88,7 @@ export default async function RecipePage({
                 <Button asChild>
                   <a href={recipe.sourceUrl} target="_blank" rel="noreferrer">
                     <ExternalLink className="size-4" />
-                    Original Source
+                    Original
                   </a>
                 </Button>
               )}
@@ -117,60 +112,53 @@ export default async function RecipePage({
           </>
         }
       >
-        <section className="overflow-hidden rounded-t-[36px] border border-white/70 bg-white/70 shadow-soft">
-          <div className="relative aspect-[16/10] sm:aspect-[16/8]">
-            {recipe.imageUrl ? (
-              <RecipeImage
-                src={recipe.imageUrl}
-                previewSrc={recipe.previewImageUrl}
-                alt={recipe.title}
-                fill
-                className="object-cover"
-                sizes="100vw"
-              />
-            ) : (
-              <div
-                className="absolute inset-0"
-                style={{
-                  backgroundColor:
-                    recipe.dominantColor ?? "rgba(214, 196, 176, 0.65)",
-                }}
-              />
-            )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 p-2 text-white sm:p-8">
-              <div className="mb-3 flex flex-wrap gap-2">
-                <RecipeVersionHistory
-                  versions={recipe.versions}
+        <section className="relative aspect-[16/10] overflow-hidden bg-white/70 sm:aspect-[16/8]">
+          {recipe.imageUrl ? (
+            <RecipeImage
+              src={recipe.imageUrl}
+              previewSrc={recipe.previewImageUrl}
+              alt={recipe.title}
+              fill
+              className="object-cover"
+              sizes="100vw"
+            />
+          ) : (
+            <div
+              className="absolute inset-0"
+              style={{
+                backgroundColor:
+                  recipe.dominantColor ?? "rgba(214, 196, 176, 0.65)",
+              }}
+            />
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-black/25" />
+          <div className="absolute inset-x-0 bottom-0 p-4 text-white sm:p-8">
+            <div className="flex flex-wrap gap-1.5">
+              <RecipeVersionHistory versions={recipe.versions} />
+              {recipe.extractionProvenance ? (
+                <Badge variant="secondary" className="border border-white/40 bg-secondary/85 px-2 py-0.5 text-[11px] text-secondary-foreground">
+                  {recipe.extractionProvenance === "image" ? "Image recipe" : "Video recipe"}
+                </Badge>
+              ) : null}
+              {recipe.totalTime ? (
+                <MetaChip
+                  icon={<Clock3 className="size-3.5" />}
+                  label={formatIso8601Duration(recipe.totalTime) ?? recipe.totalTime}
                 />
-                {recipe.extractionProvenance ? (
-                  <Badge variant="secondary">
-                    {recipe.extractionProvenance === "image" ? "Image recipe" : "Video recipe"}
-                  </Badge>
-                ) : null}
-                {recipe.totalTime ? (
-                  <MetaChip
-                    icon={<Clock3 className="h-4 w-4" />}
-                    label={
-                      formatIso8601Duration(recipe.totalTime) ??
-                      recipe.totalTime
-                    }
-                  />
-                ) : null}
-                {recipe.yieldText ? (
-                  <MetaChip
-                    icon={<ListChecks className="h-4 w-4" />}
-                    label={`${recipe.yieldText} servings`}
-                  />
-                ) : null}
-              </div>
+              ) : null}
+              {recipe.yieldText ? (
+                <MetaChip
+                  icon={<ListChecks className="size-3.5" />}
+                  label={`${recipe.yieldText} servings`}
+                />
+              ) : null}
             </div>
           </div>
         </section>
       </RecipeMetadataEditor>
 
       {recipe.status !== "recipe_ready" ? (
-        <Card className="bg-white/85">
+        <Card className="mx-auto w-full max-w-4xl bg-white/85">
           <CardContent className="flex flex-col gap-4 py-6 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
@@ -188,7 +176,7 @@ export default async function RecipePage({
       ) : null}
 
       {access.isAdmin && (
-        <Card className="bg-white/85">
+        <Card className="mx-auto w-full max-w-4xl bg-white/85">
           <CardContent className="flex flex-col gap-4 py-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-medium">Recipe source and parsing</p>
@@ -224,7 +212,7 @@ export default async function RecipePage({
 
 function MetaChip({ icon, label }: { icon: ReactNode; label: string }) {
   return (
-    <div className="inline-flex items-center gap-2 rounded-full bg-white/18 px-4 py-2 text-sm backdrop-blur">
+    <div className="inline-flex items-center gap-1.5 rounded-full border border-white/40 bg-secondary/85 px-2 py-0.5 text-[11px] font-medium text-secondary-foreground backdrop-blur">
       {icon}
       {label}
     </div>

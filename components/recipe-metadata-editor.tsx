@@ -5,7 +5,6 @@ import { ArrowLeft, Check, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
-import { AppTransitionLink } from "@/components/app-transition-link";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,7 +32,6 @@ type RecipeMetadataEditorProps = {
   tags: Array<{ tagId: string; name: string }>;
   availableTags: Array<{ tagId: string; name: string }>;
   backHref: string;
-  backLabel: string;
   children: React.ReactNode;
   topContent?: React.ReactNode;
   content?: React.ReactNode;
@@ -47,7 +45,6 @@ export function RecipeMetadataEditor({
   tags,
   availableTags,
   backHref,
-  backLabel,
   children,
   topContent,
   content,
@@ -142,14 +139,10 @@ export function RecipeMetadataEditor({
           }}
         >
           <input type="hidden" name="recipeId" value={recipeId} />
-          <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur">
-            <div className="flex items-center justify-between gap-3">
-              <Button asChild variant="outline">
-                <AppTransitionLink href={backHref} prefetch>
-                  <ArrowLeft className="size-4" />
-                  {backLabel}
-                </AppTransitionLink>
-              </Button>
+          <div className="relative left-1/2 w-screen -translate-x-1/2">
+            {children}
+            <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between p-4 sm:p-6">
+              <BackButton fallbackHref={backHref} />
               <EditSubmitButton
                 isEditing={isEditing}
                 pending={pending}
@@ -164,6 +157,29 @@ export function RecipeMetadataEditor({
                 }}
               />
             </div>
+            <div className="absolute inset-x-0 bottom-0 z-10 p-4 pb-12 text-white sm:p-8 sm:pb-20">
+              <section>
+                {isEditing ? (
+                  <Textarea
+                    ref={titleRef}
+                    form={formId}
+                    name="title"
+                    value={draftTitle}
+                    onChange={(event) => setDraftTitle(event.target.value)}
+                    placeholder="Add a recipe title"
+                    rows={2}
+                    className={cn(
+                      "min-h-0 max-w-3xl resize-none overflow-hidden rounded-none border-0 bg-transparent px-0 py-0",
+                      "font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight text-white shadow-none placeholder:text-white/70 focus-visible:ring-0 sm:text-5xl",
+                    )}
+                  />
+                ) : (
+                  <h1 className="max-w-3xl whitespace-pre-wrap font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+                    {displayTitle}
+                  </h1>
+                )}
+              </section>
+            </div>
           </div>
         </form>
 
@@ -173,9 +189,16 @@ export function RecipeMetadataEditor({
               <DialogTitle>Save recipe changes</DialogTitle>
               <DialogDescription>Choose whether to save these changes to the current version or create a new version with them.</DialogDescription>
             </DialogHeader>
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button type="button" variant="outline" disabled={pending} onClick={() => save("update")}>Save current version</Button>
-              <Button type="button" disabled={pending} onClick={() => save("new")}>Create a new version</Button>
+            <div className="flex flex-col gap-6">
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => save("new")}
+                className="self-center text-sm font-medium text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              >
+                Create a new version
+              </button>
+              <Button type="button" disabled={pending} onClick={() => save("update")}>Save current version</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -183,29 +206,7 @@ export function RecipeMetadataEditor({
         {children}
         {editBanner}
 
-        <div className="space-y-2 px-4">
-          <section>
-            {isEditing ? (
-              <Textarea
-                ref={titleRef}
-                form={formId}
-                name="title"
-                value={draftTitle}
-                onChange={(event) => setDraftTitle(event.target.value)}
-                placeholder="Add a recipe title"
-                rows={2}
-                className={cn(
-                  "min-h-0 resize-none overflow-hidden rounded-none border-0 bg-secondary/35 px-0 py-0",
-                  "font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight text-foreground shadow-none focus-visible:ring-0 sm:text-5xl",
-                )}
-              />
-            ) : (
-              <h2 className="max-w-3xl whitespace-pre-wrap font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight sm:text-5xl">
-                {displayTitle}
-              </h2>
-            )}
-          </section>
-
+        <div className="mx-auto w-full max-w-4xl space-y-2 px-4">
           <RecipeTags
             recipeId={recipeId}
             initialTags={tags}
@@ -236,6 +237,30 @@ export function RecipeMetadataEditor({
         </div>
       </div>
     </RecipeEditingContext.Provider>
+  );
+}
+
+function BackButton({ fallbackHref }: { fallbackHref: string }) {
+  const router = useRouter();
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon"
+      className="border-white/60 bg-background/85 text-foreground backdrop-blur hover:bg-background"
+      aria-label="Go back"
+      onClick={() => {
+        if (window.history.length > 1) {
+          router.back();
+          return;
+        }
+
+        router.push(fallbackHref);
+      }}
+    >
+      <ArrowLeft className="size-4" />
+    </Button>
   );
 }
 
@@ -358,13 +383,16 @@ function EditSubmitButton({
   return (
     <Button
       type="button"
+      variant="outline"
+      size="icon"
+      className="border-white/60 bg-background/85 text-foreground backdrop-blur hover:bg-background"
       disabled={pending}
+      aria-label="Edit recipe"
       onClick={() => {
         onEnableEditing();
       }}
     >
       <Pencil className="size-4" />
-      {pending ? "Saving..." : "Edit"}
     </Button>
   );
 }

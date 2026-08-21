@@ -130,15 +130,17 @@ export function HomeFeedShell({
 
   return (
     <>
-      <HomeFeed
-        initialItems={page.items}
-        initialCursor={page.nextCursor}
-        initialHasMore={page.hasMore}
-        query={activeQuery}
-        tagId={tagId}
-        onPageChange={setPage}
-      />
-      <div className="fixed left-0 right-0 bottom-24 z-30 px-3 md:bottom-4 md:px-0">
+      <div className="pt-[calc(env(safe-area-inset-top)+4.5rem)] md:pt-0">
+        <HomeFeed
+          initialItems={page.items}
+          initialCursor={page.nextCursor}
+          initialHasMore={page.hasMore}
+          query={activeQuery}
+          tagId={tagId}
+          onPageChange={setPage}
+        />
+      </div>
+      <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+0.75rem)] z-30 px-3 md:top-auto md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">
           <FeedSearch
             value={inputValue}

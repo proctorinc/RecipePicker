@@ -7,10 +7,12 @@ import {
   Settings2,
   Sparkles,
   Tags,
+  Blocks,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
+import { MobileProfileButton } from "@/components/mobile-profile-button";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -23,7 +25,7 @@ const navItems = [
   {
     href: "/tags",
     label: "Tags",
-    icon: Tags,
+    icon: Blocks,
     matches: (pathname: string) => pathname.startsWith("/tags"),
   },
   {
@@ -49,9 +51,11 @@ const navItems = [
 export function MobileNav({
   showAiPicker = false,
   showSettings = true,
+  profileLinksToSettings = false,
 }: {
   showAiPicker?: boolean;
   showSettings?: boolean;
+  profileLinksToSettings?: boolean;
 }) {
   const pathname = usePathname();
   const visibleNavItems = showSettings
@@ -106,6 +110,7 @@ export function MobileNav({
             </AppTransitionLink>
           );
         })}
+        <MobileProfileButton linksToSettings={profileLinksToSettings} />
       </div>
     </nav>
   );
