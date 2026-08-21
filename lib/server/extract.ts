@@ -308,6 +308,9 @@ async function extractRecipeRow(
       );
       throwIfAborted(signal);
       await touchRecipeUpdatedAt(db, row.recipeId);
+      if (reviewCount === 0 && !extractionResult.lowConfidence) {
+        await clearRecipeFlag(db, row.recipeId);
+      }
       return completeRecipeResult(target, startedAt, {
         outcome: reviewCount > 0 || extractionResult.lowConfidence ? "review_needed" : "extracted",
         extracted: 1,
@@ -441,6 +444,16 @@ async function touchRecipeUpdatedAt(
     .set({
       updatedAt: new Date().toISOString(),
     })
+    .where(eq(householdRecipes.recipeId, recipeId))
+    .run();
+}
+
+async function clearRecipeFlag(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  recipeId: string,
+) {
+  await db.update(householdRecipes)
+    .set({ isFlagged: false })
     .where(eq(householdRecipes.recipeId, recipeId))
     .run();
 }

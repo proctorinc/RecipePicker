@@ -38,8 +38,16 @@ export function formatScaledIngredient(
   ingredient: ScalableIngredient,
   multiplier: 1 | 2 | 3,
 ) {
+  const parts = formatScaledIngredientParts(ingredient, multiplier);
+  return [parts.amount, parts.description].filter(Boolean).join(" ");
+}
+
+export function formatScaledIngredientParts(
+  ingredient: ScalableIngredient,
+  multiplier: 1 | 2 | 3,
+) {
   if (ingredient.amountValue === null || !ingredient.parsedText) {
-    return ingredient.originalText;
+    return { amount: null, description: ingredient.originalText };
   }
 
   const minimum = ingredient.amountValue * multiplier;
@@ -50,7 +58,10 @@ export function formatScaledIngredient(
   const qualifier = getAmountQualifier(ingredient.amount);
   const notes = ingredient.notes ? `, ${ingredient.notes}` : "";
 
-  return `${amount}${qualifier}${unit} ${ingredient.parsedText}${notes}`.replace(/\s+/g, " ").trim();
+  return {
+    amount: `${amount}${qualifier}${unit}`.replace(/\s+/g, " ").trim(),
+    description: `${ingredient.parsedText}${notes}`,
+  };
 }
 
 function normalizeVolumeUnit(minimum: number, maximum: number | null, unit: string | null) {
@@ -104,6 +115,9 @@ function formatAmount(value: number) {
 }
 
 function formatUnit(unit: string, minimum: number, maximum: number | null) {
+  if (unit === "cup") {
+    return (maximum ?? minimum) <= 1 ? "cup" : "cups";
+  }
   const abbreviated = formatIngredientUnit(unit);
   if (abbreviated !== unit) {
     return abbreviated;

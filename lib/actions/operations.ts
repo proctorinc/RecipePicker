@@ -55,6 +55,7 @@ import {
 import { getIngredientAiParses } from "@/lib/server/ingredient-ai";
 import { logAudit, withActionLogging } from "@/lib/server/logger";
 import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
+import { formatIngredientOriginalText, parseAmountText } from "@/lib/ingredient-parsing";
 import {
   disconnectPinterestConnection,
   setPinterestConnectionAutoSyncEnabled,
@@ -68,6 +69,7 @@ import {
 import { sendRecipeParseJobRequestedEvent } from "@/src/inngest/events";
 import { getRecipeHouseholdPinId } from "@/lib/server/queries";
 import { extractRecipes } from "@/lib/server/extract";
+import { derivePinStatus } from "@/lib/server/status";
 import { createCustomRecipe, publishPersonalRecipe } from "@/lib/server/custom-recipe";
 import { revalidateAll, recipeScopedPaths, toErrorState, toOptionalString } from "@/lib/actions/helpers";
 import { expandDayRange, getTodayDayString, isValidDayString } from "@/lib/utils";
@@ -179,6 +181,85 @@ export const rerunRecipeAction = withActionLogging(
         recipeId: String(formData.get("recipeId") ?? "").trim() || null,
       },
     }),
+  },
+);
+
+export const toggleRecipeFlagAction = withActionLogging(
+  "action.toggle_recipe_flag",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const recipeId = String(formData.get("recipeId") ?? "").trim();
+
+    if (!recipeId) {
+      return { status: "error", message: "Recipe ID is required." };
+    }
+
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+
+      try {
+        const recipe = await db.query.householdRecipes.findFirst({
+          where: (table, { and, eq }) => and(
+            eq(table.recipeId, recipeId),
+            eq(table.householdId, context.householdId),
+          ),
+          with: {
+            pin: {
+              with: {
+                recipeExtractions: {
+                  orderBy: (table, { desc }) => [desc(table.createdAt)],
+                  limit: 1,
+                },
+              },
+            },
+            recipeInstructions: {
+              with: {
+                ingredients: {
+                  columns: { normalizationStatus: true },
+                },
+              },
+            },
+          },
+        });
+
+        if (!recipe) {
+          return { status: "error", message: "Recipe not found." };
+        }
+
+        const latestExtraction = recipe.pin.recipeExtractions[0];
+        const status = derivePinStatus({
+          hasRecipe: Boolean(recipe.recipeInstructions),
+          latestExtractionStatus: latestExtraction?.status,
+          latestExtractionLowConfidence: latestExtraction?.lowConfidence,
+          ingredientReviewCount: recipe.recipeInstructions?.ingredients.filter(
+            (ingredient) => ingredient.normalizationStatus === "needs_review",
+          ).length ?? 0,
+        });
+
+        if (status === "recipe_ready") {
+          return { status: "error", message: "Ready recipes cannot be flagged." };
+        }
+
+        const isFlagged = !recipe.isFlagged;
+        await db.update(householdRecipes)
+          .set({ isFlagged })
+          .where(and(
+            eq(householdRecipes.recipeId, recipeId),
+            eq(householdRecipes.householdId, context.householdId),
+          ))
+          .run();
+
+        revalidateAll(recipeScopedPaths(undefined, recipeId));
+        return {
+          status: "success",
+          message: isFlagged ? "Recipe flagged for follow-up." : "Recipe flag removed.",
+        };
+      } finally {
+        await sqlite.close();
+      }
+    } catch (error) {
+      return toErrorState(error, "Unable to update this recipe flag.");
+    }
   },
 );
 
@@ -1499,7 +1580,7 @@ export const saveRecipeMetadataAction = withActionLogging(
         const knownStepIds = new Set(recipe.recipeInstructions.steps.map((step) => step.stepId));
         const submittedIngredientIds = new Set<string>();
         const submittedStepIds = new Set<string>();
-        if (ingredients.some((ingredient) => (!knownIngredientIds.has(ingredient.id) && !isNewRecipeContentItem(ingredient.id)) || !ingredient.originalText.trim() || submittedIngredientIds.has(ingredient.id) || !submittedIngredientIds.add(ingredient.id))) {
+        if (ingredients.some((ingredient) => (!knownIngredientIds.has(ingredient.id) && !isNewRecipeContentItem(ingredient.id)) || !ingredient.ingredientText?.trim() || submittedIngredientIds.has(ingredient.id) || !submittedIngredientIds.add(ingredient.id))) {
           return { status: "error", message: "One or more ingredient edits are invalid." };
         }
         if (steps.some((step) => (!knownStepIds.has(step.id) && !isNewRecipeContentItem(step.id)) || !step.text.trim() || submittedStepIds.has(step.id) || !submittedStepIds.add(step.id))) {
@@ -1526,8 +1607,7 @@ export const saveRecipeMetadataAction = withActionLogging(
           if (isNewRecipeContentItem(ingredient.id)) {
             await db.insert(householdRecipeIngredients).values({
               ingredientId: crypto.randomUUID(), householdId: context.householdId, recipeId, position,
-              originalText: ingredient.originalText.trim(), amountText: null, amountValue: null, amountMaxValue: null,
-              unit: null, ingredientText: null, notes: ingredient.notes?.trim() || null,
+              ...toStructuredIngredientValues(ingredient),
               normalizedIngredientPhrase: null, canonicalIngredientId: null, attributesJson: "[]",
               matchConfidence: null, matchedBy: "manual_entry", aiSuggestionsJson: null,
               normalizationStatus: "needs_review",
@@ -1535,7 +1615,7 @@ export const saveRecipeMetadataAction = withActionLogging(
             continue;
           }
           await db.update(householdRecipeIngredients)
-            .set({ originalText: ingredient.originalText.trim(), notes: ingredient.notes?.trim() || null, position })
+            .set({ ...toStructuredIngredientValues(ingredient), position })
             .where(and(eq(householdRecipeIngredients.recipeId, recipeId), eq(householdRecipeIngredients.householdId, context.householdId), eq(householdRecipeIngredients.ingredientId, ingredient.id)))
             .run();
         }
@@ -2069,8 +2149,8 @@ export const createRecipeReviewAction = withActionLogging(
     return { status: "error", message: "Recipe ID is required." };
   }
 
-  if (!ratingValue) {
-    return { status: "error", message: "Choose a rating between 0.5 and 5 stars." };
+  if (ratingValue === null) {
+    return { status: "error", message: "Choose a rating between 0 and 5 stars." };
   }
 
   if (eatenOn && !isValidDayString(eatenOn)) {
@@ -2200,8 +2280,8 @@ export const updateRecipeReviewAction = withActionLogging(
     return { status: "error", message: "Review ID is required." };
   }
 
-  if (!ratingValue) {
-    return { status: "error", message: "Choose a rating between 0.5 and 5 stars." };
+  if (ratingValue === null) {
+    return { status: "error", message: "Choose a rating between 0 and 5 stars." };
   }
 
   if (eatenOn && !isValidDayString(eatenOn)) {
@@ -2411,7 +2491,7 @@ export const deleteRecipeEventAction = withActionLogging(
 );
 
 type ReviewMode = "match_existing" | "create_new";
-type RecipeIngredientInput = { id: string; originalText: string; notes: string | null };
+type RecipeIngredientInput = { id: string; originalText: string; amountText?: string | null; unit?: string | null; ingredientText?: string | null; notes: string | null };
 type RecipeStepInput = { id: string; section: string | null; text: string };
 
 function toReviewMode(value: string): ReviewMode {
@@ -2496,7 +2576,28 @@ function isRecipeIngredientInput(value: unknown): value is RecipeIngredientInput
   }
 
   const item = value as Record<string, unknown>;
-  return typeof item.id === "string" && typeof item.originalText === "string" && (typeof item.notes === "string" || item.notes === null);
+  return typeof item.id === "string" && typeof item.originalText === "string" &&
+    (typeof item.notes === "string" || item.notes === null) &&
+    (item.amountText === undefined || typeof item.amountText === "string" || item.amountText === null) &&
+    (item.unit === undefined || typeof item.unit === "string" || item.unit === null) &&
+    (item.ingredientText === undefined || typeof item.ingredientText === "string" || item.ingredientText === null);
+}
+
+function toStructuredIngredientValues(ingredient: RecipeIngredientInput) {
+  const amountText = ingredient.amountText?.trim() || null;
+  const unit = ingredient.unit?.trim() || null;
+  const ingredientText = ingredient.ingredientText?.trim() || ingredient.originalText.trim();
+  const notes = ingredient.notes?.trim() || null;
+  const { amountValue, amountMaxValue } = amountText ? parseAmountText(amountText) : { amountValue: null, amountMaxValue: null };
+  return {
+    originalText: formatIngredientOriginalText({ amountText, unit, ingredientText, notes }),
+    amountText,
+    amountValue,
+    amountMaxValue,
+    unit,
+    ingredientText,
+    notes,
+  };
 }
 
 function isRecipeStepInput(value: unknown): value is RecipeStepInput {
@@ -2635,17 +2736,17 @@ async function runRecipeExtraction(formData: FormData, rerun: boolean): Promise<
 }
 
 function parseRatingValue(value: FormDataEntryValue | null) {
-  const parsed = Number.parseFloat(String(value ?? ""));
+  const parsed = Number(String(value ?? ""));
 
   if (!Number.isFinite(parsed)) {
     return null;
   }
 
-  if (parsed < 0.5 || parsed > 5) {
+  if (parsed < 0 || parsed > 5) {
     return null;
   }
 
-  return Math.round(parsed * 2) === parsed * 2 ? parsed : null;
+  return Math.round(parsed * 10) === parsed * 10 ? parsed : null;
 }
 
 function buildRecipeVersionSnapshot(recipe: {

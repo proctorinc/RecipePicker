@@ -64,7 +64,7 @@ export function formatRatingValue(value: number | null | undefined) {
     return "No rating";
   }
 
-  const rounded = Math.round(value * 2) / 2;
+  const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 

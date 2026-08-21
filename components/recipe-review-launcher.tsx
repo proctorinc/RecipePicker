@@ -35,7 +35,7 @@ export function RecipeReviewLauncher({
 }: RecipeReviewLauncherProps) {
   const [rateFlowOpen, setRateFlowOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedRating, setSelectedRating] = useState(5);
+  const [selectedRating, setSelectedRating] = useState(3.5);
   const [editingReview, setEditingReview] = useState<RecipeReviewView | null>(
     null,
   );
@@ -79,7 +79,7 @@ export function RecipeReviewLauncher({
                 type="button"
                 variant="secondary"
                 onClick={() => {
-                  setSelectedRating(5);
+                  setSelectedRating(3.5);
                   setRateFlowOpen(true);
                 }}
               >

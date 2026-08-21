@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import Tesseract from "tesseract.js";
 
+import { parseIngredientLine } from "@/lib/ingredient-parsing";
 import { generateRecipeExtractionWithHouseholdAi, generateVideoRecipeExtractionWithHouseholdAi } from "@/lib/server/ai-provider";
 import { getPinImageSources, getPinVideoDiscovery } from "@/lib/server/media";
 import type { DatabaseClient } from "@/src/db/client";
@@ -64,17 +65,6 @@ const IMPERATIVE_VERBS = new Set([
   "whisk",
 ]);
 const FRAGMENTARY_STARTS = new Set(["a", "an", "and", "back", "for", "hot", "in", "into", "on", "over", "the", "to", "until", "with"]);
-const UNICODE_FRACTIONS: Record<string, string> = {
-  "¼": "1/4",
-  "½": "1/2",
-  "¾": "3/4",
-  "⅓": "1/3",
-  "⅔": "2/3",
-  "⅛": "1/8",
-  "⅜": "3/8",
-  "⅝": "5/8",
-  "⅞": "7/8",
-};
 
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
@@ -1504,157 +1494,6 @@ function repairHowToStep(step: Record<string, unknown>) {
   return stepText;
 }
 
-function parseIngredientLine(rawLine: string): ExtractedIngredientLine {
-  const normalized = normalizeWhitespace(rawLine);
-  const match = normalized.match(
-    /^((?:\d+\s+\d\/\d|\d+\/\d|\d+(?:\.\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞]+)(?:\s*-\s*(?:\d+\s+\d\/\d|\d+\/\d|\d+(?:\.\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞]+))?(?:\s*\([^)]+\))?)\s+(.+)$/u,
-  );
-
-  if (!match) {
-    const alternativeIngredientTexts = parseIngredientAlternatives(normalized);
-    return {
-      originalText: normalized,
-      amountText: null,
-      amountValue: null,
-      amountMaxValue: null,
-      unit: null,
-      ingredientText: normalized || null,
-      notes: null,
-      alternativeIngredientTexts,
-    };
-  }
-
-  const amountText = match[1].trim();
-  const parsedAmount = parseAmountText(amountText);
-  const remainder = match[2].trim();
-  const parts = remainder.split(/\s*,\s*/);
-  const mainPart = parts.shift() ?? remainder;
-  const noteText = parts.length > 0 ? parts.join(", ") : null;
-  const tokens = mainPart.split(/\s+/);
-  const unit = normalizeUnit(tokens[0] ?? "");
-  const ingredientText = unit ? tokens.slice(1).join(" ") || null : mainPart || null;
-
-  return {
-    originalText: normalized,
-    amountText,
-    amountValue: parsedAmount.amountValue,
-    amountMaxValue: parsedAmount.amountMaxValue,
-    unit,
-    ingredientText,
-    notes: noteText,
-    alternativeIngredientTexts: parseIngredientAlternatives(ingredientText),
-  };
-}
-
-function parseIngredientAlternatives(ingredientText: string | null): string[] | null {
-  if (!ingredientText || !/\s+or\s+/i.test(ingredientText)) {
-    return null;
-  }
-
-  const alternatives = ingredientText
-    .split(/\s+or\s+/i)
-    .map((value) => normalizeWhitespace(value))
-    .filter(Boolean);
-
-  // Only split complete, share-the-quantity choices. Lines such as
-  // "red or green bell pepper" need contextual rewriting and remain a single
-  // ingredient until we can model that form without losing meaning.
-  if (
-    alternatives.length < 2 ||
-    alternatives.some((value) => /\d|\b(?:cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|oz|ounce|ounces|lb|lbs|pound|pounds)\b/i.test(value))
-  ) {
-    return null;
-  }
-
-  return alternatives;
-}
-
-function normalizeUnit(token: string) {
-  const cleaned = token.replace(/[().]/g, "").toLowerCase();
-  const unitMap: Record<string, string> = {
-    c: "cup",
-    cup: "cup",
-    cups: "cup",
-    tbsp: "tablespoon",
-    tablespoon: "tablespoon",
-    tablespoons: "tablespoon",
-    tsp: "teaspoon",
-    teaspoon: "teaspoon",
-    teaspoons: "teaspoon",
-    lb: "pound",
-    lbs: "pound",
-    pound: "pound",
-    pounds: "pound",
-    oz: "ounce",
-    ounce: "ounce",
-    ounces: "ounce",
-    clove: "clove",
-    cloves: "clove",
-    can: "can",
-    cans: "can",
-    g: "gram",
-    gram: "gram",
-    grams: "gram",
-    kg: "kilogram",
-    kilogram: "kilogram",
-    kilograms: "kilogram",
-    ml: "milliliter",
-    milliliter: "milliliter",
-    milliliters: "milliliter",
-    l: "liter",
-    liter: "liter",
-    liters: "liter",
-    qt: "quart",
-    quart: "quart",
-    quarts: "quart",
-    pt: "pint",
-    pint: "pint",
-    pints: "pint",
-    package: "package",
-    packages: "package",
-    pkg: "package",
-    pinch: "pinch",
-    pinches: "pinch",
-  };
-  return unitMap[cleaned] ?? null;
-}
-
-function parseAmountText(amountText: string) {
-  const cleaned = amountText.replace(/\([^)]+\)/g, "").trim();
-  const [lowerRaw, upperRaw] = cleaned.split(/\s*-\s*/, 2);
-  return {
-    amountValue: parseSingleAmount(lowerRaw ?? ""),
-    amountMaxValue: upperRaw ? parseSingleAmount(upperRaw) : null,
-  };
-}
-
-function parseSingleAmount(value: string) {
-  const normalized = value
-    .trim()
-    .replace(/[¼½¾⅓⅔⅛⅜⅝⅞]/g, (fraction) => ` ${UNICODE_FRACTIONS[fraction] ?? ""} `)
-    .replace(/\s+/g, " ");
-  if (!normalized) {
-    return null;
-  }
-
-  let total = 0;
-  for (const part of normalized.split(" ")) {
-    if (/^\d+\/\d+$/.test(part)) {
-      const [numerator, denominator] = part.split("/").map(Number);
-      if (!denominator) {
-        return null;
-      }
-      total += numerator / denominator;
-      continue;
-    }
-    const numeric = Number(part);
-    if (!Number.isFinite(numeric)) {
-      return null;
-    }
-    total += numeric;
-  }
-  return total > 0 ? total : null;
-}
 
 function splitIngredientValue(value: string) {
   return preserveLines(value);

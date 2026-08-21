@@ -24,9 +24,9 @@ describe("formatScaledIngredient", () => {
   });
 
   it("promotes tablespoons to cups and formats common fractions", () => {
-    expect(formatScaledIngredient(ingredient({ amountValue: 8, unit: "tablespoon", originalText: "8 tablespoons oil", parsedText: "oil" }), 2)).toBe("1 c oil");
+    expect(formatScaledIngredient(ingredient({ amountValue: 8, unit: "tablespoon", originalText: "8 tablespoons oil", parsedText: "oil" }), 2)).toBe("1 cup oil");
     expect(formatScaledIngredient(ingredient({ amountValue: 0.5, originalText: "1/2 teaspoon salt", parsedText: "salt" }), 3)).toBe("1½ tsp salt");
-    expect(formatScaledIngredient(ingredient({ amountValue: 0.25, unit: "cup", originalText: "1/4 cup milk", parsedText: "milk" }), 2)).toBe("½ c milk");
+    expect(formatScaledIngredient(ingredient({ amountValue: 0.25, unit: "cup", originalText: "1/4 cup milk", parsedText: "milk" }), 2)).toBe("½ cup milk");
   });
 
   it("scales both values in a range without changing to an inconsistent unit", () => {

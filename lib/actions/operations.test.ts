@@ -103,6 +103,7 @@ import {
   rerunRecipesAction,
   resumeRecipeParseJobAction,
   saveAiConnectionAction,
+  toggleRecipeFlagAction,
 } from "@/lib/actions/operations";
 import { openDatabase } from "@/lib/server/database";
 import { resumeRecipeParseJob } from "@/lib/server/recipe-parse-jobs";
@@ -266,6 +267,80 @@ describe("rerunRecipesAction", () => {
       message: "A bulk parse job is already running for this household.",
     });
     expect(mockSendRecipeParseJobRequestedEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("toggleRecipeFlagAction", () => {
+  function mockFlagDatabase(recipe: {
+    isFlagged: boolean;
+    recipeInstructions: { ingredients: Array<{ normalizationStatus: string }> } | null;
+    pin: { recipeExtractions: Array<{ status: string; lowConfidence: boolean }> };
+  } | undefined) {
+    const run = vi.fn().mockResolvedValue(undefined);
+    const where = vi.fn(() => ({ run }));
+    const set = vi.fn(() => ({ where }));
+    vi.mocked(openDatabase).mockResolvedValue({
+      db: {
+        query: {
+          householdRecipes: { findFirst: vi.fn().mockResolvedValue(recipe) },
+        },
+        update: vi.fn(() => ({ set })),
+      },
+      sqlite: { close: vi.fn().mockResolvedValue(undefined) },
+    } as unknown as Awaited<ReturnType<typeof openDatabase>>);
+    return { set, run };
+  }
+
+  it("flags a household recipe that is not ready", async () => {
+    mockRequireHouseholdContext.mockResolvedValue({ householdId: "household_123" });
+    const { set, run } = mockFlagDatabase({
+      isFlagged: false,
+      recipeInstructions: null,
+      pin: { recipeExtractions: [{ status: "extraction_failed", lowConfidence: false }] },
+    });
+    const formData = new FormData();
+    formData.set("recipeId", "recipe_1");
+
+    await expect(toggleRecipeFlagAction({ status: "idle", message: "" }, formData)).resolves.toEqual({
+      status: "success",
+      message: "Recipe flagged for follow-up.",
+    });
+    expect(set).toHaveBeenCalledWith({ isFlagged: true });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("rejects ready recipes without changing their flag", async () => {
+    mockRequireHouseholdContext.mockResolvedValue({ householdId: "household_123" });
+    const { run } = mockFlagDatabase({
+      isFlagged: false,
+      recipeInstructions: { ingredients: [] },
+      pin: { recipeExtractions: [{ status: "extracted", lowConfidence: false }] },
+    });
+    const formData = new FormData();
+    formData.set("recipeId", "recipe_1");
+
+    await expect(toggleRecipeFlagAction({ status: "idle", message: "" }, formData)).resolves.toEqual({
+      status: "error",
+      message: "Ready recipes cannot be flagged.",
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("removes an existing follow-up flag", async () => {
+    mockRequireHouseholdContext.mockResolvedValue({ householdId: "household_123" });
+    const { set } = mockFlagDatabase({
+      isFlagged: true,
+      recipeInstructions: null,
+      pin: { recipeExtractions: [{ status: "extraction_failed", lowConfidence: false }] },
+    });
+    const formData = new FormData();
+    formData.set("recipeId", "recipe_1");
+
+    await expect(toggleRecipeFlagAction({ status: "idle", message: "" }, formData)).resolves.toEqual({
+      status: "success",
+      message: "Recipe flag removed.",
+    });
+    expect(set).toHaveBeenCalledWith({ isFlagged: false });
   });
 });
 

@@ -41,7 +41,8 @@ type BoardOption = {
   label: string;
 };
 
-const statusOptions: Array<{ value: PinStatus; label: string }> = [
+const statusOptions: Array<{ value: PinStatus | "flagged"; label: string }> = [
+  { value: "flagged", label: "Flagged" },
   { value: "recipe_ready", label: formatStatusLabel("recipe_ready") },
   { value: "not_extracted", label: formatStatusLabel("not_extracted") },
   { value: "needs_review", label: formatStatusLabel("needs_review") },
@@ -73,7 +74,11 @@ export function RecipeOpsTable({
         return false;
       }
 
-      if (statusFilter !== "all" && item.status !== statusFilter) {
+      if (statusFilter === "flagged" && !item.isFlagged) {
+        return false;
+      }
+
+      if (statusFilter !== "all" && statusFilter !== "flagged" && item.status !== statusFilter) {
         return false;
       }
 

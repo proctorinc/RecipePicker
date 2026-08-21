@@ -20,6 +20,7 @@ export function ActionForm({
   children,
   buttonVariant,
   buttonSize,
+  buttonClassName,
   className,
 }: {
   action: (state: ActionState, formData: FormData) => Promise<ActionState>;
@@ -27,6 +28,7 @@ export function ActionForm({
   children: ReactNode;
   buttonVariant?: ButtonProps["variant"];
   buttonSize?: ButtonProps["size"];
+  buttonClassName?: string;
   className?: string;
 }) {
   const [state, formAction] = useActionState(action, initialActionState);
@@ -44,7 +46,7 @@ export function ActionForm({
       {Object.entries(fields ?? {}).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}
-      <SubmitButton variant={buttonVariant} size={buttonSize}>
+      <SubmitButton variant={buttonVariant} size={buttonSize} className={buttonClassName}>
         {children}
       </SubmitButton>
     </form>
@@ -55,15 +57,17 @@ function SubmitButton({
   children,
   variant,
   size,
+  className,
 }: {
   children: ReactNode;
   variant?: ButtonProps["variant"];
   size?: ButtonProps["size"];
+  className?: string;
 }) {
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" variant={variant} size={size} disabled={pending}>
+    <Button type="submit" variant={variant} size={size} className={className} disabled={pending}>
       {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
       {children}
     </Button>

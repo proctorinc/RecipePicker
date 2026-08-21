@@ -11,8 +11,9 @@ import {
 } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
 import type { RecipeReviewView } from "@/types/view-models";
-import { formatDay, formatRatingValue, getTodayDayString } from "@/lib/utils";
+import { formatDay, getTodayDayString } from "@/lib/utils";
 import { StarRating } from "@/components/star-rating";
+import { RatingValuePicker } from "@/components/rating-value-picker";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -63,7 +64,7 @@ export function RecipeReviewDialog({
   const action = review ? updateRecipeReviewAction : createRecipeReviewAction;
   const [state, formAction] = useActionState(action, initialActionState);
   const defaultRating = useMemo(
-    () => review?.ratingValue ?? initialRating ?? 5,
+    () => review?.ratingValue ?? initialRating ?? 3.5,
     [initialRating, review?.ratingValue],
   );
   const defaultEatenOn = review?.eatenOn ?? initialEatenOn ?? "";
@@ -144,10 +145,11 @@ export function RecipeReviewDialog({
           <div className="space-y-2">
             <p className="text-sm font-medium text-foreground">Rating</p>
             <div className="flex items-center justify-between gap-4 rounded-[24px] border border-border/70 bg-secondary/20 px-4 py-4">
-              <StarRating value={ratingValue} onChange={setRatingValue} />
-              <span className="text-sm font-medium text-muted-foreground">
-                {formatRatingValue(ratingValue)} / 5
-              </span>
+              <StarRating value={ratingValue} />
+              <div className="flex items-center gap-2">
+                <RatingValuePicker value={ratingValue} onChange={setRatingValue} />
+                <span className="text-sm font-medium text-muted-foreground">/ 5</span>
+              </div>
             </div>
           </div>
 

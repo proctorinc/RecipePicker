@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
-import { CalendarPlus, Clock3, ExternalLink, ListChecks, Sparkles } from "lucide-react";
+import { CalendarPlus, Clock3, ExternalLink, ListChecks } from "lucide-react";
 import { notFound } from "next/navigation";
 
-import { ActionForm } from "@/components/action-form";
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { PageShell } from "@/components/page-shell";
 import { RecipeImage } from "@/components/recipe-image";
@@ -11,12 +10,13 @@ import { RecipeContent } from "@/components/recipe-content";
 import { RecipeMetadataEditor } from "@/components/recipe-metadata-editor";
 import { RecipeReviewLauncher } from "@/components/recipe-review-launcher";
 import { RecipeVersionHistory } from "@/components/recipe-version-history";
+import { RecipeFlagButton } from "@/components/recipe-flag-button";
+import { StatusBadge } from "@/components/status-badge";
 import { PublishPersonalRecipe } from "@/components/publish-personal-recipe";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { RecipePageScrollToTop } from "@/app/(app)/recipe/[recipeId]/scroll-to-top";
-import { extractRecipeAction } from "@/lib/actions/operations";
 import {
   getCustomRecipeBoardOptions,
   getRecipeDetail,
@@ -66,7 +66,7 @@ export default async function RecipePage({
         content={
           <RecipeContent
             recipe={recipe}
-            emptyIngredients={<EmptyRecipeState recipeId={recipe.recipeId} status={recipe.status} />}
+            emptyIngredients={<EmptyRecipeState status={recipe.status} />}
             showEmptySteps={false}
           />
         }
@@ -165,6 +165,24 @@ export default async function RecipePage({
         </section>
       </RecipeMetadataEditor>
 
+      {recipe.status !== "recipe_ready" ? (
+        <Card className="bg-white/85">
+          <CardContent className="flex flex-col gap-4 py-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-medium">Recipe parsing status</p>
+                <StatusBadge status={recipe.status} />
+              </div>
+              <p className="text-sm text-muted-foreground">{recipe.statusSummary}</p>
+              {recipe.statusReason ? (
+                <p className="text-sm text-destructive">{recipe.statusReason}</p>
+              ) : null}
+            </div>
+            <RecipeFlagButton recipeId={recipe.recipeId} isFlagged={recipe.isFlagged} />
+          </CardContent>
+        </Card>
+      ) : null}
+
       {access.isAdmin && (
         <Card className="bg-white/85">
           <CardContent className="flex flex-col gap-4 py-6 sm:flex-row sm:items-center sm:justify-between">
@@ -210,28 +228,17 @@ function MetaChip({ icon, label }: { icon: ReactNode; label: string }) {
 }
 
 function EmptyRecipeState({
-  recipeId,
   status,
 }: {
-  recipeId: string;
   status: string;
 }) {
   return (
     <div className="space-y-4 rounded-[24px] border border-dashed border-border bg-background/70 p-5">
       <p className="text-sm text-muted-foreground">
         {status === "not_extracted"
-          ? "This recipe is synced, but its recipe content has not been extracted yet."
+          ? "This recipe is synced and waiting for structured recipe content."
           : "Structured recipe content is not available yet for this recipe."}
       </p>
-      <div className="flex flex-wrap gap-3">
-        <ActionForm
-          action={extractRecipeAction}
-          fields={{ recipeId: String(recipeId) }}
-          buttonVariant="secondary"
-        >
-          Extract recipe
-        </ActionForm>
-      </div>
     </div>
   );
 }

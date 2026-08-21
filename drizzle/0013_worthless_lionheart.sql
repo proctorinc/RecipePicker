@@ -1,0 +1,2 @@
+ALTER TABLE `household_recipes` ADD `is_flagged` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE INDEX `idx_household_recipes_household_flagged_updated` ON `household_recipes` (`household_id`,`is_flagged`,`updated_at`);

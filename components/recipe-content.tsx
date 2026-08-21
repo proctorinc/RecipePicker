@@ -1,7 +1,7 @@
 "use client";
 
 import { useContext, useEffect, useState, type DragEvent, type ReactNode } from "react";
-import { GripVertical, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { EyeOff, GripVertical, Plus, RotateCcw, Trash2 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { RecipeEditingContext } from "@/components/recipe-metadata-editor";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { formatIso8601Duration } from "@/lib/utils";
+import { formatIngredientOriginalText, parseIngredientLines, type ParsedIngredientLine } from "@/lib/ingredient-parsing";
 import type { PublicRecipeDetailView } from "@/types/view-models";
 
 type RecipeContentProps = {
@@ -52,11 +53,28 @@ export function RecipeContent({
   ].filter((item): item is { label: string; value: string } => Boolean(item.value));
 
   function addIngredient() {
-    setIngredients((current) => [...current, {
-      id: createDraftId(), originalText: "", displayText: "", amount: null,
-      amountValue: null, amountMaxValue: null, unit: null, parsedText: null, notes: null,
-      canonicalIngredientId: null, canonicalName: null, attributes: [], normalizationStatus: "needs_review",
-    }]);
+    setIngredients((current) => [...current, createIngredientDraft()]);
+  }
+
+  function updateIngredient(id: string, patch: Partial<RecipeIngredientDraft>) {
+    setIngredients((current) => current.map((item) => {
+      if (item.id !== id) return item;
+      const next = { ...item, ...patch };
+      return { ...next, originalText: formatIngredientOriginalText({ amountText: next.amount, unit: next.unit, ingredientText: next.parsedText, notes: next.notes }) };
+    }));
+  }
+
+  function pasteIngredients(id: string, value: string) {
+    const parsed = parseIngredientLines(value);
+    if (parsed.length < 2) return false;
+    setIngredients((current) => {
+      const index = current.findIndex((item) => item.id === id);
+      if (index < 0) return current;
+      const next = [...current];
+      next.splice(index, 1, ...parsed.map((item, offset) => createIngredientDraft(item, offset === 0 ? id : createDraftId())));
+      return next;
+    });
+    return true;
   }
 
   function addStep() {
@@ -100,26 +118,34 @@ export function RecipeContent({
           <CardContent className="px-10">
             {isEditing ? (
               <section className="space-y-3">
-                <input form={formId} type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.filter((ingredient) => !ingredient.isPendingDeletion).map(({ id, originalText, notes }) => ({ id, originalText, notes })))} />
+                <input form={formId} type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.filter((ingredient) => !ingredient.isPendingDeletion && ingredient.parsedText?.trim()).map(({ id, originalText, amount, unit, parsedText, notes }) => ({ id, originalText, amountText: amount, unit, ingredientText: parsedText, notes })))} />
                 {ingredients.map((ingredient, index) => (
-                  <div key={ingredient.id} className={`flex items-center gap-2 ${ingredient.isPendingDeletion ? "opacity-50" : ""}`}>
+                  <div key={ingredient.id} className={`rounded-2xl border border-border/60 bg-secondary/10 p-3 ${ingredient.isPendingDeletion ? "opacity-50" : ""}`}>
+                    <div className="grid gap-3 sm:grid-cols-[8rem_8rem_minmax(0,1fr)]">
+                      <Input value={ingredient.amount ?? ""} disabled={ingredient.isPendingDeletion} onChange={(event) => updateIngredient(ingredient.id, { amount: event.target.value || null })} aria-label={`Amount for ingredient ${index + 1}`} placeholder="Amount" />
+                      <Input value={ingredient.unit ?? ""} disabled={ingredient.isPendingDeletion} onChange={(event) => updateIngredient(ingredient.id, { unit: event.target.value || null })} aria-label={`Unit for ingredient ${index + 1}`} placeholder="Unit" />
                       <Input
-                        value={ingredient.originalText}
+                        value={ingredient.parsedText ?? ""}
                         disabled={ingredient.isPendingDeletion}
-                        onChange={(event) => setIngredients((current) => current.map((item) => item.id === ingredient.id ? { ...item, originalText: event.target.value } : item))}
+                        onPaste={(event) => { if (pasteIngredients(ingredient.id, event.clipboardData.getData("text"))) event.preventDefault(); }}
+                        onChange={(event) => updateIngredient(ingredient.id, { parsedText: event.target.value || null })}
                         aria-label={`Ingredient ${index + 1}`}
-                        className={ingredient.isPendingDeletion ? "line-through" : undefined}
+                        placeholder="Ingredient"
                       />
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <Input value={ingredient.notes ?? ""} disabled={ingredient.isPendingDeletion} onChange={(event) => updateIngredient(ingredient.id, { notes: event.target.value || null })} aria-label={`Notes for ingredient ${index + 1}`} placeholder="Notes (optional)" />
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
                       className="h-12 w-12 shrink-0"
                       onClick={() => setIngredients((current) => current.map((item) => item.id === ingredient.id ? { ...item, isPendingDeletion: !item.isPendingDeletion } : item))}
-                      aria-label={`${ingredient.isPendingDeletion ? "Restore" : "Remove"} ingredient ${index + 1}`}
+                      aria-label={`${ingredient.isPendingDeletion ? "Restore" : "Disable"} ingredient ${index + 1}`}
                     >
-                      {ingredient.isPendingDeletion ? <RotateCcw className="size-5" /> : <Trash2 className="size-5" />}
+                      {ingredient.isPendingDeletion ? <RotateCcw className="size-5" /> : <EyeOff className="size-5" />}
                     </Button>
+                    </div>
                   </div>
                 ))}
                 <Button type="button" variant="outline" size="sm" onClick={addIngredient}>
@@ -216,6 +242,18 @@ type RecipeStepDraft = PublicRecipeDetailView["steps"][number] & {
 
 function createDraftId() {
   return `new-${crypto.randomUUID()}`;
+}
+
+function createIngredientDraft(parsed?: ParsedIngredientLine, id = createDraftId()): RecipeIngredientDraft {
+  const amount = parsed?.amountText ?? null;
+  const unit = parsed?.unit ?? null;
+  const parsedText = parsed?.ingredientText ?? null;
+  const notes = parsed?.notes ?? null;
+  return {
+    id, originalText: formatIngredientOriginalText({ amountText: amount, unit, ingredientText: parsedText, notes }), displayText: "",
+    amount, amountValue: parsed?.amountValue ?? null, amountMaxValue: parsed?.amountMaxValue ?? null, unit, parsedText, notes,
+    canonicalIngredientId: null, canonicalName: null, attributes: [], normalizationStatus: "needs_review",
+  };
 }
 
 function UnavailableContent() {

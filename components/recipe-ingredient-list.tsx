@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
-  formatScaledIngredient,
+  formatScaledIngredientParts,
   type ScalableIngredient,
 } from "@/lib/ingredient-scaling";
 
@@ -40,9 +40,13 @@ export function RecipeIngredientList({ ingredients }: IngredientListProps) {
       </p>
       <ul className="space-y-3">
         {ingredients.map((ingredient) => (
-          <li key={ingredient.id} className="list-disc">
-            <p className="font-medium text-foreground">
-              {formatScaledIngredient(ingredient, multiplier)}
+          <li key={ingredient.id} className="flex items-start gap-3">
+            {(() => {
+              const parts = formatScaledIngredientParts(ingredient, multiplier);
+              return parts.amount ? <span className="mt-0.5 shrink-0 rounded-lg bg-secondary px-2 py-1 text-sm font-semibold text-foreground">{parts.amount}</span> : null;
+            })()}
+            <p className="min-w-0 pt-1 font-medium text-foreground">
+              {formatScaledIngredientParts(ingredient, multiplier).description}
             </p>
           </li>
         ))}

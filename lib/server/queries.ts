@@ -301,6 +301,21 @@ export async function getRecipeDetail(
       row.pin.mediaJson,
       row.pin.rawJson,
     );
+    const status = derivePinStatus({
+      hasRecipe: Boolean(row.recipeInstructions),
+      latestExtractionStatus: latestExtraction?.status,
+      latestExtractionLowConfidence: latestExtraction?.lowConfidence,
+      ingredientReviewCount: getIngredientReviewCount(row.recipeInstructions?.ingredients),
+    });
+    const statusSummary = summarizeRecipeOps({
+      status,
+      hasRecipeContent: Boolean(row.recipeInstructions),
+      latestExtractionStatus: latestExtraction?.status ?? null,
+      latestFailureReason: latestExtraction?.failureReason ?? null,
+      latestLowConfidence: latestExtraction?.lowConfidence ?? false,
+      ingredientReviewCount: getIngredientReviewCount(row.recipeInstructions?.ingredients),
+      latestWarnings: parseJsonArray(latestExtraction?.warningsJson),
+    });
     return {
       recipeId: row.recipeId,
       folderPath,
@@ -319,14 +334,8 @@ export async function getRecipeDetail(
         null,
       siteName: row.recipeInstructions?.siteName ?? null,
       sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link,
-      status: derivePinStatus({
-        hasRecipe: Boolean(row.recipeInstructions),
-        latestExtractionStatus: latestExtraction?.status,
-        latestExtractionLowConfidence: latestExtraction?.lowConfidence,
-        ingredientReviewCount: getIngredientReviewCount(
-          row.recipeInstructions?.ingredients,
-        ),
-      }),
+      status,
+      isFlagged: row.isFlagged,
       dominantColor: row.pin.dominantColor,
       yieldText: row.recipeInstructions?.yieldText ?? null,
       prepTime: row.recipeInstructions?.prepTime ?? null,
@@ -370,6 +379,8 @@ export async function getRecipeDetail(
       extractionSummary: latestExtraction
         ? `${latestExtraction.status.replaceAll("_", " ")}${latestExtraction.method ? ` via ${latestExtraction.method}` : ""}`
         : null,
+      statusSummary: statusSummary.plainLanguageStatus,
+      statusReason: statusSummary.latestAttentionReason,
     };
   } finally {
     await sqlite.close();
@@ -868,6 +879,7 @@ export async function getRecipeOpsList(
             "Untitled recipe",
           boardId: row.pin.pinterestBoardId,
           status,
+          isFlagged: row.isFlagged,
           updatedAt: row.updatedAt,
           imageUrl:
             row.imageUrl ??

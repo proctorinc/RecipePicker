@@ -175,6 +175,9 @@ export type RecipeDetailView = {
   }>;
   extractionProvenance: "image" | "video" | null;
   extractionSummary: string | null;
+  statusSummary: string;
+  statusReason: string | null;
+  isFlagged: boolean;
 };
 
 export type PublicRecipeDetailView = Pick<
@@ -299,6 +302,7 @@ export type RecipeOpsListItem = {
   title: string;
   boardId: string;
   status: PinStatus;
+  isFlagged: boolean;
   updatedAt: string | null;
   imageUrl: string | null;
   sourceUrl: string | null;

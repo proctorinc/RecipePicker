@@ -386,6 +386,7 @@ export const householdRecipes = sqliteTable(
     title: text("title"),
     description: text("description"),
     imageUrl: text("image_url"),
+    isFlagged: integer("is_flagged", { mode: "boolean" }).notNull().default(false),
     titleOverridden: integer("title_overridden", { mode: "boolean" }).notNull().default(false),
     descriptionOverridden: integer("description_overridden", { mode: "boolean" }).notNull().default(false),
     imageUrlOverridden: integer("image_url_overridden", { mode: "boolean" }).notNull().default(false),
@@ -396,6 +397,7 @@ export const householdRecipes = sqliteTable(
     pinIdUniqueIdx: uniqueIndex("idx_household_recipes_pin_id_unique").on(table.pinId),
     householdIdx: index("idx_household_recipes_household_id").on(table.householdId),
     householdUpdatedIdx: index("idx_household_recipes_household_updated").on(table.householdId, table.updatedAt),
+    householdFlaggedUpdatedIdx: index("idx_household_recipes_household_flagged_updated").on(table.householdId, table.isFlagged, table.updatedAt),
   }),
 );
 
