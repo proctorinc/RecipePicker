@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, Pencil, Tag, X } from "lucide-react";
+import { ArrowLeft, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { saveRecipeMetadataAction } from "@/lib/actions/operations";
+import { saveRecipeMetadataAction, saveRecipeTagsAction } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
 import { cn } from "@/lib/utils";
 
@@ -62,8 +62,6 @@ export function RecipeMetadataEditor({
   const [draftDescription, setDraftDescription] = useState(description ?? "");
   const [displayTitle, setDisplayTitle] = useState(title);
   const [displayDescription, setDisplayDescription] = useState(description ?? "");
-  const [draftTags, setDraftTags] = useState(tags.map((tag) => tag.name));
-  const [displayTags, setDisplayTags] = useState(tags.map((tag) => tag.name));
   const [hasContentChanges, setHasContentChanges] = useState(false);
   const [contentResetVersion, setContentResetVersion] = useState(0);
   const [saveChoiceOpen, setSaveChoiceOpen] = useState(false);
@@ -75,16 +73,13 @@ export function RecipeMetadataEditor({
     setDraftDescription(description ?? "");
     setDisplayTitle(title);
     setDisplayDescription(description ?? "");
-    setDraftTags(tags.map((tag) => tag.name));
-    setDisplayTags(tags.map((tag) => tag.name));
     setHasContentChanges(false);
-  }, [description, tags, title]);
+  }, [description, title]);
 
   useEffect(() => {
     if (state.status === "success") {
       setDisplayTitle(draftTitle.trim());
       setDisplayDescription(draftDescription.trim());
-      setDisplayTags(draftTags);
       setIsEditing(false);
       setHasContentChanges(false);
       toast.success(state.message);
@@ -95,7 +90,7 @@ export function RecipeMetadataEditor({
     if (state.status === "error") {
       toast.error(state.message);
     }
-  }, [draftDescription, draftTags, draftTitle, router, state]);
+  }, [draftDescription, draftTitle, router, state]);
 
   useLayoutEffect(() => {
     if (!isEditing) {
@@ -113,8 +108,7 @@ export function RecipeMetadataEditor({
   }, [draftDescription, draftTitle, isEditing]);
 
   const hasMetadataChanges = draftTitle.trim() !== displayTitle.trim()
-    || draftDescription.trim() !== displayDescription.trim()
-    || draftTags.join("\u0000") !== displayTags.join("\u0000");
+    || draftDescription.trim() !== displayDescription.trim();
   const hasChanges = hasMetadataChanges || hasContentChanges;
 
   function save(versionMode: "update" | "new") {
@@ -129,7 +123,6 @@ export function RecipeMetadataEditor({
   function cancelEditing() {
     setDraftTitle(displayTitle);
     setDraftDescription(displayDescription);
-    setDraftTags(displayTags);
     setHasContentChanges(false);
     setContentResetVersion((version) => version + 1);
     setSaveChoiceOpen(false);
@@ -149,7 +142,6 @@ export function RecipeMetadataEditor({
           }}
         >
           <input type="hidden" name="recipeId" value={recipeId} />
-          <input type="hidden" name="tagsJson" value={JSON.stringify(draftTags)} />
           <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur">
             <div className="flex items-center justify-between gap-3">
               <Button asChild variant="outline">
@@ -167,7 +159,6 @@ export function RecipeMetadataEditor({
                 onEnableEditing={() => {
                   setDraftTitle(displayTitle);
                   setDraftDescription(displayDescription);
-                  setDraftTags(displayTags);
                   setHasContentChanges(false);
                   setIsEditing(true);
                 }}
@@ -216,10 +207,9 @@ export function RecipeMetadataEditor({
           </section>
 
           <RecipeTags
-            tags={isEditing ? draftTags : displayTags}
+            recipeId={recipeId}
+            initialTags={tags}
             availableTags={availableTags}
-            editable={isEditing}
-            onChange={setDraftTags}
           />
 
           <section>
@@ -250,22 +240,46 @@ export function RecipeMetadataEditor({
 }
 
 function RecipeTags({
-  tags,
+  recipeId,
+  initialTags,
   availableTags,
-  editable,
-  onChange,
 }: {
-  tags: string[];
+  recipeId: string;
+  initialTags: Array<{ tagId: string; name: string }>;
   availableTags: Array<{ tagId: string; name: string }>;
-  editable: boolean;
-  onChange: (tags: string[]) => void;
 }) {
+  const router = useRouter();
+  const [tags, setTags] = useState(initialTags.map((tag) => tag.name));
   const [input, setInput] = useState("");
+  const [isAdding, setIsAdding] = useState(false);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [state, saveTags, pending] = useActionState(saveRecipeTagsAction, initialActionState);
   const normalizedTags = new Set(tags.map((tag) => tag.toLocaleLowerCase()));
   const suggestions = availableTags.filter((tag) =>
     !normalizedTags.has(tag.name.toLocaleLowerCase())
     && tag.name.toLocaleLowerCase().includes(input.trim().toLocaleLowerCase()),
   ).slice(0, 6);
+
+  useEffect(() => {
+    setTags(initialTags.map((tag) => tag.name));
+  }, [initialTags]);
+
+  useEffect(() => {
+    if (state.status === "success") {
+      router.refresh();
+      return;
+    }
+    if (state.status === "error") toast.error(state.message);
+  }, [router, state]);
+
+  function save(nextTags: string[]) {
+    const formData = new FormData();
+    formData.set("recipeId", recipeId);
+    formData.set("tagsJson", JSON.stringify(nextTags));
+    setTags(nextTags);
+    setSelectedTag(null);
+    saveTags(formData);
+  }
 
   function addTag(raw: string) {
     const name = raw.trim().replace(/\s+/g, " ");
@@ -274,24 +288,20 @@ function RecipeTags({
       return;
     }
     const existing = availableTags.find((tag) => tag.name.toLocaleLowerCase() === name.toLocaleLowerCase());
-    onChange([...tags, existing?.name ?? name]);
+    save([...tags, existing?.name ?? name]);
     setInput("");
+    setIsAdding(false);
   }
-
-  if (!editable && tags.length === 0) return null;
 
   return (
     <section aria-label="Recipe tags" className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        {tags.map((tag) => editable ? (
-          <button key={tag} type="button" onClick={() => onChange(tags.filter((value) => value !== tag))} className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium transition hover:bg-secondary" aria-label={`Remove ${tag} tag`}>
-            <Tag className="size-3" />{tag}<X className="size-3" />
-          </button>
-        ) : (
-          <span key={tag} className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium"><Tag className="size-3" />{tag}</span>
-        ))}
+        {tags.map((tag) => <button key={tag} type="button" disabled={pending} onClick={() => selectedTag === tag ? save(tags.filter((value) => value !== tag)) : setSelectedTag(tag)} className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium transition hover:bg-secondary" aria-label={selectedTag === tag ? `Remove ${tag} tag` : `Select ${tag} tag`}>
+          {tag}{selectedTag === tag ? <X className="size-3" /> : null}
+        </button>)}
+        <button type="button" disabled={pending} onClick={() => setIsAdding((open) => !open)} className="inline-flex size-7 items-center justify-center rounded-full border border-dashed border-border text-muted-foreground transition hover:bg-secondary hover:text-foreground" aria-label="Add tag"><Plus className="size-4" /></button>
       </div>
-      {editable ? (
+      {isAdding ? (
         <div className="relative max-w-md">
           <Input
             value={input}
@@ -302,7 +312,6 @@ function RecipeTags({
                 addTag(input);
               }
             }}
-            onBlur={() => { if (input.trim()) addTag(input); }}
             placeholder="Add a tag"
             aria-label="Add a tag"
           />

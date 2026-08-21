@@ -138,6 +138,40 @@ async function replaceRecipeTags(
   });
 }
 
+export const saveRecipeTagsAction = withActionLogging(
+  "action.save_recipe_tags",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const recipeId = String(formData.get("recipeId") ?? "").trim();
+    const tags = parseRecipeTags(formData.get("tagsJson"));
+    if (!recipeId) return { status: "error", message: "Recipe ID is required." };
+    if (!tags) return { status: "error", message: "One or more tags are invalid." };
+
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+      try {
+        const recipe = await db.query.householdRecipes.findFirst({
+          where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
+          columns: { recipeId: true },
+        });
+        if (!recipe) return { status: "error", message: "Recipe was not found." };
+        await replaceRecipeTags(db, { householdId: context.householdId, recipeId, tags, now: new Date().toISOString() });
+      } finally {
+        await sqlite.close();
+      }
+      revalidateAll(recipeScopedPaths(undefined, recipeId).concat("/tags"));
+      return { status: "success", message: "Recipe tags saved." };
+    } catch (error) {
+      return toErrorState(error, "Unable to save recipe tags.");
+    }
+  },
+  {
+    getStartData: (_state, formData) => ({
+      target: { recipeId: String(formData.get("recipeId") ?? "").trim() || null },
+    }),
+  },
+);
+
 export const createCustomRecipeAction = withActionLogging(
   "action.create_custom_recipe",
   async (_: ActionState, formData: FormData): Promise<ActionState> => {
@@ -1592,7 +1626,6 @@ export const saveRecipeMetadataAction = withActionLogging(
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const versionMode = String(formData.get("versionMode") ?? "").trim();
-  const submittedTags = parseRecipeTags(formData.get("tagsJson"));
   const hasContentEdits = formData.has("ingredientsJson") || formData.has("stepsJson");
   const ingredients = parseRecipeContentItems(formData.get("ingredientsJson"), isRecipeIngredientInput);
   const steps = parseRecipeContentItems(formData.get("stepsJson"), isRecipeStepInput);
@@ -1607,10 +1640,6 @@ export const saveRecipeMetadataAction = withActionLogging(
 
   if (versionMode !== "update" && versionMode !== "new") {
     return { status: "error", message: "Choose whether to save the current version or create a new one." };
-  }
-
-  if (!submittedTags) {
-    return { status: "error", message: "One or more tags are invalid." };
   }
 
   try {
@@ -1784,12 +1813,11 @@ export const saveRecipeMetadataAction = withActionLogging(
         .where(and(eq(householdRecipes.recipeId, recipeId), eq(householdRecipes.householdId, context.householdId)))
         .run();
 
-      await replaceRecipeTags(db, { householdId: context.householdId, recipeId, tags: submittedTags, now });
     } finally {
       await sqlite.close();
     }
 
-    revalidateAll(recipeScopedPaths(undefined, recipeId).concat("/tags"));
+    revalidateAll(recipeScopedPaths(undefined, recipeId));
     return {
       status: "success",
       message: versionMode === "new" ? "New recipe version created." : "Saved the recipe details.",
