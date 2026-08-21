@@ -55,7 +55,7 @@ import {
   upsertHouseholdAiConnection,
 } from "@/lib/server/ai-provider";
 import { getIngredientAiParses } from "@/lib/server/ingredient-ai";
-import { logAudit, withActionLogging } from "@/lib/server/logger";
+import { logAudit, logError, withActionLogging } from "@/lib/server/logger";
 import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
 import { formatIngredientOriginalText, parseAmountText } from "@/lib/ingredient-parsing";
 import {
@@ -101,8 +101,17 @@ function parseRecipeTags(value: FormDataEntryValue | null) {
   }
 }
 
+function getSubmittedTagCount(value: FormDataEntryValue | null) {
+  try {
+    const parsed = JSON.parse(String(value ?? ""));
+    return Array.isArray(parsed) ? parsed.length : null;
+  } catch {
+    return null;
+  }
+}
+
 async function replaceRecipeTags(
-  db: DatabaseHandle,
+  transaction: Awaited<ReturnType<typeof openDatabase>>["sqlite"],
   input: {
     householdId: string;
     recipeId: string;
@@ -110,21 +119,15 @@ async function replaceRecipeTags(
     now: string;
   },
 ) {
-  const transaction = db.transaction as unknown as (
-    callback: (tx: DatabaseHandle) => Promise<void>,
-  ) => Promise<void>;
-  await transaction(async (tx) => {
+  await transaction.transaction(async (tx) => {
     const tagIds: string[] = [];
     for (const tag of input.tags) {
       await tx.insert(recipeTags)
         .values({ householdId: input.householdId, name: tag.name, normalizedName: tag.normalizedName, createdAt: input.now, updatedAt: input.now })
         .onConflictDoNothing()
         .run();
-      const storedTag = await tx.query.recipeTags.findFirst({
-        where: (table, { and, eq }) => and(eq(table.householdId, input.householdId), eq(table.normalizedName, tag.normalizedName)),
-        columns: { tagId: true },
-      });
-      if (storedTag) tagIds.push(storedTag.tagId);
+      const storedTags = await tx.all<{ tag_id: string }>(sql`SELECT tag_id FROM recipe_tags WHERE household_id = ${input.householdId} AND normalized_name = ${tag.normalizedName} LIMIT 1`);
+      if (storedTags[0]) tagIds.push(storedTags[0].tag_id);
     }
     await tx.delete(recipeTagMemberships)
       .where(and(eq(recipeTagMemberships.recipeId, input.recipeId), eq(recipeTagMemberships.householdId, input.householdId)))
@@ -143,11 +146,13 @@ export const saveRecipeTagsAction = withActionLogging(
   async (_: ActionState, formData: FormData): Promise<ActionState> => {
     const recipeId = String(formData.get("recipeId") ?? "").trim();
     const tags = parseRecipeTags(formData.get("tagsJson"));
+    let householdId: string | null = null;
     if (!recipeId) return { status: "error", message: "Recipe ID is required." };
     if (!tags) return { status: "error", message: "One or more tags are invalid." };
 
     try {
       const context = await requireHouseholdContext();
+      householdId = context.householdId;
       const { db, sqlite } = await openDatabase();
       try {
         const recipe = await db.query.householdRecipes.findFirst({
@@ -155,20 +160,33 @@ export const saveRecipeTagsAction = withActionLogging(
           columns: { recipeId: true },
         });
         if (!recipe) return { status: "error", message: "Recipe was not found." };
-        await replaceRecipeTags(db, { householdId: context.householdId, recipeId, tags, now: new Date().toISOString() });
+        await replaceRecipeTags(sqlite, { householdId: context.householdId, recipeId, tags, now: new Date().toISOString() });
+        logAudit("recipe.tags_updated", {
+          target: { householdId: context.householdId, recipeId },
+          result: { tagCount: tags.length },
+        });
       } finally {
         await sqlite.close();
       }
       revalidateAll(recipeScopedPaths(undefined, recipeId).concat("/tags"));
       return { status: "success", message: "Recipe tags saved." };
     } catch (error) {
-      return toErrorState(error, "Unable to save recipe tags.");
+      logError("recipe.tags_update_failed", error, {
+        target: { householdId, recipeId },
+      });
+      return { status: "error", message: "Unable to save recipe tags." };
     }
   },
   {
     getStartData: (_state, formData) => ({
       target: { recipeId: String(formData.get("recipeId") ?? "").trim() || null },
+      result: { submittedTagCount: getSubmittedTagCount(formData.get("tagsJson")) },
     }),
+    getResultData: (_result, _state, formData) => ({
+      target: { recipeId: String(formData.get("recipeId") ?? "").trim() || null },
+      result: { submittedTagCount: getSubmittedTagCount(formData.get("tagsJson")) },
+    }),
+    getFailureLevel: (result) => result.message?.startsWith("Unable") ? "error" : "warn",
   },
 );
 

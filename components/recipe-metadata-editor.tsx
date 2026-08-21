@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, Pencil, Plus, X } from "lucide-react";
+import { ArrowLeft, Check, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -302,24 +302,27 @@ function RecipeTags({
         <button type="button" disabled={pending} onClick={() => setIsAdding((open) => !open)} className="inline-flex size-7 items-center justify-center rounded-full border border-dashed border-border text-muted-foreground transition hover:bg-secondary hover:text-foreground" aria-label="Add tag"><Plus className="size-4" /></button>
       </div>
       {isAdding ? (
-        <div className="relative max-w-md">
-          <Input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === ",") {
-                event.preventDefault();
-                addTag(input);
-              }
-            }}
-            placeholder="Add a tag"
-            aria-label="Add a tag"
-          />
-          {input.trim() && suggestions.length > 0 ? (
-            <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-lg">
-              {suggestions.map((tag) => <button key={tag.tagId} type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-secondary" onMouseDown={(event) => event.preventDefault()} onClick={() => addTag(tag.name)}>{tag.name}</button>)}
-            </div>
-          ) : null}
+        <div className="relative flex max-w-md gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Input
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === ",") {
+                  event.preventDefault();
+                  addTag(input);
+                }
+              }}
+              placeholder="Add a tag"
+              aria-label="Add a tag"
+            />
+            {input.trim() && suggestions.length > 0 ? (
+              <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-lg">
+                {suggestions.map((tag) => <button key={tag.tagId} type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-secondary" onMouseDown={(event) => event.preventDefault()} onClick={() => addTag(tag.name)}>{tag.name}</button>)}
+              </div>
+            ) : null}
+          </div>
+          <Button type="button" size="icon" disabled={pending || !input.trim()} onClick={() => addTag(input)} aria-label="Add tag"><Check className="size-4" /></Button>
         </div>
       ) : null}
     </section>
