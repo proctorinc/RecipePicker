@@ -203,7 +203,6 @@ export function RecipeMetadataEditor({
           </DialogContent>
         </Dialog>
 
-        {children}
         {editBanner}
 
         <div className="mx-auto w-full max-w-4xl space-y-2 px-4">
@@ -248,7 +247,7 @@ function BackButton({ fallbackHref }: { fallbackHref: string }) {
       type="button"
       variant="outline"
       size="icon"
-      className="border-white/60 bg-background/85 text-foreground backdrop-blur hover:bg-background"
+      className="h-14 w-14 border-white/60 bg-background/85 text-foreground backdrop-blur hover:bg-background"
       aria-label="Go back"
       onClick={() => {
         if (window.history.length > 1) {
@@ -259,7 +258,7 @@ function BackButton({ fallbackHref }: { fallbackHref: string }) {
         router.push(fallbackHref);
       }}
     >
-      <ArrowLeft className="size-4" />
+      <ArrowLeft className="size-6 shrink-0" />
     </Button>
   );
 }
@@ -385,14 +384,14 @@ function EditSubmitButton({
       type="button"
       variant="outline"
       size="icon"
-      className="border-white/60 bg-background/85 text-foreground backdrop-blur hover:bg-background"
+      className="h-14 w-14 border-white/60 bg-background/85 text-foreground backdrop-blur hover:bg-background"
       disabled={pending}
       aria-label="Edit recipe"
       onClick={() => {
         onEnableEditing();
       }}
     >
-      <Pencil className="size-4" />
+      <Pencil className="size-6 shrink-0" />
     </Button>
   );
 }

@@ -4,10 +4,10 @@ import {
   Calendar,
   ShoppingCart,
   LayoutDashboard,
-  Settings2,
   Sparkles,
   Tags,
   Blocks,
+  Layers,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 
@@ -25,7 +25,7 @@ const navItems = [
   {
     href: "/tags",
     label: "Tags",
-    icon: Blocks,
+    icon: Layers,
     matches: (pathname: string) => pathname.startsWith("/tags"),
   },
   {
@@ -40,27 +40,16 @@ const navItems = [
     icon: Calendar,
     matches: (pathname: string) => pathname.startsWith("/history"),
   },
-  {
-    href: "/settings",
-    label: "Settings",
-    icon: Settings2,
-    matches: (pathname: string) => pathname.startsWith("/settings"),
-  },
 ];
 
 export function MobileNav({
   showAiPicker = false,
-  showSettings = true,
   profileLinksToSettings = false,
 }: {
   showAiPicker?: boolean;
-  showSettings?: boolean;
   profileLinksToSettings?: boolean;
 }) {
   const pathname = usePathname();
-  const visibleNavItems = showSettings
-    ? navItems
-    : navItems.filter((item) => item.href !== "/settings");
   // const navItems = showAiPicker
   //   ? [
   //       items[0],
@@ -78,7 +67,7 @@ export function MobileNav({
   return (
     <nav className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-40 px-4 md:hidden">
       <div className="mx-auto flex w-full max-w-sm items-center justify-between gap-2 rounded-full border border-white/75 bg-background/90 p-2 shadow-[0_18px_40px_rgba(73,49,31,0.14)] backdrop-blur-xl">
-        {visibleNavItems.map((item) => {
+        {navItems.map((item) => {
           const isActive = item.matches(pathname);
           const Icon = item.icon;
 

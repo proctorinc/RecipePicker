@@ -139,7 +139,6 @@ export async function AppShell({
       </main>
       <MobileNav
         showAiPicker={showAiPicker}
-        showSettings={showSettings}
         profileLinksToSettings={mobileProfileLinksToSettings}
       />
     </div>

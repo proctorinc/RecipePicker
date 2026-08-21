@@ -530,11 +530,11 @@ export function RecipeHistoryCalendar({
               <div className="mb-1 flex items-start justify-between sm:mb-2">
                 <span
                   className={cn(
-                    "absolute left-0 top-0 z-10 inline-flex h-8 w-8 items-start justify-start rounded-br-[1.5rem] bg-white/90 px-1.5 pt-1 text-[10px] font-semibold text-foreground sm:relative sm:h-8 sm:min-w-8 sm:w-auto sm:items-center sm:justify-center sm:rounded-full sm:bg-transparent sm:px-1 sm:pt-0 sm:text-sm",
+                    "absolute left-1 top-1 z-10 inline-flex h-auto min-w-0 items-start justify-start bg-transparent p-0 text-[9px] font-semibold text-foreground sm:relative sm:left-auto sm:top-auto sm:h-8 sm:min-w-8 sm:w-auto sm:items-center sm:justify-center sm:rounded-full sm:px-1 sm:pt-0 sm:text-sm",
                     day.events.length > 0 &&
-                      !day.isToday &&
-                      "sm:bg-white/90",
-                    day.isToday && "bg-primary text-primary-foreground",
+                      "left-0 top-0 h-6 w-7 rounded-br-[2rem] bg-white/90 px-1 pt-0.5 sm:bg-white/90",
+                    day.isToday && "sm:bg-primary sm:text-primary-foreground",
+                    day.isToday && day.events.length > 0 && "bg-primary text-primary-foreground",
                   )}
                 >
                   {day.dayNumber}

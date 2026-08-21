@@ -112,7 +112,7 @@ export default async function RecipePage({
           </>
         }
       >
-        <section className="relative aspect-[16/10] overflow-hidden bg-white/70 sm:aspect-[16/8]">
+        <section className="relative aspect-[16/10] overflow-hidden rounded-t-[36px] border border-white/70 bg-white/70 shadow-soft sm:aspect-[16/8]">
           {recipe.imageUrl ? (
             <RecipeImage
               src={recipe.imageUrl}
