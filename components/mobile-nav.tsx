@@ -27,16 +27,16 @@ const navItems = [
     matches: (pathname: string) => pathname.startsWith("/tags"),
   },
   {
-    href: "/history",
-    label: "History",
-    icon: Calendar,
-    matches: (pathname: string) => pathname.startsWith("/history"),
-  },
-  {
     href: "/",
     label: "Feed",
     icon: LayoutDashboard,
     matches: (pathname: string) => pathname === "/",
+  },
+  {
+    href: "/history",
+    label: "History",
+    icon: Calendar,
+    matches: (pathname: string) => pathname.startsWith("/history"),
   },
   {
     href: "/settings",

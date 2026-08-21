@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { FeedSearch } from "@/components/feed-search";
 import { HomeFeed } from "@/components/home-feed";
+import {
+  cacheFeedPage,
+  cacheFeedScrollPosition,
+  getCachedFeed,
+  getFeedCacheKey,
+} from "@/lib/feed-cache";
 import type { FeedPinsPage } from "@/types/view-models";
 
 const SEARCH_DEBOUNCE_MS = 350;
@@ -20,18 +26,54 @@ export function HomeFeedShell({
   tagId,
 }: HomeFeedShellProps) {
   const normalizedInitialQuery = initialQuery.trim();
+  const cacheKey = getFeedCacheKey(normalizedInitialQuery, tagId);
+  const cachedFeed = getCachedFeed(cacheKey);
   const [inputValue, setInputValue] = useState(initialQuery);
   const [activeQuery, setActiveQuery] = useState(normalizedInitialQuery);
-  const [page, setPage] = useState(initialPage);
+  const [page, setPage] = useState(() => cachedFeed?.page ?? initialPage);
   const [isSearching, setIsSearching] = useState(false);
   const searchAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    setInputValue(initialQuery);
-    setActiveQuery(normalizedInitialQuery);
-    setPage(initialPage);
-    setIsSearching(false);
-  }, [initialPage, initialQuery, normalizedInitialQuery]);
+    cacheFeedPage(getFeedCacheKey(activeQuery, tagId), page);
+  }, [activeQuery, page, tagId]);
+
+  useLayoutEffect(() => {
+    if (!cachedFeed || cachedFeed.scrollY === 0) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: cachedFeed.scrollY, behavior: "instant" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [cacheKey, cachedFeed]);
+
+  useEffect(() => {
+    let frame: number | null = null;
+
+    function saveScrollPosition() {
+      if (frame !== null) {
+        return;
+      }
+
+      frame = window.requestAnimationFrame(() => {
+        cacheFeedScrollPosition(cacheKey, window.scrollY);
+        frame = null;
+      });
+    }
+
+    window.addEventListener("scroll", saveScrollPosition, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", saveScrollPosition);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      cacheFeedScrollPosition(cacheKey, window.scrollY);
+    };
+  }, [cacheKey]);
 
   useEffect(() => {
     const trimmedValue = inputValue.trim();
@@ -94,6 +136,7 @@ export function HomeFeedShell({
         initialHasMore={page.hasMore}
         query={activeQuery}
         tagId={tagId}
+        onPageChange={setPage}
       />
       <div className="fixed left-0 right-0 bottom-24 z-30 px-3 md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">

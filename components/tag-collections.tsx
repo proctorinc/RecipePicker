@@ -1,7 +1,5 @@
-import type { CSSProperties } from "react";
-
 import { AppTransitionLink } from "@/components/app-transition-link";
-import { RecipeImage } from "@/components/recipe-image";
+import { RecipeCollage } from "@/components/recipe-collage";
 import { Card } from "@/components/ui/card";
 import type { RecipeTagCollectionView } from "@/types/view-models";
 
@@ -25,27 +23,5 @@ export function TagCollections({ collections }: { collections: RecipeTagCollecti
 }
 
 function RecipePreview({ recipes }: { recipes: RecipeTagCollectionView["previewRecipes"] }) {
-  if (recipes.length === 1) return <RecipeTile recipe={recipes[0]} className="absolute inset-0" />;
-
-  const collagePositions = [
-    "left-[-8%] top-[-5%] h-[58%] w-[58%] rotate-[-7deg]",
-    "right-[-7%] top-[-4%] h-[53%] w-[53%] rotate-[6deg]",
-    "bottom-[-8%] left-[-4%] h-[55%] w-[55%] rotate-[5deg]",
-    "bottom-[-7%] right-[-5%] h-[57%] w-[57%] rotate-[-6deg]",
-    "left-[22%] top-[22%] h-[53%] w-[53%] rotate-[2deg]",
-  ];
-
-  return <div className="absolute inset-0 overflow-hidden bg-secondary">
-    {recipes.map((recipe, index) => <RecipeTile key={recipe.recipeId} recipe={recipe} className={`absolute overflow-hidden border-2 border-white/85 shadow-lg ${collagePositions[index] ?? ""}`} style={{ zIndex: index + 1 }} />)}
-  </div>;
-}
-
-function RecipeTile({ recipe, className, style }: {
-  recipe: RecipeTagCollectionView["previewRecipes"][number];
-  className: string;
-  style?: CSSProperties;
-}) {
-  return <div className={className} style={style}>
-    {recipe.imageUrl ? <RecipeImage src={recipe.imageUrl} previewSrc={recipe.previewImageUrl} alt="" fill sizes="(max-width: 640px) 50vw, 33vw" className="object-cover" /> : <div className="absolute inset-0" style={{ backgroundColor: recipe.dominantColor ?? "rgba(214, 196, 176, 0.65)" }} />}
-  </div>;
+  return <RecipeCollage recipes={recipes} />;
 }

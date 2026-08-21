@@ -12,7 +12,7 @@ import {
   getFeedColumnCount,
   getFeedPrefetchTriggerIndex,
 } from "@/lib/feed-layout";
-import type { FeedPinCard } from "@/types/view-models";
+import type { FeedPinCard, FeedPinsPage } from "@/types/view-models";
 
 const DEFAULT_FEED_PAGE_SIZE = 50;
 
@@ -22,6 +22,7 @@ type HomeFeedProps = {
   initialHasMore: boolean;
   query: string;
   tagId?: string;
+  onPageChange: (page: FeedPinsPage) => void;
 };
 
 export function HomeFeed({
@@ -30,6 +31,7 @@ export function HomeFeed({
   initialHasMore,
   query,
   tagId,
+  onPageChange,
 }: HomeFeedProps) {
   const [columnCount, setColumnCount] = useState(getInitialColumnCount);
   const [items, setItems] = useState(initialItems);
@@ -148,27 +150,27 @@ export function HomeFeed({
         hasMore: boolean;
       };
 
-      let appendedItems: FeedPinCard[] = [];
-      setItems((current) => {
-        appendedItems = page.items.filter(
-          (item) =>
-            !current.some((existing) => existing.recipeId === item.recipeId),
-        );
+      const appendedItems = page.items.filter(
+        (item) =>
+          !itemsRef.current.some(
+            (existing) => existing.recipeId === item.recipeId,
+          ),
+      );
+      const nextItems = [...itemsRef.current, ...appendedItems];
 
-        if (appendedItems.length === 0) {
-          return current;
-        }
-
-        const nextItems = [...current, ...appendedItems];
-        itemsRef.current = nextItems;
-        return nextItems;
-      });
+      itemsRef.current = nextItems;
+      setItems(nextItems);
       if (appendedItems.length > 0) {
         setColumns((current) => appendFeedItems(current, appendedItems));
       }
       setLastBatchSize(page.items.length);
       setCursor(page.nextCursor);
       setHasMore(page.hasMore);
+      onPageChange({
+        items: nextItems,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+      });
     } finally {
       isFetchingRef.current = false;
       setIsLoadingMore(false);

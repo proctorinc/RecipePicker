@@ -24,6 +24,7 @@ import { HistoryEventDeleteButton } from "@/components/history-event-delete-butt
 import { FeedCardSkeleton } from "@/components/loading-skeletons";
 import { useAppRouteTransition } from "@/components/app-route-transition";
 import { RecipeImage } from "@/components/recipe-image";
+import { RecipeCollage } from "@/components/recipe-collage";
 import { RecipeImageCard } from "@/components/recipe-image-card";
 import { RecipeReviewDialog } from "@/components/recipe-review-dialog";
 import { ReviewDeleteButton } from "@/components/review-delete-button";
@@ -536,7 +537,7 @@ export function RecipeHistoryCalendar({
               )}
             >
               {day.events.length > 0 ? (
-                <DayPreviewImage event={day.events[day.events.length - 1]!} />
+                <DayRecipeCollage events={day.events} />
               ) : null}
               <div className="mb-1 flex items-start justify-between sm:mb-2">
                 <span
@@ -837,21 +838,14 @@ export function RecipeHistoryCalendar({
   );
 }
 
-function DayPreviewImage({ event }: { event: RecipeHistoryEventView }) {
-  return (
-    <div className="absolute inset-0 overflow-hidden">
-      {event.recipeImageUrl ? (
-        <RecipeImage
-          src={event.recipeImageUrl}
-          previewSrc={event.recipePreviewImageUrl}
-          alt={event.recipeTitle}
-          fill
-          className="object-cover"
-          sizes="220px"
-        />
-      ) : (
-        <div className="absolute inset-0 bg-secondary/80" />
-      )}
-    </div>
-  );
+function DayRecipeCollage({ events }: { events: RecipeHistoryEventView[] }) {
+  return <RecipeCollage
+    recipes={events.map((event) => ({
+      recipeId: `${event.recipeId}-${event.eventId}`,
+      imageUrl: event.recipeImageUrl,
+      previewImageUrl: event.recipePreviewImageUrl,
+      dominantColor: null,
+    }))}
+    sizes="220px"
+  />;
 }
