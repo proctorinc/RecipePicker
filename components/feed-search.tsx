@@ -16,12 +16,12 @@ export function FeedSearch({
   return (
     <div className="relative">
       <div className="relative">
-        <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="z-50 pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground" />
         <Input
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder="Search recipes, ingredients, and more"
-          className="h-14 border-white/80 bg-background/90 pl-11 pr-12 text-base"
+          className="h-14 rounded-full border-0 bg-background/65 pl-10 pr-12 text-base shadow-[0_18px_40px_rgba(73,49,31,0.14)] backdrop-blur-sm"
           aria-busy={isSearching}
         />
         {value ? (

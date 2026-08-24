@@ -1,22 +1,22 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { usePathname } from "next/navigation";
 
-import { cn } from "@/lib/utils";
-
-export function MobileAwareAppHeader({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
-  const isSettingsPage = pathname.startsWith("/settings");
-
+export function MobileAwareAppHeader({
+  children,
+  mobileLogo,
+}: {
+  children: ReactNode;
+  mobileLogo: ReactNode;
+}) {
   return (
-    <header
-      className={cn(
-        "sticky top-0 z-40 border-b border-white/50 bg-background/75 backdrop-blur-xl",
-        isSettingsPage ? "block" : "hidden md:block",
-      )}
-    >
-      {children}
-    </header>
+    <>
+      <header className="fixed inset-x-0 top-0 z-40 hidden bg-background md:block">
+        {children}
+      </header>
+      <header className="fixed inset-x-0 top-0 z-40 flex h-12 items-center justify-center bg-background px-4 md:hidden">
+        {mobileLogo}
+      </header>
+    </>
   );
 }

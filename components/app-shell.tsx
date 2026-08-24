@@ -81,7 +81,22 @@ export async function AppShell({
 
   return (
     <div className="min-h-screen bg-grain pb-16">
-      <MobileAwareAppHeader>
+      <MobileAwareAppHeader
+        mobileLogo={
+          <AppTransitionLink
+            href="/"
+            prefetch
+            aria-label="Recipe Picker home"
+            className="flex items-center gap-1 justify-center font-[family-name:var(--font-serif)]"
+            pendingClassName="opacity-80"
+          >
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+              <Soup className="h-3 w-3" />
+            </div>
+            Recipe Picker
+          </AppTransitionLink>
+        }
+      >
         <AppShellProgress />
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <AppTransitionLink
@@ -103,7 +118,11 @@ export async function AppShell({
 
           <nav className="hidden items-center gap-2 md:flex">
             <Button asChild className="rounded-full">
-              <AppTransitionLink href="/recipe/new" prefetch className="flex items-center gap-2">
+              <AppTransitionLink
+                href="/recipe/new"
+                prefetch
+                className="flex items-center gap-2"
+              >
                 <Plus className="h-4 w-4" />
                 Create recipe
               </AppTransitionLink>
@@ -134,7 +153,7 @@ export async function AppShell({
         </div>
       </MobileAwareAppHeader>
 
-      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-2 py-4 pb-24 sm:px-6 md:pb-4 lg:px-8">
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-2 pb-24 pt-16 sm:px-6 md:pb-4 md:pt-[5.75rem] lg:px-8">
         {children}
       </main>
       <MobileNav

@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { FeedCardSkeleton } from "@/components/loading-skeletons";
+import {
+  FeedCardSkeleton,
+  FeedCardsSkeleton,
+} from "@/components/loading-skeletons";
 import { PinCard } from "@/components/pin-card";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -22,6 +25,7 @@ type HomeFeedProps = {
   initialHasMore: boolean;
   query: string;
   tagId?: string;
+  isSearching?: boolean;
   onPageChange: (page: FeedPinsPage) => void;
 };
 
@@ -31,6 +35,7 @@ export function HomeFeed({
   initialHasMore,
   query,
   tagId,
+  isSearching = false,
   onPageChange,
 }: HomeFeedProps) {
   const [columnCount, setColumnCount] = useState(getInitialColumnCount);
@@ -177,6 +182,10 @@ export function HomeFeed({
     }
   }
 
+  if (isSearching) {
+    return <FeedCardsSkeleton />;
+  }
+
   if (items.length === 0) {
     return (
       <Card className="border-dashed border-white/80 bg-white/70">
@@ -206,6 +215,7 @@ export function HomeFeed({
                   <FeedCardSkeleton
                     key={skeleton.id}
                     aspectVariant={skeleton.aspectVariant}
+                    animationDelayMs={columnIndex * 120}
                   />
                 ))
               : null}

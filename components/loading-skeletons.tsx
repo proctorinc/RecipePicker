@@ -1,12 +1,22 @@
+import { Soup } from "lucide-react";
+import type { CSSProperties } from "react";
+
 import { cn } from "@/lib/utils";
 import {
   getFeedCardAspectClassFromVariant,
   type FeedCardAspectVariant,
 } from "@/lib/feed-layout";
 
-export function Skeleton({ className }: { className?: string }) {
+export function Skeleton({
+  className,
+  style,
+}: {
+  className?: string;
+  style?: CSSProperties;
+}) {
   return (
     <div
+      style={style}
       className={cn(
         "animate-pulse rounded-[24px] bg-gradient-to-r from-white/80 via-white to-white/80",
         className,
@@ -18,11 +28,7 @@ export function Skeleton({ className }: { className?: string }) {
 export function FeedPageSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="md:hidden">{renderFeedSkeletonColumns(2)}</div>
-      <div className="hidden md:block lg:hidden">
-        {renderFeedSkeletonColumns(3)}
-      </div>
-      <div className="hidden lg:block">{renderFeedSkeletonColumns(4)}</div>
+      <FeedCardsSkeleton />
       <div className="fixed bottom-24 left-0 right-0 z-30 px-3 md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">
           <Skeleton className="h-14 rounded-full border border-white/80" />
@@ -32,15 +38,48 @@ export function FeedPageSkeleton() {
   );
 }
 
+export function FeedCardsSkeleton() {
+  return (
+    <>
+      <div className="md:hidden">{renderFeedSkeletonColumns(2)}</div>
+      <div className="hidden md:block lg:hidden">
+        {renderFeedSkeletonColumns(3)}
+      </div>
+      <div className="hidden lg:block">{renderFeedSkeletonColumns(4)}</div>
+    </>
+  );
+}
+
+export function AppLoadingScreen() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-grain px-6">
+      <div className="flex flex-col items-center gap-4 text-center">
+        <div className="flex h-16 w-16 animate-pulse items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_18px_40px_rgba(73,49,31,0.18)]">
+          <Soup className="h-7 w-7" />
+        </div>
+        <div>
+          <p className="font-[family-name:var(--font-serif)] text-xl font-semibold">
+            Recipe Picker
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">Loading your recipes…</p>
+        </div>
+      </div>
+    </main>
+  );
+}
+
 export function FeedCardSkeleton({
   aspectVariant,
+  animationDelayMs = 0,
 }: {
   aspectVariant: FeedCardAspectVariant;
+  animationDelayMs?: number;
 }) {
   return (
     <Skeleton
+      style={{ animationDelay: `${animationDelayMs}ms` }}
       className={cn(
-        "w-full rounded-[28px] border border-white/70",
+        "w-full rounded-[28px] border border-primary/25 from-primary/80 via-primary/60 to-primary/80 shadow-[0_12px_28px_rgba(73,49,31,0.12)]",
         getFeedCardAspectClassFromVariant(aspectVariant),
       )}
     />
@@ -60,17 +99,40 @@ function renderFeedSkeletonColumns(columnCount: number) {
       )}
     >
       {Array.from({ length: columnCount }, (_unused, columnIndex) => (
-        <div key={columnIndex} className="flex flex-col gap-2 md:gap-5">
-          <FeedCardSkeleton
-            aspectVariant={columnIndex % 3 === 0 ? "taller" : "tall"}
-          />
-          <FeedCardSkeleton
-            aspectVariant={columnIndex % 2 === 0 ? "square" : "taller"}
-          />
-          {columnIndex < Math.max(1, columnCount - 2) ? (
-            <FeedCardSkeleton aspectVariant="tall" />
-          ) : null}
-        </div>
+        <FeedSkeletonColumn
+          key={columnIndex}
+          columnIndex={columnIndex}
+          columnCount={columnCount}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FeedSkeletonColumn({
+  columnIndex,
+  columnCount,
+}: {
+  columnIndex: number;
+  columnCount: number;
+}) {
+  const cards: FeedCardAspectVariant[] = [
+    columnIndex % 3 === 0 ? "taller" : "tall",
+    columnIndex % 2 === 0 ? "square" : "taller",
+  ];
+
+  if (columnIndex < Math.max(1, columnCount - 2)) {
+    cards.push("tall");
+  }
+
+  return (
+    <div className="flex flex-col gap-2 md:gap-5">
+      {cards.map((aspectVariant, rowIndex) => (
+        <FeedCardSkeleton
+          key={`${aspectVariant}-${rowIndex}`}
+          aspectVariant={aspectVariant}
+          animationDelayMs={(rowIndex * columnCount + columnIndex) * 120}
+        />
       ))}
     </div>
   );

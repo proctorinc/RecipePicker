@@ -66,7 +66,7 @@ export function MobileNav({
 
   return (
     <nav className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-40 px-4 md:hidden">
-      <div className="mx-auto flex w-full max-w-sm items-center justify-between gap-2 rounded-full border border-white/75 bg-background/90 p-2 shadow-[0_18px_40px_rgba(73,49,31,0.14)] backdrop-blur-xl">
+      <div className="mx-auto flex w-full max-w-sm items-center justify-between gap-2 rounded-full bg-background/65 p-2 shadow-[0_18px_40px_rgba(73,49,31,0.14)] backdrop-blur-sm">
         {navItems.map((item) => {
           const isActive = item.matches(pathname);
           const Icon = item.icon;

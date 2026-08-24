@@ -81,7 +81,6 @@ export function HomeFeedShell({
     if (trimmedValue !== activeQuery && searchAbortRef.current) {
       searchAbortRef.current.abort();
       searchAbortRef.current = null;
-      setIsSearching(false);
     }
 
     const timeout = window.setTimeout(() => {
@@ -130,27 +129,35 @@ export function HomeFeedShell({
 
   return (
     <>
-      <div className="pt-[calc(env(safe-area-inset-top)+4.5rem)] md:pt-0">
+      <div className="pt-[calc(env(safe-area-inset-top)+4.25rem)] md:pt-0">
         <HomeFeed
           initialItems={page.items}
           initialCursor={page.nextCursor}
           initialHasMore={page.hasMore}
           query={activeQuery}
           tagId={tagId}
+          isSearching={isSearching}
           onPageChange={setPage}
         />
       </div>
-      <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+0.75rem)] z-30 px-3 md:top-auto md:bottom-4 md:px-0">
+      <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3.75rem)] z-30 px-3 md:top-auto md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">
           <FeedSearch
             value={inputValue}
-            onChange={setInputValue}
+            onChange={handleSearchChange}
             isSearching={isSearching}
           />
         </div>
       </div>
     </>
   );
+
+  function handleSearchChange(nextValue: string) {
+    searchAbortRef.current?.abort();
+    searchAbortRef.current = null;
+    setInputValue(nextValue);
+    setIsSearching(nextValue.trim() !== activeQuery);
+  }
 }
 
 function syncUrl(query: string) {
