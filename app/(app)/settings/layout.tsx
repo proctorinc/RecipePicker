@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 
 import { PageIntro, PageShell } from "@/components/page-shell";
+import { SettingsNav } from "@/components/settings-nav";
 import { getCurrentUserAccess } from "@/lib/server/access";
 import { requireHouseholdContext } from "@/lib/server/auth";
 
@@ -22,6 +23,10 @@ export default async function SettingsLayout({ children }: { children: ReactNode
       <PageIntro
         title="Settings"
         description="Manage board sync, recipe extraction, and parsing diagnostics from one minimal control surface."
+      />
+      <SettingsNav
+        canManageSettings={household.role === "owner" || access.isActualAdmin}
+        isAdmin={access.isActualAdmin}
       />
       {children}
     </PageShell>

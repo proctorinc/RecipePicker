@@ -1,7 +1,6 @@
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { IngredientReviewTable } from "@/components/ingredient-review-table";
 import { IngredientCatalog } from "@/components/ingredient-catalog";
-import { SettingsNav } from "@/components/settings-nav";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireHouseholdContext } from "@/lib/server/auth";
 import { getHouseholdAiConnectionStatus } from "@/lib/server/ai-provider";
@@ -38,7 +37,6 @@ export default async function IngredientSettingsPage({
 
   return (
     <div className="space-y-6">
-      <SettingsNav currentPath="/settings/ingredients" />
       <Card>
         <CardHeader>
           <CardTitle>Ingredient review</CardTitle>

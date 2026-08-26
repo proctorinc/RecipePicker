@@ -1,5 +1,4 @@
 import { AppTransitionLink } from "@/components/app-transition-link";
-import { SettingsNav } from "@/components/settings-nav";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -112,8 +111,6 @@ export default async function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <SettingsNav currentPath="/settings" />
-
       <Card className="bg-white/90">
         <CardHeader>
           <CardTitle>Overview</CardTitle>

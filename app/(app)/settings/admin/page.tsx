@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 
 import { ActionForm } from "@/components/action-form";
-import { SettingsNav } from "@/components/settings-nav";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -26,7 +25,6 @@ export default async function AdminSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <SettingsNav currentPath="/settings/admin" />
 
       <Card className="bg-white/90">
         <CardHeader>

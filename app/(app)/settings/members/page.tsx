@@ -1,5 +1,4 @@
 import { ActionForm } from "@/components/action-form";
-import { SettingsNav } from "@/components/settings-nav";
 import { ShareInviteLink } from "@/components/share-invite-link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +21,6 @@ export default async function MembersPage() {
 
   return (
     <div className="space-y-6">
-      <SettingsNav currentPath="/settings/members" />
 
       <Card>
         <CardHeader>

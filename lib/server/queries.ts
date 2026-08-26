@@ -931,11 +931,12 @@ export async function getPinterestSyncHistory(limit = 25) {
   const context = await requireHouseholdContext();
   const { db, sqlite } = await openDatabase();
   try {
-    return await db.query.pinterestSyncRuns.findMany({
+    const runs = await db.query.pinterestSyncRuns.findMany({
       where: (table, { eq }) => eq(table.householdId, context.householdId),
       orderBy: (table, { desc: orderDesc }) => [orderDesc(table.startedAt)],
       limit,
     });
+    return await withPinterestSyncChangeCounts(db, runs);
   } finally {
     await sqlite.close();
   }
@@ -965,8 +966,9 @@ export async function getPinterestSyncRunDetail(syncRunId: string) {
       with: { pin: true, recipeInstructions: true },
     });
     const recipeById = new Map(recipes.map((recipe) => [recipe.recipeId, recipe]));
+    const [countedRun] = await withPinterestSyncChangeCounts(db, [run]);
     return {
-      run,
+      run: countedRun,
       changes: changes.map((change) => {
         const recipe = recipeById.get(change.recipeId);
         return {
@@ -979,6 +981,38 @@ export async function getPinterestSyncRunDetail(syncRunId: string) {
   } finally {
     await sqlite.close();
   }
+}
+
+async function withPinterestSyncChangeCounts<TRun extends {
+  syncRunId: string;
+  createdRecipeCount: number;
+  removedRecipeCount: number;
+  restoredRecipeCount: number;
+}>(db: DatabaseHandle, runs: TRun[]) {
+  if (runs.length === 0) return runs;
+  const changes = await db.query.pinterestSyncRecipeChanges.findMany({
+    where: (table, { inArray: whereInArray }) => whereInArray(
+      table.syncRunId,
+      runs.map((run) => run.syncRunId),
+    ),
+    columns: { syncRunId: true, changeType: true },
+  });
+  const countsByRunId = new Map<string, Record<"created" | "removed" | "restored", number>>();
+  for (const change of changes) {
+    if (change.changeType !== "created" && change.changeType !== "removed" && change.changeType !== "restored") continue;
+    const counts = countsByRunId.get(change.syncRunId) ?? { created: 0, removed: 0, restored: 0 };
+    counts[change.changeType] += 1;
+    countsByRunId.set(change.syncRunId, counts);
+  }
+  return runs.map((run) => {
+    const counts = countsByRunId.get(run.syncRunId);
+    return counts ? {
+      ...run,
+      createdRecipeCount: counts.created,
+      removedRecipeCount: counts.removed,
+      restoredRecipeCount: counts.restored,
+    } : run;
+  });
 }
 
 export async function getRecipeOpsDetail(

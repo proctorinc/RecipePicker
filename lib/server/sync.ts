@@ -41,6 +41,7 @@ export type PinterestSyncTrigger = "manual" | "auto_feed_load" | "force";
 type PinterestSyncRunContext = {
   syncRunId: string;
   trigger: PinterestSyncTrigger;
+  changes: Record<"created" | "removed" | "restored", number>;
 };
 
 type SyncClaimOptions = {
@@ -689,7 +690,11 @@ async function startPinterestSyncRun(args: {
       message: null,
     }).returning().get();
     if (!run) throw new Error("Unable to create Pinterest sync history record.");
-    return { syncRunId: run.syncRunId, trigger: args.trigger };
+    return {
+      syncRunId: run.syncRunId,
+      trigger: args.trigger,
+      changes: { created: 0, removed: 0, restored: 0 },
+    };
   } finally {
     await sqlite.close();
   }
@@ -710,6 +715,7 @@ async function recordPinterestSyncRecipeChange(
       changeType,
       createdAt,
     }).onConflictDoNothing().run();
+    syncRun.changes[changeType] += 1;
   } finally {
     await sqlite.close();
   }
@@ -723,10 +729,6 @@ async function completePinterestSyncRun(args: {
 }) {
   const { db, sqlite } = await openDatabase();
   try {
-    const changes = await db.query.pinterestSyncRecipeChanges.findMany({
-      where: (table, { eq: whereEq }) => whereEq(table.syncRunId, args.syncRun.syncRunId),
-      columns: { changeType: true },
-    });
     const result = args.result;
     const boards = result && "boards" in result ? result.boards : result ? [result] : [];
     await db.update(pinterestSyncRuns).set({
@@ -734,9 +736,9 @@ async function completePinterestSyncRun(args: {
       completedAt: new Date().toISOString(),
       boardCount: boards.length,
       pinCount: boards.reduce((count, board) => count + board.syncedPins, 0),
-      createdRecipeCount: changes.filter((change) => change.changeType === "created").length,
-      removedRecipeCount: changes.filter((change) => change.changeType === "removed").length,
-      restoredRecipeCount: changes.filter((change) => change.changeType === "restored").length,
+      createdRecipeCount: args.syncRun.changes.created,
+      removedRecipeCount: args.syncRun.changes.removed,
+      restoredRecipeCount: args.syncRun.changes.restored,
       message: args.status === "error"
         ? args.error instanceof Error ? args.error.message : String(args.error)
         : null,

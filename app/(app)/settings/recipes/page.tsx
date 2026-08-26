@@ -1,5 +1,4 @@
 import { RecipeOpsTable } from "@/components/recipe-ops-table";
-import { SettingsNav } from "@/components/settings-nav";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getBoardSyncOptions, getRecipeOpsList, getRecipeParseJobSummaries } from "@/lib/server/queries";
 
@@ -27,7 +26,6 @@ export default async function RecipeSettingsPage({
 
   return (
     <div className="space-y-6">
-      <SettingsNav currentPath="/settings/recipes" />
       <Card>
         <CardHeader className="p-4 sm:p-6">
           <CardTitle>Recipes</CardTitle>

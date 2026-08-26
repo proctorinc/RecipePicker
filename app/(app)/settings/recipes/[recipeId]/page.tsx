@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 
 import { ActionForm } from "@/components/action-form";
 import { RecipeSettingsWorkspace } from "@/components/recipe-settings-workspace";
-import { SettingsNav } from "@/components/settings-nav";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,6 @@ export default async function RecipeOpsDetailPage({ params }: { params: Promise<
 
   return (
     <div className="space-y-6">
-      <SettingsNav currentPath="/settings/recipes" />
 
       <Card className="overflow-hidden">
         <CardHeader className="space-y-4">

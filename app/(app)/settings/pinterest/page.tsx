@@ -3,8 +3,8 @@ import { notFound } from "next/navigation";
 import { ActionForm } from "@/components/action-form";
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { BoardSyncPicker } from "@/components/board-sync-picker";
+import { LocalDateTime } from "@/components/local-date-time";
 import { PinterestAutoSyncToggle } from "@/components/pinterest-auto-sync-toggle";
-import { SettingsNav } from "@/components/settings-nav";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -43,7 +43,7 @@ import {
   getNextPinterestAutoSyncEligibleAt,
   isPinterestSyncLeaseActive,
 } from "@/lib/server/sync";
-import { formatDate, formatRelativeTimeShort } from "@/lib/utils";
+import { formatRelativeTimeShort } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -95,7 +95,6 @@ export default async function PinterestSettingsPage({
 
   return (
     <div className="space-y-6">
-      <SettingsNav currentPath="/settings/pinterest" />
 
       <Card className="bg-white/90">
         <CardHeader>
@@ -121,9 +120,7 @@ export default async function PinterestSettingsPage({
               Auto-sync frequency: {syncFrequency}.
             </p>
             <p className="text-sm text-muted-foreground">
-              {connection.lastSyncAt
-                ? `Synced ${syncRecency} (${formatDate(connection.lastSyncAt)}). Last result: ${connection.lastSyncStatus ?? "success"}.`
-                : "No sync run yet."}
+              {connection.lastSyncAt ? <>Synced {syncRecency} (<LocalDateTime value={connection.lastSyncAt} />). Last result: {connection.lastSyncStatus ?? "success"}.</> : "No sync run yet."}
             </p>
             <p className="text-sm text-muted-foreground">
               {!connection.autoSyncEnabled
@@ -131,7 +128,7 @@ export default async function PinterestSettingsPage({
                 : syncInProgress
                   ? "Next auto-sync is running now."
                   : nextAutoSyncAt && new Date(nextAutoSyncAt).getTime() > Date.now()
-                    ? `Next auto-sync becomes eligible ${formatRelativeTimeShort(nextAutoSyncAt)} (${formatDate(nextAutoSyncAt)}).`
+                    ? <>Next auto-sync becomes eligible {formatRelativeTimeShort(nextAutoSyncAt)} (<LocalDateTime value={nextAutoSyncAt} />).</>
                     : "Next auto-sync can run on the next feed load."}
             </p>
             {syncInProgress ? (
@@ -139,8 +136,7 @@ export default async function PinterestSettingsPage({
             ) : null}
             {connection.accessTokenExpiresAt ? (
               <p className="text-sm text-muted-foreground">
-                Access token expires{" "}
-                {formatDate(connection.accessTokenExpiresAt)}.
+                Access token expires <LocalDateTime value={connection.accessTokenExpiresAt} />.
               </p>
             ) : null}
             {connection.scope.length > 0 ? (
@@ -266,7 +262,7 @@ export default async function PinterestSettingsPage({
                       ) : null}
                     </div>
                   </TableCell>
-                  <TableCell>{formatDate(board.lastSyncedAt)}</TableCell>
+                  <TableCell><LocalDateTime value={board.lastSyncedAt} /></TableCell>
                   <TableCell>{board.pinCount}</TableCell>
                   <TableCell>{board.recipeCount}</TableCell>
                   <TableCell>{board.pendingCount}</TableCell>

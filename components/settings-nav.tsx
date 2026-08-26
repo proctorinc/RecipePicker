@@ -1,6 +1,7 @@
+"use client";
+
 import { AppTransitionLink } from "@/components/app-transition-link";
-import { getCurrentUserAccess } from "@/lib/server/access";
-import { requireHouseholdContext } from "@/lib/server/auth";
+import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const items = [
@@ -15,15 +16,18 @@ const elevatedItems = [
   { href: "/settings/pinterest", label: "Pinterest" },
 ];
 
-export async function SettingsNav({ currentPath }: { currentPath: string }) {
-  const [access, household] = await Promise.all([
-    getCurrentUserAccess(),
-    requireHouseholdContext(),
-  ]);
+export function SettingsNav({
+  canManageSettings,
+  isAdmin,
+}: {
+  canManageSettings: boolean;
+  isAdmin: boolean;
+}) {
+  const pathname = usePathname();
   const navItems = [
     ...items,
-    ...(household.role === "owner" || access.isActualAdmin ? elevatedItems : []),
-    ...(access.isActualAdmin ? [{ href: "/settings/admin", label: "Admin" }] : []),
+    ...(canManageSettings ? elevatedItems : []),
+    ...(isAdmin ? [{ href: "/settings/admin", label: "Admin" }] : []),
   ];
 
   return (
@@ -35,7 +39,9 @@ export async function SettingsNav({ currentPath }: { currentPath: string }) {
           prefetch
           className={cn(
             "rounded-full px-4 py-2 text-sm font-medium transition",
-            currentPath === item.href
+            (item.href === "/settings"
+              ? pathname === item.href
+              : pathname.startsWith(item.href))
               ? "bg-primary text-primary-foreground shadow-sm"
               : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
           )}
