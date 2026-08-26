@@ -224,7 +224,19 @@ export default async function PinterestSettingsPage({
             </div>
           ) : null}
           {canManagePinterest ? <BoardSyncPicker boards={boards} /> : null}
-          <Table>
+          <div className="space-y-3 md:hidden">
+            {syncedBoards.length === 0 ? <p className="rounded-2xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">No boards are selected for sync yet. Connect Pinterest, then choose the boards you want to include.</p> : null}
+            {syncedBoards.map((board) => (
+              <div key={board.boardId} className="rounded-2xl border border-border/60 p-4">
+                <p className="font-medium">{board.name ?? board.boardId}</p>
+                {board.name ? <p className="text-xs text-muted-foreground">{board.boardId}</p> : null}
+                <p className="mt-2 text-sm text-muted-foreground">Last synced <LocalDateTime value={board.lastSyncedAt} /></p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm"><Stat label="Pins" value={board.pinCount} /><Stat label="Ready" value={board.recipeCount} /><Stat label="Pending" value={board.pendingCount} /><Stat label="Needs attention" value={board.reviewCount + board.failedCount} /></div>
+                {canManagePinterest ? <div className="mt-4 flex flex-wrap gap-2"><ActionForm action={setBoardSyncEnabledAction} fields={{ boardId: board.boardId, boardName: board.name ?? "", syncEnabled: "false" }} buttonVariant="ghost">Pause</ActionForm><ActionForm action={syncBoardAction} fields={{ boardId: board.boardId, boardName: board.name ?? "" }} buttonVariant="secondary">Sync board</ActionForm></div> : null}
+              </div>
+            ))}
+          </div>
+          <div className="hidden md:block"><Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Board</TableHead>
@@ -300,10 +312,15 @@ export default async function PinterestSettingsPage({
               ))}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
     </div>
   );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return <div className="rounded-xl bg-secondary/40 px-3 py-2"><p className="text-xs text-muted-foreground">{label}</p><p className="font-medium">{value}</p></div>;
 }
 
 function formatConnectionStatus(status: PinterestConnectionStatus) {

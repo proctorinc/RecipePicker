@@ -13,6 +13,7 @@ import {
 import type { FeedPinsPage } from "@/types/view-models";
 
 const SEARCH_DEBOUNCE_MS = 350;
+const LAST_HOME_FEED_QUERY_KEY = "food-picker:last-home-feed-query";
 
 type HomeFeedShellProps = {
   initialPage: FeedPinsPage;
@@ -26,13 +27,59 @@ export function HomeFeedShell({
   tagId,
 }: HomeFeedShellProps) {
   const normalizedInitialQuery = initialQuery.trim();
-  const cacheKey = getFeedCacheKey(normalizedInitialQuery, tagId);
+  const savedQuery = getSavedHomeFeedQuery(tagId);
+  const restoredQuery = normalizedInitialQuery || savedQuery;
+  const cacheKey = getFeedCacheKey(restoredQuery, tagId);
   const cachedFeed = getCachedFeed(cacheKey);
-  const [inputValue, setInputValue] = useState(initialQuery);
-  const [activeQuery, setActiveQuery] = useState(normalizedInitialQuery);
+  const [inputValue, setInputValue] = useState(restoredQuery);
+  const [activeQuery, setActiveQuery] = useState(restoredQuery);
   const [page, setPage] = useState(() => cachedFeed?.page ?? initialPage);
-  const [isSearching, setIsSearching] = useState(false);
+  const [isSearching, setIsSearching] = useState(
+    Boolean(savedQuery && !normalizedInitialQuery && !cachedFeed),
+  );
   const searchAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (tagId) {
+      return;
+    }
+
+    if (!activeQuery) {
+      window.localStorage.removeItem(LAST_HOME_FEED_QUERY_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(LAST_HOME_FEED_QUERY_KEY, activeQuery);
+  }, [activeQuery, tagId]);
+
+  useEffect(() => {
+    if (tagId || !savedQuery || normalizedInitialQuery || cachedFeed) {
+      return;
+    }
+
+    const controller = new AbortController();
+    syncUrl(savedQuery);
+
+    void fetchSearchPage(savedQuery, controller.signal)
+      .then((nextPage) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setPage(nextPage);
+        setIsSearching(false);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setIsSearching(false);
+        console.error("Unable to restore feed search.", error);
+      });
+
+    return () => controller.abort();
+  }, [cachedFeed, normalizedInitialQuery, savedQuery, tagId]);
 
   useEffect(() => {
     cacheFeedPage(getFeedCacheKey(activeQuery, tagId), page);
@@ -158,6 +205,14 @@ export function HomeFeedShell({
     setInputValue(nextValue);
     setIsSearching(nextValue.trim() !== activeQuery);
   }
+}
+
+function getSavedHomeFeedQuery(tagId?: string) {
+  if (tagId || typeof window === "undefined") {
+    return "";
+  }
+
+  return window.localStorage.getItem(LAST_HOME_FEED_QUERY_KEY)?.trim() ?? "";
 }
 
 function syncUrl(query: string) {

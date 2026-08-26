@@ -219,12 +219,12 @@ export async function runClaimedPinterestAutoSync(args: {
 
     return syncResult;
   } catch (error) {
-    await completePinterestSyncRun({ syncRun, status: "error", error });
     await updatePinterestConnectionSyncStatus({
       householdId: args.householdId,
       status: "error",
       errorMessage: error instanceof Error ? error.message : String(error),
     });
+    await completePinterestSyncRun({ syncRun, status: "error", error });
     logError("pinterest.sync.auto.failed", error, {
       target: {
         householdId: args.householdId,
@@ -287,12 +287,12 @@ export async function runManualBoardSync(args: {
 
     return result;
   } catch (error) {
-    await completePinterestSyncRun({ syncRun, status: "error", error });
     await updatePinterestConnectionSyncStatus({
       householdId: args.householdId,
       status: "error",
       errorMessage: error instanceof Error ? error.message : String(error),
     });
+    await completePinterestSyncRun({ syncRun, status: "error", error });
     logError("pinterest.sync.manual_board.failed", error, {
       target: {
         householdId: args.householdId,
@@ -366,12 +366,12 @@ export async function runManualSyncAllBoards(args: {
 
     return result;
   } catch (error) {
-    await completePinterestSyncRun({ syncRun, status: "error", error });
     await updatePinterestConnectionSyncStatus({
       householdId: args.householdId,
       status: "error",
       errorMessage: error instanceof Error ? error.message : String(error),
     });
+    await completePinterestSyncRun({ syncRun, status: "error", error });
     logError("pinterest.sync.manual_all.failed", error, {
       target: {
         householdId: args.householdId,

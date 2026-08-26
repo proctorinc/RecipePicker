@@ -931,6 +931,7 @@ export async function getPinterestSyncHistory(limit = 25) {
   const context = await requireHouseholdContext();
   const { db, sqlite } = await openDatabase();
   try {
+    await reconcileIncompletePinterestSyncRuns(db, context.householdId);
     const runs = await db.query.pinterestSyncRuns.findMany({
       where: (table, { eq }) => eq(table.householdId, context.householdId),
       orderBy: (table, { desc: orderDesc }) => [orderDesc(table.startedAt)],
@@ -946,6 +947,7 @@ export async function getPinterestSyncRunDetail(syncRunId: string) {
   const context = await requireHouseholdContext();
   const { db, sqlite } = await openDatabase();
   try {
+    await reconcileIncompletePinterestSyncRuns(db, context.householdId);
     const run = await db.query.pinterestSyncRuns.findFirst({
       where: (table, { and, eq }) => and(
         eq(table.syncRunId, syncRunId),
@@ -981,6 +983,37 @@ export async function getPinterestSyncRunDetail(syncRunId: string) {
   } finally {
     await sqlite.close();
   }
+}
+
+async function reconcileIncompletePinterestSyncRuns(
+  db: DatabaseHandle,
+  householdId: string,
+) {
+  const connection = await db.query.pinterestAccounts.findFirst({
+    where: (table, { and, eq }) => and(
+      eq(table.householdId, householdId),
+      eq(table.provider, "pinterest"),
+    ),
+    columns: {
+      lastSyncAt: true,
+      lastSyncStatus: true,
+      lastSyncError: true,
+    },
+  });
+  const syncStatus = connection?.lastSyncStatus;
+  if (!connection?.lastSyncAt || (syncStatus !== "success" && syncStatus !== "error")) return;
+
+  await db.update(pinterestSyncRuns).set({
+    status: syncStatus,
+    completedAt: connection.lastSyncAt,
+    message: syncStatus === "error"
+      ? connection.lastSyncError ?? "Pinterest sync did not complete."
+      : null,
+  }).where(and(
+    eq(pinterestSyncRuns.householdId, householdId),
+    eq(pinterestSyncRuns.status, "running"),
+    lt(pinterestSyncRuns.startedAt, connection.lastSyncAt),
+  )).run();
 }
 
 async function withPinterestSyncChangeCounts<TRun extends {

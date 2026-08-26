@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { cancelRecipeParseJobAction, resumeRecipeParseJobAction } from "@/lib/actions/operations";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -62,6 +63,7 @@ export function RecipeOpsTable({
 }) {
   const [boardFilter, setBoardFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [titleFilter, setTitleFilter] = useState("");
   const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
   const [state, formAction] = useActionState(rerunRecipesAction, initialState);
   const [cancelState, cancelFormAction] = useActionState(cancelRecipeParseJobAction, initialState);
@@ -70,7 +72,13 @@ export function RecipeOpsTable({
   const [isRefreshing, startRefresh] = useTransition();
 
   const filteredItems = useMemo(() => {
+    const normalizedTitleFilter = titleFilter.trim().toLocaleLowerCase();
+
     return items.filter((item) => {
+      if (normalizedTitleFilter && !item.title.toLocaleLowerCase().includes(normalizedTitleFilter)) {
+        return false;
+      }
+
       if (boardFilter !== "all" && item.boardId !== boardFilter) {
         return false;
       }
@@ -89,7 +97,7 @@ export function RecipeOpsTable({
 
       return true;
     });
-  }, [boardFilter, items, statusFilter]);
+  }, [boardFilter, items, statusFilter, titleFilter]);
 
   const filteredIds = filteredItems.map((item) => item.recipeId);
   const allFilteredSelected =
@@ -166,7 +174,17 @@ export function RecipeOpsTable({
       />
       <div className="flex flex-col gap-3 rounded-[24px] border border-border/60 bg-secondary/20 p-3 sm:gap-4 sm:p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <label className="space-y-2">
+              <span className="sr-only">Filter by recipe title</span>
+              <Input
+                type="search"
+                value={titleFilter}
+                onChange={(event) => setTitleFilter(event.target.value)}
+                placeholder="Search recipe titles"
+                className="h-11 rounded-full bg-background/90 px-4 shadow-sm"
+              />
+            </label>
             <label className="space-y-2">
               <select
                 value={boardFilter}

@@ -63,7 +63,18 @@ export default async function MembersPage() {
           <CardDescription>Roles are intentionally simple for v1: owners manage sharing and integrations, members use the household.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
+          <div className="space-y-3 md:hidden">
+            {members.map((member) => (
+              <div key={member.clerkUserId} className="rounded-2xl border border-border/60 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2"><span className="font-medium">{member.name}</span>{member.isCurrentUser ? <Badge variant="outline">You</Badge> : null}</div>
+                  <Badge variant={member.role === "owner" ? "success" : "secondary"}>{member.role}</Badge>
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">Joined {formatDate(member.joinedAt)}</p>
+              </div>
+            ))}
+          </div>
+          <div className="hidden md:block"><Table>
             <TableHeader>
               <TableRow>
                 <TableHead>User</TableHead>
@@ -88,6 +99,7 @@ export default async function MembersPage() {
               ))}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

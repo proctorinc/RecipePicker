@@ -28,7 +28,11 @@ export default async function PinterestSyncHistoryPage() {
           <CardDescription>Recent imports and reconciliation changes for this household.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
+          <div className="space-y-3 md:hidden">
+            {runs.length === 0 ? <p className="rounded-2xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">No syncs have run yet.</p> : null}
+            {runs.map((run) => <div key={run.syncRunId} className="rounded-2xl border border-border/60 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><Badge variant={run.status === "success" ? "success" : run.status === "error" ? "destructive" : "secondary"}>{run.status === "success" ? "Succeeded" : run.status === "error" ? "Failed" : "Running"}</Badge><AppTransitionLink href={`/settings/pinterest/syncs/${run.syncRunId}`} className="text-sm text-primary underline-offset-4 hover:underline">Details</AppTransitionLink></div><p className="mt-2 text-sm"><LocalDateTime value={run.startedAt} /> · {run.trigger === "auto_feed_load" ? "Automatic" : run.trigger === "force" ? "Force resync" : "Manual"}</p><p className="mt-2 text-sm text-muted-foreground">{run.createdRecipeCount} added · {run.removedRecipeCount} removed · {run.restoredRecipeCount} restored</p></div>)}
+          </div>
+          <div className="hidden md:block"><Table>
             <TableHeader><TableRow><TableHead>Started</TableHead><TableHead>Result</TableHead><TableHead>Trigger</TableHead><TableHead>Changes</TableHead><TableHead /></TableRow></TableHeader>
             <TableBody>
               {runs.length === 0 ? <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">No syncs have run yet.</TableCell></TableRow> : null}
@@ -43,6 +47,7 @@ export default async function PinterestSyncHistoryPage() {
               ))}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -195,24 +195,11 @@ export function PickerPageSkeleton() {
   );
 }
 
-export function SettingsNavSkeleton() {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {Array.from({ length: 5 }, (_unused, index) => (
-        <Skeleton key={index} className="h-10 w-28 rounded-full" />
-      ))}
-    </div>
-  );
-}
-
 export function SettingsPageSkeleton() {
   return (
-    <div className="space-y-8">
-      <SettingsNavSkeleton />
-      <div className="space-y-6">
-        <Skeleton className="h-52 rounded-[32px]" />
-        <Skeleton className="h-72 rounded-[32px]" />
-      </div>
+    <div className="space-y-6">
+      <Skeleton className="h-52 rounded-[32px]" />
+      <Skeleton className="h-72 rounded-[32px]" />
     </div>
   );
 }
