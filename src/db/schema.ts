@@ -107,6 +107,42 @@ export const pinterestAccounts = sqliteTable(
   }),
 );
 
+export const pinterestSyncRuns = sqliteTable(
+  "pinterest_sync_runs",
+  {
+    syncRunId: generatedId("sync_run_id"),
+    householdId: text("household_id").notNull().references(() => households.householdId),
+    trigger: text("trigger").notNull(),
+    status: text("status").notNull(),
+    startedAt: text("started_at").notNull(),
+    completedAt: text("completed_at"),
+    boardCount: integer("board_count").notNull().default(0),
+    pinCount: integer("pin_count").notNull().default(0),
+    createdRecipeCount: integer("created_recipe_count").notNull().default(0),
+    removedRecipeCount: integer("removed_recipe_count").notNull().default(0),
+    restoredRecipeCount: integer("restored_recipe_count").notNull().default(0),
+    message: text("message"),
+  },
+  (table) => ({
+    householdStartedIdx: index("idx_pinterest_sync_runs_household_started").on(table.householdId, table.startedAt),
+  }),
+);
+
+export const pinterestSyncRecipeChanges = sqliteTable(
+  "pinterest_sync_recipe_changes",
+  {
+    syncRecipeChangeId: generatedId("sync_recipe_change_id"),
+    syncRunId: text("sync_run_id").notNull().references(() => pinterestSyncRuns.syncRunId),
+    recipeId: text("recipe_id").notNull().references(() => householdRecipes.recipeId),
+    changeType: text("change_type").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => ({
+    runIdx: index("idx_pinterest_sync_recipe_changes_run").on(table.syncRunId, table.createdAt),
+    runRecipeUniqueIdx: uniqueIndex("idx_pinterest_sync_recipe_changes_run_recipe_unique").on(table.syncRunId, table.recipeId),
+  }),
+);
+
 export const householdAiConnections = sqliteTable(
   "household_ai_connections",
   {
@@ -390,6 +426,7 @@ export const householdRecipes = sqliteTable(
     titleOverridden: integer("title_overridden", { mode: "boolean" }).notNull().default(false),
     descriptionOverridden: integer("description_overridden", { mode: "boolean" }).notNull().default(false),
     imageUrlOverridden: integer("image_url_overridden", { mode: "boolean" }).notNull().default(false),
+    removedAt: text("removed_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
@@ -398,6 +435,7 @@ export const householdRecipes = sqliteTable(
     householdIdx: index("idx_household_recipes_household_id").on(table.householdId),
     householdUpdatedIdx: index("idx_household_recipes_household_updated").on(table.householdId, table.updatedAt),
     householdFlaggedUpdatedIdx: index("idx_household_recipes_household_flagged_updated").on(table.householdId, table.isFlagged, table.updatedAt),
+    householdRemovedIdx: index("idx_household_recipes_household_removed").on(table.householdId, table.removedAt),
   }),
 );
 

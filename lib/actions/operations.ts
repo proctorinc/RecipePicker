@@ -340,6 +340,7 @@ export const toggleRecipeFlagAction = withActionLogging(
 
         const latestExtraction = recipe.pin.recipeExtractions[0];
         const status = derivePinStatus({
+          removedAt: recipe.removedAt,
           hasRecipe: Boolean(recipe.recipeInstructions),
           latestExtractionStatus: latestExtraction?.status,
           latestExtractionLowConfidence: latestExtraction?.lowConfidence,

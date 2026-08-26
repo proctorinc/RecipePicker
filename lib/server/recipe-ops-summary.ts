@@ -79,6 +79,13 @@ export function summarizeRecipeOps(input: RecipeOpsSummaryInput): RecipeOpsSumma
         recommendedNextStep: "Review the preview and source context to confirm whether this should stay marked as not a recipe.",
         latestAttentionReason: actionableIssues[0] ?? "The parser did not find recipe content on this page.",
       };
+    case "removed":
+      return {
+        plainLanguageStatus: "This recipe is no longer present on the selected Pinterest boards.",
+        actionableIssues: [],
+        recommendedNextStep: "Restore the Pin in Pinterest, then run a force resync to make this recipe active again.",
+        latestAttentionReason: null,
+      };
     case "not_extracted":
     default:
       return {

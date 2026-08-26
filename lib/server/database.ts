@@ -1,5 +1,5 @@
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { migrate as migrateLibsql } from "drizzle-orm/libsql/migrator";
+import { readMigrationFiles } from "drizzle-orm/migrator";
+import { sql } from "drizzle-orm";
 
 import { logError, logInfo, maybeWithSqliteTarget } from "@/lib/server/logger";
 import { createDatabase } from "@/lib/server/db";
@@ -36,16 +36,7 @@ export async function openDatabase(sqlitePath?: string) {
     });
 
     try {
-      if (handle.driver === "sqlite") {
-        migrate(handle.db as DatabaseClient & Parameters<typeof migrate>[0], {
-          migrationsFolder: "drizzle",
-        });
-      } else {
-        await migrateLibsql(
-          handle.db as DatabaseClient & Parameters<typeof migrateLibsql>[0],
-          { migrationsFolder: "drizzle" },
-        );
-      }
+      await migrateByHash(handle.db, handle.driver);
 
       migratedTargets.add(`${handle.driver}:${handle.targetLabel}`);
       logInfo("db.runtime_migration.completed", {
@@ -68,4 +59,35 @@ export async function openDatabase(sqlitePath?: string) {
   }
 
   return handle;
+}
+
+async function migrateByHash(db: DatabaseClient, driver: "sqlite" | "turso") {
+  const migrations = readMigrationFiles({ migrationsFolder: "drizzle" });
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS __drizzle_migrations (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at numeric
+    )
+  `);
+  const applied = await db.all<{ hash: string }>(sql`SELECT hash FROM __drizzle_migrations`);
+  const appliedHashes = new Set(applied.map((migration) => migration.hash));
+
+  for (const migration of migrations) {
+    if (appliedHashes.has(migration.hash)) continue;
+    if (driver === "sqlite") {
+      (db as DatabaseClient & { transaction: (fn: (tx: DatabaseClient) => void) => void }).transaction((tx) => {
+        for (const statement of migration.sql) tx.run(sql.raw(statement));
+        tx.run(sql`INSERT INTO __drizzle_migrations (hash, created_at) VALUES (${migration.hash}, ${migration.folderMillis})`);
+      });
+    } else {
+      const tursoDb = db as {
+        transaction: (fn: (tx: { run: (query: ReturnType<typeof sql.raw> | ReturnType<typeof sql>) => Promise<unknown> }) => Promise<void>) => Promise<void>;
+      };
+      await tursoDb.transaction(async (tx) => {
+        for (const statement of migration.sql) await tx.run(sql.raw(statement));
+        await tx.run(sql`INSERT INTO __drizzle_migrations (hash, created_at) VALUES (${migration.hash}, ${migration.folderMillis})`);
+      });
+    }
+  }
 }

@@ -39,11 +39,20 @@ describe("derivePinStatus", () => {
       }),
     ).toBe("not_extracted");
   });
+
+  it("marks a reconciled Pinterest deletion as removed", () => {
+    expect(derivePinStatus({
+      removedAt: "2026-08-25T00:00:00.000Z",
+      hasRecipe: true,
+      latestExtractionStatus: "recipe_extracted",
+    })).toBe("removed");
+  });
 });
 
 describe("formatStatusLabel", () => {
   it("formats readable labels", () => {
     expect(formatStatusLabel("recipe_ready")).toBe("Ready");
     expect(formatStatusLabel("not_recipe")).toBe("Not a recipe");
+    expect(formatStatusLabel("removed")).toBe("Removed");
   });
 });

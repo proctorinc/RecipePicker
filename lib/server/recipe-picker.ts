@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -688,7 +688,10 @@ async function getRecipePickerRows(
 ) {
   return await db.query.householdRecipes
     .findMany({
-      where: (table, { eq }) => eq(table.householdId, householdId),
+      where: (table, { and, eq, isNull }) => and(
+        eq(table.householdId, householdId),
+        isNull(table.removedAt),
+      ),
       with: {
         pin: {
           columns: {

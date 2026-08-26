@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table";
 import {
   setBoardSyncEnabledAction,
+  forcePinterestResyncAction,
   syncAllBoardsAction,
   syncBoardAction,
 } from "@/lib/actions/board-actions";
@@ -36,7 +37,7 @@ import {
   type PinterestConnectionStatus,
   getPinterestConnectionSummary,
 } from "@/lib/server/pinterest";
-import { getBoardSyncOptions } from "@/lib/server/queries";
+import { getBoardSyncOptions, getPinterestSyncHistory } from "@/lib/server/queries";
 import {
   formatPinterestAutoSyncFrequency,
   getNextPinterestAutoSyncEligibleAt,
@@ -70,10 +71,12 @@ export default async function PinterestSettingsPage({
 
   const { household, access: appAccess } = integrationAccess;
 
-  const [boards, connection] = await Promise.all([
+  const [boards, connection, syncRuns] = await Promise.all([
     getBoardSyncOptions(),
     getPinterestConnectionSummary(household.householdId),
+    getPinterestSyncHistory(1),
   ]);
+  const latestSync = syncRuns[0] ?? null;
   const syncedBoards = boards.filter((board) => board.syncEnabled);
   const syncFrequency = formatPinterestAutoSyncFrequency(
     appAccess.subscriptionTier,
@@ -154,6 +157,22 @@ export default async function PinterestSettingsPage({
                 {connection.lastSyncError}
               </p>
             ) : null}
+            <div className="rounded-[18px] border border-border/60 px-4 py-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium">Latest sync</p>
+                <AppTransitionLink href="/settings/pinterest/syncs" className="text-primary underline-offset-4 hover:underline">
+                  View all syncs
+                </AppTransitionLink>
+              </div>
+              {latestSync ? (
+                <p className="mt-1 text-muted-foreground">
+                  {latestSync.status === "success" ? "Succeeded" : "Failed"} {formatRelativeTimeShort(latestSync.startedAt)} · {latestSync.createdRecipeCount} added, {latestSync.removedRecipeCount} removed, {latestSync.restoredRecipeCount} restored.
+                  {latestSync.message ? ` ${latestSync.message}` : ""}
+                </p>
+              ) : (
+                <p className="mt-1 text-muted-foreground">No recorded syncs yet.</p>
+              )}
+            </div>
             {oauthError ? (
               <p className="rounded-[18px] bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {oauthError}
@@ -200,6 +219,9 @@ export default async function PinterestSettingsPage({
         <CardContent className="space-y-6">
           {canManagePinterest ? (
             <div className="flex flex-wrap gap-3">
+              <ActionForm action={forcePinterestResyncAction} buttonVariant="secondary">
+                Force resync
+              </ActionForm>
               <ActionForm action={syncAllBoardsAction} buttonVariant="default">
                 Sync all boards
               </ActionForm>

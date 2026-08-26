@@ -191,7 +191,7 @@ describe("syncBoard", () => {
     });
   });
 
-  it("updates folder membership and section name when a pin moves sections", async () => {
+  it("keeps existing Pinterest metadata unchanged when a pin moves sections", async () => {
     await withTestDatabase(async ({ sqlitePath }) => {
       const now = "2026-06-17T00:00:00.000Z";
       const householdId = "household-moves";
@@ -275,10 +275,58 @@ describe("syncBoard", () => {
         const boardFolder = folders.find((folder) => folder.sourceType === "board");
         const sectionFolder = folders.find((folder) => folder.sourceType === "section");
 
-        expect(boardFolder?.name).toBe("Dinner ideas");
-        expect(sectionFolder?.name).toBe("Top picks");
+        expect(boardFolder?.name).toBe("Dinner");
+        expect(sectionFolder?.name).toBe("Favorites");
         expect(memberships).toHaveLength(1);
-        expect(memberships[0]?.folder.folderId).toBe(sectionFolder?.folderId);
+        expect(memberships[0]?.folder.folderId).toBe(boardFolder?.folderId);
+      } finally {
+        await reopened.sqlite.close();
+      }
+    });
+  });
+
+  it("marks missing pins removed and restores them when they reappear", async () => {
+    await withTestDatabase(async ({ sqlitePath }) => {
+      const now = "2026-06-17T00:00:00.000Z";
+      const householdId = "household-removals";
+      mockGetValidPinterestAccessToken.mockResolvedValue("token");
+      const { db, sqlite } = await openDatabase(sqlitePath);
+      try {
+        await db.insert(households).values({
+          householdId,
+          name: "Removal Kitchen",
+          createdAt: now,
+          updatedAt: now,
+        }).run();
+      } finally {
+        await sqlite.close();
+      }
+
+      mockFetchAllPins.mockResolvedValueOnce([{ id: "pin-removed", title: "Original title" }]);
+      await syncBoard("board-removals", { householdId, sqlitePath, boardName: "Saved" });
+      mockFetchAllPins.mockResolvedValueOnce([]);
+      await syncBoard("board-removals", { householdId, sqlitePath, boardName: "Renamed remotely" });
+
+      let reopened = await openDatabase(sqlitePath);
+      try {
+        const recipe = await reopened.db.query.householdRecipes.findFirst({
+          where: (table, { eq }) => eq(table.householdId, householdId),
+        });
+        expect(recipe?.removedAt).not.toBeNull();
+        expect(recipe?.title).toBe("Original title");
+      } finally {
+        await reopened.sqlite.close();
+      }
+
+      mockFetchAllPins.mockResolvedValueOnce([{ id: "pin-removed", title: "Changed remotely" }]);
+      await syncBoard("board-removals", { householdId, sqlitePath, boardName: "Renamed remotely" });
+      reopened = await openDatabase(sqlitePath);
+      try {
+        const recipe = await reopened.db.query.householdRecipes.findFirst({
+          where: (table, { eq }) => eq(table.householdId, householdId),
+        });
+        expect(recipe?.removedAt).toBeNull();
+        expect(recipe?.title).toBe("Original title");
       } finally {
         await reopened.sqlite.close();
       }

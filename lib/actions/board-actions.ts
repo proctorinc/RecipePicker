@@ -10,6 +10,7 @@ import { runBackgroundJob, withActionLogging } from "@/lib/server/logger";
 import {
   runManualBoardSync,
   runManualSyncAllBoards,
+  runForcePinterestResync,
 } from "@/lib/server/sync";
 import {
   revalidateAll,
@@ -78,6 +79,25 @@ export const syncAllBoardsAction = withActionLogging(
       };
     } catch (error) {
       return toErrorState(error, "Unable to sync all boards.");
+    }
+  },
+);
+
+export const forcePinterestResyncAction = withActionLogging(
+  "action.force_pinterest_resync",
+  async (_: ActionState, _formData: FormData): Promise<ActionState> => {
+    try {
+      const context = await requireHouseholdRole("owner");
+      const result = await runForcePinterestResync({ householdId: context.householdId });
+      revalidateAll(recipeScopedPaths());
+      return {
+        status: "success",
+        message: result.boards.length > 0
+          ? `Force resynced ${result.boards.length} selected boards.`
+          : "No boards are selected for sync yet.",
+      };
+    } catch (error) {
+      return toErrorState(error, "Unable to force Pinterest resync.");
     }
   },
 );

@@ -325,13 +325,7 @@ export async function ensureBoardSubscriptions(householdId: string, boards: Pint
           createdAt: now,
           updatedAt: now,
         })
-        .onConflictDoUpdate({
-          target: [boardSyncSubscriptions.householdId, boardSyncSubscriptions.pinterestBoardId],
-          set: {
-            boardName: board.name ?? null,
-            updatedAt: now,
-          },
-        })
+        .onConflictDoNothing()
         .run();
     }
   } finally {

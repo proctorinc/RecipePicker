@@ -1,15 +1,31 @@
 "use client";
 
-import { createContext, useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useActionState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { ArrowLeft, Check, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { saveRecipeMetadataAction, saveRecipeTagsAction } from "@/lib/actions/operations";
+import {
+  saveRecipeMetadataAction,
+  saveRecipeTagsAction,
+} from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
 import { cn } from "@/lib/utils";
 
@@ -58,11 +74,16 @@ export function RecipeMetadataEditor({
   const [draftTitle, setDraftTitle] = useState(title);
   const [draftDescription, setDraftDescription] = useState(description ?? "");
   const [displayTitle, setDisplayTitle] = useState(title);
-  const [displayDescription, setDisplayDescription] = useState(description ?? "");
+  const [displayDescription, setDisplayDescription] = useState(
+    description ?? "",
+  );
   const [hasContentChanges, setHasContentChanges] = useState(false);
   const [contentResetVersion, setContentResetVersion] = useState(0);
   const [saveChoiceOpen, setSaveChoiceOpen] = useState(false);
-  const [state, formAction, pending] = useActionState(saveRecipeMetadataAction, initialActionState);
+  const [state, formAction, pending] = useActionState(
+    saveRecipeMetadataAction,
+    initialActionState,
+  );
   const formId = `recipe-metadata-${recipeId}`;
 
   useEffect(() => {
@@ -104,8 +125,9 @@ export function RecipeMetadataEditor({
     }
   }, [draftDescription, draftTitle, isEditing]);
 
-  const hasMetadataChanges = draftTitle.trim() !== displayTitle.trim()
-    || draftDescription.trim() !== displayDescription.trim();
+  const hasMetadataChanges =
+    draftTitle.trim() !== displayTitle.trim() ||
+    draftDescription.trim() !== displayDescription.trim();
   const hasChanges = hasMetadataChanges || hasContentChanges;
 
   function save(versionMode: "update" | "new") {
@@ -127,7 +149,9 @@ export function RecipeMetadataEditor({
   }
 
   return (
-    <RecipeEditingContext.Provider value={{ isEditing, formId, contentResetVersion, setHasContentChanges }}>
+    <RecipeEditingContext.Provider
+      value={{ isEditing, formId, contentResetVersion, setHasContentChanges }}
+    >
       <div className="contents">
         <form
           id={formId}
@@ -187,7 +211,10 @@ export function RecipeMetadataEditor({
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Save recipe changes</DialogTitle>
-              <DialogDescription>Choose whether to save these changes to the current version or create a new version with them.</DialogDescription>
+              <DialogDescription>
+                Choose whether to save these changes to the current version or
+                create a new version with them.
+              </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col gap-6">
               <button
@@ -198,7 +225,13 @@ export function RecipeMetadataEditor({
               >
                 Create a new version
               </button>
-              <Button type="button" disabled={pending} onClick={() => save("update")}>Save current version</Button>
+              <Button
+                type="button"
+                disabled={pending}
+                onClick={() => save("update")}
+              >
+                Save current version
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -277,12 +310,18 @@ function RecipeTags({
   const [input, setInput] = useState("");
   const [isAdding, setIsAdding] = useState(false);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [state, saveTags, pending] = useActionState(saveRecipeTagsAction, initialActionState);
+  const [state, saveTags, pending] = useActionState(
+    saveRecipeTagsAction,
+    initialActionState,
+  );
   const normalizedTags = new Set(tags.map((tag) => tag.toLocaleLowerCase()));
-  const suggestions = availableTags.filter((tag) =>
-    !normalizedTags.has(tag.name.toLocaleLowerCase())
-    && tag.name.toLocaleLowerCase().includes(input.trim().toLocaleLowerCase()),
-  ).slice(0, 6);
+  const suggestions = availableTags
+    .filter(
+      (tag) =>
+        !normalizedTags.has(tag.name.toLocaleLowerCase()) &&
+        tag.name.toLocaleLowerCase().includes(input.trim().toLocaleLowerCase()),
+    )
+    .slice(0, 6);
 
   useEffect(() => {
     setTags(initialTags.map((tag) => tag.name));
@@ -311,7 +350,9 @@ function RecipeTags({
       setInput("");
       return;
     }
-    const existing = availableTags.find((tag) => tag.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    const existing = availableTags.find(
+      (tag) => tag.name.toLocaleLowerCase() === name.toLocaleLowerCase(),
+    );
     save([...tags, existing?.name ?? name]);
     setInput("");
     setIsAdding(false);
@@ -320,10 +361,34 @@ function RecipeTags({
   return (
     <section aria-label="Recipe tags" className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        {tags.map((tag) => <button key={tag} type="button" disabled={pending} onClick={() => selectedTag === tag ? save(tags.filter((value) => value !== tag)) : setSelectedTag(tag)} className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium transition hover:bg-secondary" aria-label={selectedTag === tag ? `Remove ${tag} tag` : `Select ${tag} tag`}>
-          {tag}{selectedTag === tag ? <X className="size-3" /> : null}
-        </button>)}
-        <button type="button" disabled={pending} onClick={() => setIsAdding((open) => !open)} className="inline-flex size-7 items-center justify-center rounded-full border border-dashed border-border text-muted-foreground transition hover:bg-secondary hover:text-foreground" aria-label="Add tag"><Plus className="size-4" /></button>
+        {tags.map((tag) => (
+          <button
+            key={tag}
+            type="button"
+            disabled={pending}
+            onClick={() =>
+              selectedTag === tag
+                ? save(tags.filter((value) => value !== tag))
+                : setSelectedTag(tag)
+            }
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium transition hover:bg-secondary"
+            aria-label={
+              selectedTag === tag ? `Remove ${tag} tag` : `Select ${tag} tag`
+            }
+          >
+            {tag}
+            {selectedTag === tag ? <X className="size-3" /> : null}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => setIsAdding((open) => !open)}
+          className="inline-flex size-7 items-center justify-center rounded-full border border-dashed border-border text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+          aria-label="Add tag"
+        >
+          <Plus className="size-4" />
+        </button>
       </div>
       {isAdding ? (
         <div className="relative flex max-w-md gap-2">
@@ -342,11 +407,29 @@ function RecipeTags({
             />
             {input.trim() && suggestions.length > 0 ? (
               <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-lg">
-                {suggestions.map((tag) => <button key={tag.tagId} type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-secondary" onMouseDown={(event) => event.preventDefault()} onClick={() => addTag(tag.name)}>{tag.name}</button>)}
+                {suggestions.map((tag) => (
+                  <button
+                    key={tag.tagId}
+                    type="button"
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-secondary"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => addTag(tag.name)}
+                  >
+                    {tag.name}
+                  </button>
+                ))}
               </div>
             ) : null}
           </div>
-          <Button type="button" size="icon" disabled={pending || !input.trim()} onClick={() => addTag(input)} aria-label="Add tag"><Check className="size-4" /></Button>
+          <Button
+            type="button"
+            size="icon"
+            disabled={pending || !input.trim()}
+            onClick={() => addTag(input)}
+            aria-label="Add tag"
+          >
+            <Check className="size-4" />
+          </Button>
         </div>
       ) : null}
     </section>
@@ -371,8 +454,19 @@ function EditSubmitButton({
   if (isEditing) {
     return (
       <div className="flex items-center gap-2">
-        <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>Cancel</Button>
-        <Button type="button" disabled={pending || !hasChanges} onClick={onSave}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pending}
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          disabled={pending || !hasChanges}
+          onClick={onSave}
+        >
           {pending ? "Saving..." : "Save"}
         </Button>
       </div>

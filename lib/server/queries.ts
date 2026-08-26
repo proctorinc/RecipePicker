@@ -1,5 +1,5 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 
 import { getCurrentUserAccess, resolveFeedCardHref } from "@/lib/server/access";
 import {
@@ -21,6 +21,8 @@ import {
   householdRecipeInstructions,
   householdRecipeReviews,
   householdRecipeVersions,
+  pinterestSyncRecipeChanges,
+  pinterestSyncRuns,
   householdShoppingCarts,
   householdShoppingCartItemStates,
   pinterestAccounts,
@@ -219,10 +221,11 @@ export async function getRecipeDetail(
   try {
     const row = await db.query.householdRecipes
       .findFirst({
-        where: (table, { and, eq }) =>
+        where: (table, { and, eq, isNull }) =>
           and(
             eq(table.recipeId, recipeId),
             eq(table.householdId, context.householdId),
+            isNull(table.removedAt),
           ),
         with: {
           pin: {
@@ -312,6 +315,7 @@ export async function getRecipeDetail(
       row.pin.rawJson,
     );
     const status = derivePinStatus({
+      removedAt: row.removedAt,
       hasRecipe: Boolean(row.recipeInstructions),
       latestExtractionStatus: latestExtraction?.status,
       latestExtractionLowConfidence: latestExtraction?.lowConfidence,
@@ -419,7 +423,7 @@ export async function getPublicRecipeDetail(
     const selected = versions.find((version) => version.versionNumber === versionNumber);
     if (!selected && versions.length === 0 && versionNumber === 1) {
       const row = await db.query.householdRecipes.findFirst({
-        where: (table, { eq }) => eq(table.recipeId, recipeId),
+        where: (table, { and, eq, isNull }) => and(eq(table.recipeId, recipeId), isNull(table.removedAt)),
         with: { pin: true, recipeInstructions: { with: { ingredients: { orderBy: (table, { asc }) => [asc(table.position)], with: { canonicalIngredient: true } }, steps: { orderBy: (table, { asc }) => [asc(table.position)] } } } },
       });
       if (!row) return null;
@@ -460,7 +464,7 @@ export async function getLatestPublicRecipeVersion(recipeId: string): Promise<nu
     });
     if (version) return version.versionNumber;
     const recipe = await db.query.householdRecipes.findFirst({
-      where: (table, { eq }) => eq(table.recipeId, recipeId),
+      where: (table, { and, eq, isNull }) => and(eq(table.recipeId, recipeId), isNull(table.removedAt)),
       columns: { recipeId: true },
     });
     return recipe ? 1 : null;
@@ -491,10 +495,11 @@ export async function hasCurrentUserRecipeAccess(recipeId: string): Promise<bool
     }
 
     const recipe = await db.query.householdRecipes.findFirst({
-      where: (table, { and, eq }) =>
+      where: (table, { and, eq, isNull }) =>
         and(
           eq(table.recipeId, recipeId),
           eq(table.householdId, membership.householdId),
+          isNull(table.removedAt),
         ),
       columns: { recipeId: true },
     });
@@ -648,7 +653,10 @@ export async function getRecipeHistoryPage(
         },
       }),
       db.query.householdRecipes.findMany({
-        where: (table, { eq }) => eq(table.householdId, context.householdId),
+        where: (table, { and, eq, isNull }) => and(
+          eq(table.householdId, context.householdId),
+          isNull(table.removedAt),
+        ),
         with: {
           pin: true,
           recipeInstructions: true,
@@ -867,6 +875,7 @@ export async function getRecipeOpsList(
           row.recipeInstructions?.ingredients,
         );
         const status = derivePinStatus({
+          removedAt: row.removedAt,
           hasRecipe: Boolean(row.recipeInstructions),
           latestExtractionStatus: latestExtraction?.status,
           latestExtractionLowConfidence: latestExtraction?.lowConfidence,
@@ -913,6 +922,60 @@ export async function getRecipeOpsList(
       .sort((left, right) =>
         (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""),
       );
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function getPinterestSyncHistory(limit = 25) {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+  try {
+    return await db.query.pinterestSyncRuns.findMany({
+      where: (table, { eq }) => eq(table.householdId, context.householdId),
+      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.startedAt)],
+      limit,
+    });
+  } finally {
+    await sqlite.close();
+  }
+}
+
+export async function getPinterestSyncRunDetail(syncRunId: string) {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+  try {
+    const run = await db.query.pinterestSyncRuns.findFirst({
+      where: (table, { and, eq }) => and(
+        eq(table.syncRunId, syncRunId),
+        eq(table.householdId, context.householdId),
+      ),
+    });
+    if (!run) return null;
+    const changes = await db.query.pinterestSyncRecipeChanges.findMany({
+      where: (table, { eq }) => eq(table.syncRunId, syncRunId),
+      orderBy: (table, { asc: orderAsc }) => [asc(table.createdAt)],
+    });
+    const recipeIds = changes.map((change) => change.recipeId);
+    const recipes = recipeIds.length === 0 ? [] : await db.query.householdRecipes.findMany({
+      where: (table, { and, eq, inArray }) => and(
+        eq(table.householdId, context.householdId),
+        inArray(table.recipeId, recipeIds),
+      ),
+      with: { pin: true, recipeInstructions: true },
+    });
+    const recipeById = new Map(recipes.map((recipe) => [recipe.recipeId, recipe]));
+    return {
+      run,
+      changes: changes.map((change) => {
+        const recipe = recipeById.get(change.recipeId);
+        return {
+          ...change,
+          title: recipe?.title ?? recipe?.pin.title ?? recipe?.recipeInstructions?.title ?? "Untitled recipe",
+          recipeExists: Boolean(recipe),
+        };
+      }),
+    };
   } finally {
     await sqlite.close();
   }
@@ -1000,6 +1063,7 @@ export async function getRecipeOpsDetail(
       ((row.recipeInstructions?.ingredients.length ?? 0) > 0 ||
         (row.recipeInstructions?.steps.length ?? 0) > 0);
     const status = derivePinStatus({
+      removedAt: row.removedAt,
       hasRecipe: Boolean(row.recipeInstructions),
       latestExtractionStatus: latestExtraction?.status,
       latestExtractionLowConfidence: latestExtraction?.lowConfidence,
@@ -1311,10 +1375,12 @@ export async function getBoardSummaries(): Promise<BoardSyncSummary[]> {
       const syncedBoard = syncedBoardById.get(subscription.pinterestBoardId);
       const boardRecipes = recipeRows.filter(
         (recipe) =>
+          recipe.removedAt === null &&
           recipe.pin.pinterestBoardId === subscription.pinterestBoardId,
       );
       const statuses = boardRecipes.map((recipe) =>
         derivePinStatus({
+          removedAt: recipe.removedAt,
           hasRecipe: Boolean(recipe.recipeInstructions),
           latestExtractionStatus: recipe.pin.recipeExtractions[0]?.status,
           latestExtractionLowConfidence:
@@ -1780,6 +1846,7 @@ function toFeedCard(row: RecipeGraph, subscriptionTier: "free" | "premium") {
     }),
     siteName: row.recipeInstructions?.siteName ?? null,
     status: derivePinStatus({
+      removedAt: row.removedAt,
       hasRecipe: Boolean(row.recipeInstructions),
       latestExtractionStatus: latestExtraction?.status,
       latestExtractionLowConfidence: latestExtraction?.lowConfidence,
@@ -2159,6 +2226,7 @@ async function getFeedRecipeRows(db: DatabaseHandle, householdId: string, tagId?
     .findMany({
       where: (table, { and, eq }) => and(
         eq(table.householdId, householdId),
+        isNull(table.removedAt),
         tagId
           ? sql`${table.recipeId} IN (
               SELECT "feed_tag_membership"."recipe_id"

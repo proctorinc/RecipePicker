@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { openDatabase } from "@/lib/server/database";
 import type { DatabaseClient } from "@/src/db/client";
@@ -136,7 +136,11 @@ export async function extractSingleRecipe(args: {
       databaseOwner: args.databaseOwner ?? "single_recipe",
     });
     const row = await db.query.householdRecipes.findFirst({
-      where: (table, { and, eq }) => and(eq(table.householdId, args.householdId), eq(table.recipeId, args.recipeId)),
+      where: (table, { and, eq, isNull }) => and(
+        eq(table.householdId, args.householdId),
+        eq(table.recipeId, args.recipeId),
+        isNull(table.removedAt),
+      ),
       with: {
         pin: true,
         recipeInstructions: true,
@@ -207,7 +211,10 @@ async function loadRecipeExtractionRows(
   householdId: string,
 ) {
   return db.query.householdRecipes.findMany({
-    where: (table, { eq }) => eq(table.householdId, householdId),
+    where: (table, { and, eq, isNull }) => and(
+      eq(table.householdId, householdId),
+      isNull(table.removedAt),
+    ),
     with: {
       pin: true,
       recipeInstructions: true,

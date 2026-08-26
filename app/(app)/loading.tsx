@@ -1,10 +1,5 @@
-import { FeedPageSkeleton } from "@/components/loading-skeletons";
-import { PageShell } from "@/components/page-shell";
+import { AppLoadingScreen } from "@/components/loading-skeletons";
 
 export default function AppLoading() {
-  return (
-    <PageShell>
-      <FeedPageSkeleton />
-    </PageShell>
-  );
+  return <AppLoadingScreen />;
 }

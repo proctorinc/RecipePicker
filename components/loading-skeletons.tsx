@@ -79,7 +79,7 @@ export function FeedCardSkeleton({
     <Skeleton
       style={{ animationDelay: `${animationDelayMs}ms` }}
       className={cn(
-        "w-full rounded-[28px] border border-primary/25 from-primary/80 via-primary/60 to-primary/80 shadow-[0_12px_28px_rgba(73,49,31,0.12)]",
+        "w-full rounded-[28px] border border-primary/20 bg-gradient-to-br from-primary/55 via-primary/40 to-primary/55 shadow-[0_12px_28px_rgba(73,49,31,0.08)]",
         getFeedCardAspectClassFromVariant(aspectVariant),
       )}
     />

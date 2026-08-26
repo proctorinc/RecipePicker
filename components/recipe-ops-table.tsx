@@ -48,6 +48,7 @@ const statusOptions: Array<{ value: PinStatus | "flagged"; label: string }> = [
   { value: "needs_review", label: formatStatusLabel("needs_review") },
   { value: "extraction_failed", label: formatStatusLabel("extraction_failed") },
   { value: "not_recipe", label: formatStatusLabel("not_recipe") },
+  { value: "removed", label: formatStatusLabel("removed") },
 ];
 
 export function RecipeOpsTable({
@@ -71,6 +72,10 @@ export function RecipeOpsTable({
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       if (boardFilter !== "all" && item.boardId !== boardFilter) {
+        return false;
+      }
+
+      if (statusFilter === "all" && item.status === "removed") {
         return false;
       }
 

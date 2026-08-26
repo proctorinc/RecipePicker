@@ -3,7 +3,8 @@ export type PinStatus =
   | "not_extracted"
   | "extraction_failed"
   | "needs_review"
-  | "not_recipe";
+  | "not_recipe"
+  | "removed";
 
 export type FeedPinCard = {
   recipeId: string;

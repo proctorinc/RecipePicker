@@ -1,11 +1,15 @@
 import type { PinStatus } from "@/types/view-models";
 
 export function derivePinStatus(input: {
+  removedAt?: string | null | undefined;
   hasRecipe: boolean;
   latestExtractionStatus: string | null | undefined;
   latestExtractionLowConfidence?: boolean | null | undefined;
   ingredientReviewCount?: number | null | undefined;
 }): PinStatus {
+  if (input.removedAt) {
+    return "removed";
+  }
   if (input.hasRecipe) {
     if ((input.ingredientReviewCount ?? 0) > 0 || Boolean(input.latestExtractionLowConfidence)) {
       return "needs_review";
@@ -39,6 +43,8 @@ export function formatStatusLabel(status: PinStatus) {
       return "Needs review";
     case "not_recipe":
       return "Not a recipe";
+    case "removed":
+      return "Removed";
   }
 }
 
@@ -54,5 +60,7 @@ export function statusTone(status: PinStatus): "success" | "secondary" | "destru
       return "warning";
     case "not_recipe":
       return "outline";
+    case "removed":
+      return "secondary";
   }
 }

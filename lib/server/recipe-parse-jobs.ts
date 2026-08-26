@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 
 import { openDatabase } from "@/lib/server/database";
 import {
@@ -151,8 +151,12 @@ export async function createRecipeParseJob(input: {
     }
 
     const recipes = await db.query.householdRecipes.findMany({
-      where: (table, { and, eq, inArray }) =>
-        and(eq(table.householdId, input.householdId), inArray(table.recipeId, normalizedIds)),
+      where: (table, { and, eq, inArray, isNull }) =>
+        and(
+          eq(table.householdId, input.householdId),
+          inArray(table.recipeId, normalizedIds),
+          isNull(table.removedAt),
+        ),
       columns: {
         recipeId: true,
       },
