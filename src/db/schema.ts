@@ -228,6 +228,7 @@ export const householdPins = sqliteTable(
     title: text("title"),
     description: text("description"),
     link: text("link"),
+    sourceUrlKey: text("source_url_key"),
     altText: text("alt_text"),
     dominantColor: text("dominant_color"),
     note: text("note"),
@@ -242,6 +243,7 @@ export const householdPins = sqliteTable(
   },
   (table) => ({
     householdPinterestPinUniqueIdx: uniqueIndex("idx_household_pins_household_pin_unique").on(table.householdId, table.pinterestPinId),
+    householdSourceUrlKeyIdx: index("idx_household_pins_household_source_url_key").on(table.householdId, table.sourceUrlKey),
     boardIdIdx: index("idx_household_pins_board_id").on(table.boardId),
   }),
 );

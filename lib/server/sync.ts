@@ -17,6 +17,7 @@ import {
 import { extractRecipes } from "@/lib/server/extract";
 import { logError, logInfo, logWarn } from "@/lib/server/logger";
 import { getPinImageUrl } from "@/lib/server/media";
+import { normalizeRecipeSourceUrl } from "@/lib/recipe-source-url";
 import {
   fetchAllPins,
   getValidPinterestAccessToken,
@@ -59,7 +60,7 @@ type SyncBoardResult = {
   boardId: string;
   syncedPins: number;
   newRecipeIds: string[];
-  seenPinterestPinIds: string[];
+  seenRecipeIds: string[];
   sqlitePath: string;
 };
 
@@ -412,9 +413,30 @@ export async function syncBoard(
     const existingRecipes = await db.query.householdRecipes.findMany({
       where: (table, { eq: whereEq }) => whereEq(table.householdId, options.householdId),
       columns: { pinId: true, recipeId: true },
+      with: { pin: { columns: { pinterestPinId: true, pinterestBoardId: true, sourceUrlKey: true, link: true } } },
     });
-    const existingRecipeIdsByPinId = new Map(existingRecipes.map((row) => [row.pinId, row.recipeId]));
+    const existingRecipeIdsByPinterestPinId = new Map(
+      existingRecipes.map((row) => [
+        row.pin.pinterestPinId,
+        { pinId: row.pinId, recipeId: row.recipeId },
+      ]),
+    );
+    const existingRecipeIdsBySourceUrlKey = new Map(
+      existingRecipes.flatMap((row) => {
+        const sourceUrlKey = row.pin.sourceUrlKey ?? normalizeRecipeSourceUrl(row.pin.link);
+        return sourceUrlKey ? [[sourceUrlKey, { pinId: row.pinId, recipeId: row.recipeId }] as const] : [];
+      }),
+    );
+    const existingPins = await db.query.householdPins.findMany({
+      where: (table, { eq: whereEq }) => whereEq(table.householdId, options.householdId),
+      columns: { pinId: true, pinterestPinId: true, pinterestBoardId: true },
+    });
+    const existingPinIdsByPinterestPinId = new Map(existingPins.map((row) => [
+      row.pinterestPinId,
+      row.pinId,
+    ]));
     const newRecipeIds: string[] = [];
+    const seenRecipeIds = new Set<string>();
 
     if (options.syncEnabled !== undefined || options.boardName !== undefined) {
       await db.insert(boardSyncSubscriptions).values({
@@ -458,12 +480,14 @@ export async function syncBoard(
 
     for (const pin of pinRecords) {
       const pinKey = toPinKey(options.householdId, pin.id);
-      if (existingRecipeIdsByPinId.has(pinKey)) continue;
+      const existingRecipe = existingRecipeIdsByPinterestPinId.get(pin.id);
+      const sourceUrlKey = normalizeRecipeSourceUrl(pin.link);
+      const sourceUrlRecipe = sourceUrlKey ? existingRecipeIdsBySourceUrlKey.get(sourceUrlKey) : undefined;
 
       const pinValues = {
         pinId: pinKey, householdId: options.householdId, pinterestPinId: pin.id,
         boardId: boardKey, pinterestBoardId, boardSectionId: pin.board_section_id ?? null,
-        title: pin.title ?? null, description: pin.description ?? null, link: pin.link ?? null,
+        title: pin.title ?? null, description: pin.description ?? null, link: pin.link ?? null, sourceUrlKey,
         altText: pin.alt_text ?? null, dominantColor: pin.dominant_color ?? null,
         note: pin.note ?? null, createdAt: pin.created_at ?? null, parentPinId: pin.parent_pin_id ?? null,
         mediaJson: pin.media ? JSON.stringify(pin.media) : null,
@@ -472,11 +496,49 @@ export async function syncBoard(
         boardOwnerJson: pin.board_owner ? JSON.stringify(pin.board_owner) : null,
         rawJson: JSON.stringify(pin), updatedAt: syncNow,
       };
-      await db.insert(householdPins).values(pinValues).onConflictDoNothing().run();
+      const { pinId: _pinId, ...pinUpdateValues } = pinValues;
+      const folderId = pin.board_section_id
+        ? folderIdsBySectionId.get(pin.board_section_id) ?? boardFolder.folderId
+        : boardFolder.folderId;
+
+      if (existingRecipe) {
+        // Pinterest's pin ID is the recipe identity; board metadata only describes
+        // where that pin currently lives.
+        await db.update(householdPins).set(pinUpdateValues)
+          .where(eq(householdPins.pinId, existingRecipe.pinId)).run();
+        await db.insert(recipeFolderMemberships).values({
+          householdId: options.householdId, recipeId: existingRecipe.recipeId, folderId,
+          source: PINTEREST_FOLDER_SOURCE, createdAt: syncNow, updatedAt: syncNow,
+        }).onConflictDoUpdate({
+          target: [
+            recipeFolderMemberships.householdId,
+            recipeFolderMemberships.recipeId,
+            recipeFolderMemberships.source,
+          ],
+          set: { folderId, updatedAt: syncNow },
+        }).run();
+        seenRecipeIds.add(existingRecipe.recipeId);
+        continue;
+      }
+
+      // A different Pinterest Pin can point at the same recipe URL. Keep the
+      // original app recipe and its user-managed metadata unchanged.
+      if (sourceUrlRecipe) {
+        seenRecipeIds.add(sourceUrlRecipe.recipeId);
+        continue;
+      }
+
+      const storedPinId = existingPinIdsByPinterestPinId.get(pin.id) ?? pinKey;
+      if (storedPinId === pinKey) {
+        await db.insert(householdPins).values(pinValues).onConflictDoNothing().run();
+      } else {
+        await db.update(householdPins).set(pinUpdateValues)
+          .where(eq(householdPins.pinId, storedPinId)).run();
+      }
 
       const recipeId = createId();
       const insertedRecipe = await db.insert(householdRecipes).values({
-        recipeId, householdId: options.householdId, pinId: pinKey,
+        recipeId, householdId: options.householdId, pinId: storedPinId,
         title: pin.title ?? null, description: pin.description ?? null,
         imageUrl: getPinImageUrl(pinValues.mediaJson, pinValues.rawJson),
         removedAt: null, createdAt: syncNow, updatedAt: syncNow,
@@ -484,10 +546,10 @@ export async function syncBoard(
       if (!insertedRecipe) continue;
 
       newRecipeIds.push(recipeId);
-      existingRecipeIdsByPinId.set(pinKey, recipeId);
-      const folderId = pin.board_section_id
-        ? folderIdsBySectionId.get(pin.board_section_id) ?? boardFolder.folderId
-        : boardFolder.folderId;
+      existingRecipeIdsByPinterestPinId.set(pin.id, { pinId: storedPinId, recipeId });
+      if (sourceUrlKey) existingRecipeIdsBySourceUrlKey.set(sourceUrlKey, { pinId: storedPinId, recipeId });
+      seenRecipeIds.add(recipeId);
+      existingPinIdsByPinterestPinId.set(pin.id, storedPinId);
       await db.insert(recipeFolderMemberships).values({
         householdId: options.householdId, recipeId, folderId,
         source: PINTEREST_FOLDER_SOURCE, createdAt: syncNow, updatedAt: syncNow,
@@ -495,12 +557,12 @@ export async function syncBoard(
       await recordPinterestSyncRecipeChange(options.syncRun, recipeId, "created", syncNow);
     }
 
-    if (options.reconcile !== false) {
+    if (options.reconcile === true) {
       await reconcileRemovedRecipes({
         db,
         householdId: options.householdId,
         boardIds: new Set([pinterestBoardId]),
-        seenPinterestPinIds: new Set(pinRecords.map((pin) => pin.id)),
+        seenRecipeIds,
         syncNow,
         syncRun: options.syncRun,
       });
@@ -510,7 +572,7 @@ export async function syncBoard(
       boardId: pinterestBoardId,
       syncedPins: pinRecords.length,
       newRecipeIds,
-      seenPinterestPinIds: pinRecords.map((pin) => pin.id),
+      seenRecipeIds: [...seenRecipeIds],
       sqlitePath: targetLabel,
     };
   } finally {
@@ -554,7 +616,7 @@ export async function syncAllBoards(options: {
       db,
       householdId: options.householdId,
       boardIds: selectedBoardIds,
-      seenPinterestPinIds: new Set(boards.flatMap((board) => board.seenPinterestPinIds)),
+      seenRecipeIds: new Set(boards.flatMap((board) => board.seenRecipeIds)),
       syncNow: new Date().toISOString(),
       syncRun: options.syncRun,
     });
@@ -642,7 +704,7 @@ async function reconcileRemovedRecipes(args: {
   db: Awaited<ReturnType<typeof openDatabase>>["db"];
   householdId: string;
   boardIds: Set<string>;
-  seenPinterestPinIds: Set<string>;
+  seenRecipeIds: Set<string>;
   syncNow: string;
   syncRun?: PinterestSyncRunContext;
 }) {
@@ -654,7 +716,7 @@ async function reconcileRemovedRecipes(args: {
   });
   for (const recipe of recipes) {
     if (!args.boardIds.has(recipe.pin.pinterestBoardId)) continue;
-    const shouldBeRemoved = !args.seenPinterestPinIds.has(recipe.pin.pinterestPinId);
+    const shouldBeRemoved = !args.seenRecipeIds.has(recipe.recipeId);
     if (shouldBeRemoved === Boolean(recipe.removedAt)) continue;
     await args.db.update(householdRecipes).set({
       removedAt: shouldBeRemoved ? args.syncNow : null,

@@ -15,6 +15,7 @@
     "start": "next start",
     "oauth:pinterest": "tsx src/pinterest-oauth.ts",
     "refresh:pinterest-token": "tsx src/pinterest-refresh-token.ts",
+    "remediate:pinterest-sources": "tsx src/remediate-pinterest-sources.ts",
     "sync:board": "tsx src/pinterest-board-sync.ts",
     "test": "vitest run"
   },

@@ -2,11 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openDatabase } from "@/lib/server/database";
 import {
   households,
+  householdRecipes,
 } from "@/lib/server/db";
 import { syncBoard } from "@/lib/server/sync";
 
@@ -191,7 +193,7 @@ describe("syncBoard", () => {
     });
   });
 
-  it("keeps existing Pinterest metadata unchanged when a pin moves sections", async () => {
+  it("moves an existing recipe to its latest Pinterest section without replacing the recipe", async () => {
     await withTestDatabase(async ({ sqlitePath }) => {
       const now = "2026-06-17T00:00:00.000Z";
       const householdId = "household-moves";
@@ -237,10 +239,10 @@ describe("syncBoard", () => {
         },
       ]);
 
-      await syncBoard("board-2", {
+      await syncBoard("board-3", {
         householdId,
         sqlitePath,
-        boardName: "Dinner ideas",
+        boardName: "Moved recipes",
       });
 
       mockFetchAllPins.mockResolvedValueOnce([
@@ -254,10 +256,10 @@ describe("syncBoard", () => {
         },
       ]);
 
-      await syncBoard("board-2", {
+      await syncBoard("board-3", {
         householdId,
         sqlitePath,
-        boardName: "Dinner ideas",
+        boardName: "Moved recipes",
       });
 
       const reopened = await openDatabase(sqlitePath);
@@ -272,20 +274,20 @@ describe("syncBoard", () => {
           },
         });
 
-        const boardFolder = folders.find((folder) => folder.sourceType === "board");
+        const boardFolder = folders.find((folder) => folder.sourceType === "board" && folder.pinterestBoardId === "board-3");
         const sectionFolder = folders.find((folder) => folder.sourceType === "section");
 
-        expect(boardFolder?.name).toBe("Dinner");
+        expect(boardFolder?.name).toBe("Moved recipes");
         expect(sectionFolder?.name).toBe("Favorites");
         expect(memberships).toHaveLength(1);
-        expect(memberships[0]?.folder.folderId).toBe(boardFolder?.folderId);
+        expect(memberships[0]?.folder.folderId).toBe(sectionFolder?.folderId);
       } finally {
         await reopened.sqlite.close();
       }
     });
   });
 
-  it("marks missing pins removed and restores them when they reappear", async () => {
+  it("does not mark a pin removed during a one-board sync", async () => {
     await withTestDatabase(async ({ sqlitePath }) => {
       const now = "2026-06-17T00:00:00.000Z";
       const householdId = "household-removals";
@@ -312,23 +314,81 @@ describe("syncBoard", () => {
         const recipe = await reopened.db.query.householdRecipes.findFirst({
           where: (table, { eq }) => eq(table.householdId, householdId),
         });
-        expect(recipe?.removedAt).not.toBeNull();
+        expect(recipe?.removedAt).toBeNull();
         expect(recipe?.title).toBe("Original title");
       } finally {
         await reopened.sqlite.close();
       }
 
-      mockFetchAllPins.mockResolvedValueOnce([{ id: "pin-removed", title: "Changed remotely" }]);
-      await syncBoard("board-removals", { householdId, sqlitePath, boardName: "Renamed remotely" });
-      reopened = await openDatabase(sqlitePath);
+    });
+  });
+
+  it("keeps the original recipe and folder when a different Pin has the same source URL", async () => {
+    await withTestDatabase(async ({ sqlitePath }) => {
+      const now = "2026-06-17T00:00:00.000Z";
+      const householdId = "household-source-dedupe";
+      mockGetValidPinterestAccessToken.mockResolvedValue("token");
+      const { db, sqlite } = await openDatabase(sqlitePath);
       try {
-        const recipe = await reopened.db.query.householdRecipes.findFirst({
+        await db.insert(households).values({
+          householdId,
+          name: "Source Kitchen",
+          createdAt: now,
+          updatedAt: now,
+        }).run();
+      } finally {
+        await sqlite.close();
+      }
+
+      mockFetchAllPins.mockResolvedValueOnce([{
+        id: "pin-original",
+        title: "Original title",
+        link: "https://example.com/recipe/?utm_source=pinterest",
+        created_at: now,
+      }]);
+      await syncBoard("board-original", { householdId, sqlitePath, boardName: "Original board" });
+
+      let opened = await openDatabase(sqlitePath);
+      try {
+        const original = await opened.db.query.householdRecipes.findFirst({
           where: (table, { eq }) => eq(table.householdId, householdId),
         });
-        expect(recipe?.removedAt).toBeNull();
-        expect(recipe?.title).toBe("Original title");
+        await opened.db.update(householdRecipes).set({
+          title: "Edited title",
+          titleOverridden: true,
+        }).where(eq(householdRecipes.recipeId, original!.recipeId)).run();
       } finally {
-        await reopened.sqlite.close();
+        await opened.sqlite.close();
+      }
+
+      mockFetchAllPins.mockResolvedValueOnce([{
+        id: "pin-later-copy",
+        title: "Later Pinterest title",
+        link: "https://EXAMPLE.com/recipe#saved",
+        created_at: now,
+      }]);
+      await syncBoard("board-later", { householdId, sqlitePath, boardName: "Later board" });
+
+      opened = await openDatabase(sqlitePath);
+      try {
+        const recipes = await opened.db.query.householdRecipes.findMany({
+          where: (table, { eq }) => eq(table.householdId, householdId),
+          with: { pin: true },
+        });
+        const memberships = await opened.db.query.recipeFolderMemberships.findMany({
+          where: (table, { eq }) => eq(table.householdId, householdId),
+          with: { folder: true },
+        });
+        expect(recipes).toHaveLength(1);
+        expect(recipes[0]).toMatchObject({
+          title: "Edited title",
+          titleOverridden: true,
+          pin: { pinterestPinId: "pin-original", sourceUrlKey: "https://example.com/recipe" },
+        });
+        expect(memberships).toHaveLength(1);
+        expect(memberships[0]?.folder.pinterestBoardId).toBe("board-original");
+      } finally {
+        await opened.sqlite.close();
       }
     });
   });

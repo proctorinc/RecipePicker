@@ -109,3 +109,31 @@ Target one recipe:
 ```bash
 npm run extract:recipes -- --household-id <household-id> --recipe-id <recipe-id>
 ```
+
+### Pinterest source-URL remediation
+
+Pinterest imports use the full Pinterest Pin ID as their primary identity and a
+normalized destination URL as a second, household-scoped identity. A later Pin
+with the same normalized URL does not replace the original recipe, its edits,
+or its Pinterest folder membership. Before cleanup, deploy the migration that
+adds `household_pins.source_url_key`, pause Pinterest syncing, and create a
+reviewed dry-run report:
+
+```bash
+npm run remediate:pinterest-sources -- --report /secure/location/pinterest-source-dry-run.json
+```
+
+The report includes source-key backfills as well as source-URL duplicate groups.
+It makes no database changes unless both `--apply` and `--confirm` are supplied.
+Apply only the exact dry-run report you reviewed:
+
+```bash
+npm run remediate:pinterest-sources -- --apply --confirm \
+  --reviewed-report /secure/location/pinterest-source-dry-run.json \
+  --report /secure/location/pinterest-source-applied.json
+```
+
+The command blocks groups whose earliest recipe timestamps tie, deletes later
+duplicate recipes and their dependent rows in a transaction, and backfills keys
+without transferring duplicate data to the retained recipe. Do not add the
+partial unique source-key index until a reviewed cleanup reports zero groups.
