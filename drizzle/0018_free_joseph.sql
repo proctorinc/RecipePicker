@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS `idx_household_pins_household_source_url_key`;--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_household_pins_household_source_url_key_unique` ON `household_pins` (`household_id`,`source_url_key`) WHERE "household_pins"."source_url_key" IS NOT NULL;

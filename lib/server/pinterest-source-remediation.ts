@@ -9,6 +9,16 @@ type RecipeRow = {
   recipe_id: string;
   pin_id: string;
   created_at: string;
+  title_overridden: number;
+  description_overridden: number;
+  image_url_overridden: number;
+  is_flagged: number;
+  tag_membership_count: number;
+  manual_folder_membership_count: number;
+  review_count: number;
+  event_count: number;
+  feedback_count: number;
+  extraction_feedback_count: number;
 };
 
 type PinRow = {
@@ -32,6 +42,21 @@ export type PinterestSourceRemediationGroup = {
   identityPinIds: string[];
   boardIds: string[];
   dependentRowCounts: Record<string, number>;
+  recipeUserData: Array<{
+    recipeId: string;
+    titleOverridden: boolean;
+    descriptionOverridden: boolean;
+    imageUrlOverridden: boolean;
+    isFlagged: boolean;
+    tagMembershipCount: number;
+    manualFolderMembershipCount: number;
+    reviewCount: number;
+    eventCount: number;
+    feedbackCount: number;
+    extractionFeedbackCount: number;
+    hasUserManagedData: boolean;
+  }>;
+  selectionReason: "earliest_created_at" | "unique_user_managed_data" | "no_user_managed_data" | "multiple_recipes_have_user_managed_data";
   actions: string[];
   blockedReason: string | null;
 };
@@ -74,6 +99,35 @@ function reportFingerprint(args: {
   sourceUrlKeyBackfills: Array<{ pinId: string; sourceUrlKey: string }>;
 }) {
   return createHash("sha256").update(JSON.stringify(args)).digest("hex");
+}
+
+function userDataEvidence(recipe: RecipeRow) {
+  const evidence = {
+    recipeId: recipe.recipe_id,
+    titleOverridden: Boolean(recipe.title_overridden),
+    descriptionOverridden: Boolean(recipe.description_overridden),
+    imageUrlOverridden: Boolean(recipe.image_url_overridden),
+    isFlagged: Boolean(recipe.is_flagged),
+    tagMembershipCount: Number(recipe.tag_membership_count),
+    manualFolderMembershipCount: Number(recipe.manual_folder_membership_count),
+    reviewCount: Number(recipe.review_count),
+    eventCount: Number(recipe.event_count),
+    feedbackCount: Number(recipe.feedback_count),
+    extractionFeedbackCount: Number(recipe.extraction_feedback_count),
+  };
+  return {
+    ...evidence,
+    hasUserManagedData: evidence.titleOverridden
+      || evidence.descriptionOverridden
+      || evidence.imageUrlOverridden
+      || evidence.isFlagged
+      || evidence.tagMembershipCount > 0
+      || evidence.manualFolderMembershipCount > 0
+      || evidence.reviewCount > 0
+      || evidence.eventCount > 0
+      || evidence.feedbackCount > 0
+      || evidence.extractionFeedbackCount > 0,
+  };
 }
 
 async function countRows(db: Awaited<ReturnType<typeof openDatabase>>["db"], query: ReturnType<typeof sql>) {
@@ -125,8 +179,15 @@ export async function planPinterestSourceRemediation(sqlitePath?: string): Promi
   const { db, sqlite, targetLabel } = await openDatabase(sqlitePath);
   try {
     const rows = await db.all<RecipeRow & PinRow>(sql`
-      SELECT r.recipe_id, r.pin_id, r.created_at, p.household_id, p.pinterest_pin_id, p.pinterest_board_id,
-             p.link, p.source_url_key
+      SELECT r.recipe_id, r.pin_id, r.created_at, r.title_overridden, r.description_overridden,
+             r.image_url_overridden, r.is_flagged, p.household_id, p.pinterest_pin_id, p.pinterest_board_id,
+             p.link, p.source_url_key,
+             (SELECT count(*) FROM recipe_tag_memberships m WHERE m.recipe_id = r.recipe_id) AS tag_membership_count,
+             (SELECT count(*) FROM recipe_folder_memberships m WHERE m.recipe_id = r.recipe_id AND m.source <> 'pinterest') AS manual_folder_membership_count,
+             (SELECT count(*) FROM household_recipe_reviews v WHERE v.recipe_id = r.recipe_id) AS review_count,
+             (SELECT count(*) FROM household_recipe_events v WHERE v.recipe_id = r.recipe_id) AS event_count,
+             (SELECT count(*) FROM household_recipe_feedback v WHERE v.recipe_id = r.recipe_id) AS feedback_count,
+             (SELECT count(*) FROM household_recipe_extraction_feedback v WHERE v.recipe_id = r.recipe_id) AS extraction_feedback_count
       FROM household_recipes r
       INNER JOIN household_pins p ON p.pin_id = r.pin_id
       WHERE p.pinterest_pin_id NOT LIKE 'personal:%'
@@ -143,11 +204,26 @@ export async function planPinterestSourceRemediation(sqlitePath?: string): Promi
     const groups: PinterestSourceRemediationGroup[] = [];
     for (const [identity, recipes] of recipesByIdentity) {
       const [householdId, normalizedSourceUrl] = identity.split("\u0000");
-      const survivor = recipes[0]!;
-      const duplicates = recipes.slice(1);
+      let survivor = recipes[0]!;
+      let selectionReason: PinterestSourceRemediationGroup["selectionReason"] = "earliest_created_at";
+      let blockedReason: string | null = null;
+      const tiedForEarliest = recipes.filter((recipe) => recipe.created_at === survivor.created_at);
+      if (tiedForEarliest.length > 1) {
+        const recipesWithUserData = recipes.filter((recipe) => userDataEvidence(recipe).hasUserManagedData);
+        if (recipesWithUserData.length === 1) {
+          survivor = recipesWithUserData[0]!;
+          selectionReason = "unique_user_managed_data";
+        } else if (recipesWithUserData.length === 0) {
+          survivor = [...recipes].sort((left, right) => left.recipe_id.localeCompare(right.recipe_id))[0]!;
+          selectionReason = "no_user_managed_data";
+        } else {
+          selectionReason = "multiple_recipes_have_user_managed_data";
+          blockedReason = "Multiple recipes tied for earliest created_at contain user-managed data; choose the survivor manually.";
+        }
+      }
+      const duplicates = recipes.filter((recipe) => recipe.recipe_id !== survivor.recipe_id);
       if (duplicates.length === 0) continue;
 
-      const tied = duplicates.some((recipe) => recipe.created_at === survivor.created_at);
       const duplicatePinIds = [...new Set(duplicates.map((recipe) => recipe.pin_id))];
       const identityPinIds = [...new Set(recipes.map((recipe) => recipe.pin_id))];
       const removedPinIds = duplicatePinIds;
@@ -159,11 +235,13 @@ export async function planPinterestSourceRemediation(sqlitePath?: string): Promi
         duplicateRecipeIds: duplicates.map((recipe) => recipe.recipe_id), duplicatePinIds, identityPinIds,
         boardIds: [...new Set(recipes.map((recipe) => recipe.pinterest_board_id))],
         dependentRowCounts: counts,
+        recipeUserData: recipes.map(userDataEvidence),
+        selectionReason,
         actions: [
           ...(duplicates.length ? ["delete later duplicate recipes and dependent records"] : []),
           "backfill the retained Pin source URL key",
         ],
-        blockedReason: tied ? "Multiple recipes have the earliest created_at; choose the original manually." : null,
+        blockedReason,
       });
     }
     const duplicatePinIds = new Set(groups.flatMap((group) => group.duplicatePinIds));
@@ -285,9 +363,7 @@ export async function applyPinterestSourceRemediation(args: {
   if (current.fingerprint !== args.reviewedReport.fingerprint) {
     throw new Error("The reviewed report no longer matches the database. Run a new dry run and review it before applying cleanup.");
   }
-  if (current.blockingGroups.length) {
-    throw new Error("Cleanup is blocked because one or more duplicate groups have an ambiguous earliest recipe.");
-  }
+  const applicableGroups = current.groups.filter((group) => !group.blockedReason);
   const { db, sqlite, driver } = await openDatabase(args.sqlitePath);
   try {
     if (driver === "sqlite") {
@@ -299,28 +375,38 @@ export async function applyPinterestSourceRemediation(args: {
       };
       sqliteDb.transaction((tx) => {
         tx.run(sql`PRAGMA defer_foreign_keys = ON`);
-        for (const group of current.groups) {
+        for (const group of applicableGroups) {
           deleteDuplicateDataSync(tx, group.duplicateRecipeIds, group.duplicatePinIds);
         }
         for (const backfill of current.sourceUrlKeyBackfills) {
           tx.run(sql`UPDATE household_pins SET source_url_key = ${backfill.sourceUrlKey} WHERE pin_id = ${backfill.pinId}`);
         }
       });
-      return { appliedGroups: current.groups.length, backfilledPins: current.sourceUrlKeyBackfills.length, fingerprint: current.fingerprint };
+      return {
+        appliedGroups: applicableGroups.length,
+        skippedBlockedGroups: current.blockingGroups.length,
+        backfilledPins: current.sourceUrlKeyBackfills.length,
+        fingerprint: current.fingerprint,
+      };
     }
     const transactionDb = db as unknown as {
       transaction: (callback: (transaction: typeof db) => Promise<void>) => Promise<void>;
     };
     await transactionDb.transaction(async (tx) => {
       await tx.run(sql`PRAGMA defer_foreign_keys = ON`);
-      for (const group of current.groups) {
+      for (const group of applicableGroups) {
         await deleteDuplicateData(tx, group.duplicateRecipeIds, group.duplicatePinIds);
       }
       for (const backfill of current.sourceUrlKeyBackfills) {
         await tx.run(sql`UPDATE household_pins SET source_url_key = ${backfill.sourceUrlKey} WHERE pin_id = ${backfill.pinId}`);
       }
     });
-    return { appliedGroups: current.groups.length, backfilledPins: current.sourceUrlKeyBackfills.length, fingerprint: current.fingerprint };
+    return {
+      appliedGroups: applicableGroups.length,
+      skippedBlockedGroups: current.blockingGroups.length,
+      backfilledPins: current.sourceUrlKeyBackfills.length,
+      fingerprint: current.fingerprint,
+    };
   } finally {
     await sqlite.close();
   }

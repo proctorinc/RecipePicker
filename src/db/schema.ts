@@ -243,7 +243,9 @@ export const householdPins = sqliteTable(
   },
   (table) => ({
     householdPinterestPinUniqueIdx: uniqueIndex("idx_household_pins_household_pin_unique").on(table.householdId, table.pinterestPinId),
-    householdSourceUrlKeyIdx: index("idx_household_pins_household_source_url_key").on(table.householdId, table.sourceUrlKey),
+    householdSourceUrlKeyUniqueIdx: uniqueIndex("idx_household_pins_household_source_url_key_unique")
+      .on(table.householdId, table.sourceUrlKey)
+      .where(sql`${table.sourceUrlKey} IS NOT NULL`),
     boardIdIdx: index("idx_household_pins_board_id").on(table.boardId),
   }),
 );

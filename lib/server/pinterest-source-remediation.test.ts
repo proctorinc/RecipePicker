@@ -37,7 +37,20 @@ async function withTestDatabase(run: (sqlitePath: string) => Promise<void>) {
   await run(sqlitePath);
 }
 
-async function seedDuplicate(sqlitePath: string, duplicateCreatedAt = "2026-08-26T01:00:00.000Z") {
+async function seedDuplicate(args: {
+  sqlitePath: string;
+  duplicateCreatedAt?: string;
+  originalTitleOverridden?: boolean;
+  duplicateTitleOverridden?: boolean;
+  duplicateTag?: boolean;
+}) {
+  const {
+    sqlitePath,
+    duplicateCreatedAt = "2026-08-26T01:00:00.000Z",
+    originalTitleOverridden = false,
+    duplicateTitleOverridden = false,
+    duplicateTag = false,
+  } = args;
   const { db, sqlite } = await openDatabase(sqlitePath);
   try {
     const firstCreatedAt = "2026-08-26T00:00:00.000Z";
@@ -47,12 +60,14 @@ async function seedDuplicate(sqlitePath: string, duplicateCreatedAt = "2026-08-2
              ('household-a:pin-duplicate', 'household-a', 'pin-duplicate', 'household-a:board-two', 'board-two', 'https://example.com/recipe#pinterest', '{}', ${duplicateCreatedAt})
     `);
     await db.run(sql`
-      INSERT INTO household_recipes (recipe_id, household_id, pin_id, created_at, updated_at)
-      VALUES ('recipe-original', 'household-a', 'household-a:pin-original', ${firstCreatedAt}, ${firstCreatedAt}),
-             ('recipe-duplicate', 'household-a', 'household-a:pin-duplicate', ${duplicateCreatedAt}, ${duplicateCreatedAt})
+      INSERT INTO household_recipes (recipe_id, household_id, pin_id, title_overridden, created_at, updated_at)
+      VALUES ('recipe-original', 'household-a', 'household-a:pin-original', ${originalTitleOverridden ? 1 : 0}, ${firstCreatedAt}, ${firstCreatedAt}),
+             ('recipe-duplicate', 'household-a', 'household-a:pin-duplicate', ${duplicateTitleOverridden ? 1 : 0}, ${duplicateCreatedAt}, ${duplicateCreatedAt})
     `);
-    await db.run(sql`INSERT INTO recipe_tags (tag_id, household_id, name, normalized_name, created_at, updated_at) VALUES ('tag-a', 'household-a', 'Dinner', 'dinner', ${firstCreatedAt}, ${firstCreatedAt})`);
-    await db.run(sql`INSERT INTO recipe_tag_memberships (membership_id, household_id, recipe_id, tag_id, created_at, updated_at) VALUES ('duplicate-tag', 'household-a', 'recipe-duplicate', 'tag-a', ${duplicateCreatedAt}, ${duplicateCreatedAt})`);
+    if (duplicateTag) {
+      await db.run(sql`INSERT INTO recipe_tags (tag_id, household_id, name, normalized_name, created_at, updated_at) VALUES ('tag-a', 'household-a', 'Dinner', 'dinner', ${firstCreatedAt}, ${firstCreatedAt})`);
+      await db.run(sql`INSERT INTO recipe_tag_memberships (membership_id, household_id, recipe_id, tag_id, created_at, updated_at) VALUES ('duplicate-tag', 'household-a', 'recipe-duplicate', 'tag-a', ${duplicateCreatedAt}, ${duplicateCreatedAt})`);
+    }
   } finally {
     await sqlite.close();
   }
@@ -61,7 +76,7 @@ async function seedDuplicate(sqlitePath: string, duplicateCreatedAt = "2026-08-2
 describe("Pinterest source URL remediation", () => {
   it("reports then removes later source duplicates while retaining the original", async () => {
     await withTestDatabase(async (sqlitePath) => {
-      await seedDuplicate(sqlitePath);
+      await seedDuplicate({ sqlitePath, duplicateTag: true });
       const report = await planPinterestSourceRemediation(sqlitePath);
       expect(report.groups).toHaveLength(1);
       expect(report.groups[0]).toMatchObject({
@@ -88,18 +103,58 @@ describe("Pinterest source URL remediation", () => {
     });
   });
 
-  it("blocks ambiguous original recipes without mutating either one", async () => {
+  it("chooses a deterministic survivor when tied recipes have no user-managed data", async () => {
     await withTestDatabase(async (sqlitePath) => {
-      await seedDuplicate(sqlitePath, "2026-08-26T00:00:00.000Z");
+      await seedDuplicate({ sqlitePath, duplicateCreatedAt: "2026-08-26T00:00:00.000Z" });
       const report = await planPinterestSourceRemediation(sqlitePath);
-      expect(report.blockingGroups).toHaveLength(1);
-      await expect(applyPinterestSourceRemediation({ reviewedReport: report, sqlitePath })).rejects.toThrow("ambiguous earliest recipe");
+      expect(report.blockingGroups).toHaveLength(0);
+      expect(report.groups[0]).toMatchObject({
+        survivorRecipeId: "recipe-duplicate",
+        selectionReason: "no_user_managed_data",
+      });
+      const result = await applyPinterestSourceRemediation({ reviewedReport: report, sqlitePath });
+      expect(result).toMatchObject({ appliedGroups: 1, skippedBlockedGroups: 0 });
       const { db, sqlite } = await openDatabase(sqlitePath);
       try {
-        expect(await db.get(sql`SELECT count(*) AS count FROM household_recipes WHERE household_id = 'household-a'`)).toEqual({ count: 2 });
+        expect(await db.get(sql`SELECT count(*) AS count FROM household_recipes WHERE household_id = 'household-a'`)).toEqual({ count: 1 });
+        expect(await db.all(sql`SELECT source_url_key FROM household_pins WHERE household_id = 'household-a' ORDER BY pin_id`)).toEqual([
+          { source_url_key: "https://example.com/recipe" },
+        ]);
       } finally {
         await sqlite.close();
       }
+    });
+  });
+
+  it("preserves the sole recipe with user-managed data in a timestamp tie", async () => {
+    await withTestDatabase(async (sqlitePath) => {
+      await seedDuplicate({
+        sqlitePath,
+        duplicateCreatedAt: "2026-08-26T00:00:00.000Z",
+        originalTitleOverridden: true,
+      });
+      const report = await planPinterestSourceRemediation(sqlitePath);
+      expect(report.groups[0]).toMatchObject({
+        survivorRecipeId: "recipe-original",
+        selectionReason: "unique_user_managed_data",
+        blockedReason: null,
+      });
+    });
+  });
+
+  it("leaves a timestamp tie blocked when multiple recipes have user-managed data", async () => {
+    await withTestDatabase(async (sqlitePath) => {
+      await seedDuplicate({
+        sqlitePath,
+        duplicateCreatedAt: "2026-08-26T00:00:00.000Z",
+        originalTitleOverridden: true,
+        duplicateTitleOverridden: true,
+      });
+      const report = await planPinterestSourceRemediation(sqlitePath);
+      expect(report.groups[0]).toMatchObject({
+        selectionReason: "multiple_recipes_have_user_managed_data",
+        blockedReason: expect.stringContaining("user-managed data"),
+      });
     });
   });
 });

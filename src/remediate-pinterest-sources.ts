@@ -31,7 +31,7 @@ async function main() {
     const reviewed = JSON.parse(fs.readFileSync(path.resolve(reviewedReportPath!), "utf8")) as PinterestSourceRemediationReport;
     const result = await applyPinterestSourceRemediation({ reviewedReport: reviewed, sqlitePath });
     fs.writeFileSync(path.resolve(reportPath), `${JSON.stringify({ ...report, appliedAt: new Date().toISOString(), result }, null, 2)}\n`);
-    process.stdout.write(`Applied ${result.appliedGroups} Pinterest source-URL remediation groups and backfilled ${result.backfilledPins} source keys.\n`);
+    process.stdout.write(`Applied ${result.appliedGroups} Pinterest source-URL remediation groups, skipped ${result.skippedBlockedGroups} ambiguous groups, and backfilled ${result.backfilledPins} source keys.\n`);
     return;
   }
 
