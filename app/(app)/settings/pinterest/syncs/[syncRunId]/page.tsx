@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
+import { ActivityIndicator } from "@/components/activity-indicator";
 import { LocalDateTime } from "@/components/local-date-time";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,7 +27,7 @@ export default async function PinterestSyncDetailPage({ params }: { params: Prom
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle>Sync details</CardTitle><CardDescription><LocalDateTime value={detail.run.startedAt} /> · {detail.run.trigger === "auto_feed_load" ? "Automatic" : detail.run.trigger === "force" ? "Force resync" : "Manual"}</CardDescription></div><Badge variant={detail.run.status === "success" ? "success" : detail.run.status === "error" ? "destructive" : "secondary"}>{detail.run.status}</Badge></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle>Sync details</CardTitle><CardDescription><LocalDateTime value={detail.run.startedAt} /> · {detail.run.trigger === "auto_feed_load" ? "Automatic" : detail.run.trigger === "force" ? "Force resync" : "Manual"}</CardDescription></div><Badge variant={detail.run.status === "success" ? "success" : detail.run.status === "error" ? "destructive" : "secondary"}>{detail.run.status === "running" ? <ActivityIndicator label="Pinterest sync running" className="mr-1.5" /> : null}{detail.run.status}</Badge></div>
           {detail.run.message ? <p className="text-sm text-destructive">{detail.run.message}</p> : null}
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-4"><Stat label="Boards" value={detail.run.boardCount} /><Stat label="Pins read" value={detail.run.pinCount} /><Stat label="Added" value={detail.run.createdRecipeCount} /><Stat label="Removed / restored" value={`${detail.run.removedRecipeCount} / ${detail.run.restoredRecipeCount}`} /></CardContent>

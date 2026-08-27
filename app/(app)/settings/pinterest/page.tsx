@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { ActionForm } from "@/components/action-form";
+import { ActivityIndicator } from "@/components/activity-indicator";
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { BoardSyncPicker } from "@/components/board-sync-picker";
 import { LocalDateTime } from "@/components/local-date-time";
@@ -132,7 +133,7 @@ export default async function PinterestSettingsPage({
                     : "Next auto-sync can run on the next feed load."}
             </p>
             {syncInProgress ? (
-              <p className="text-sm text-muted-foreground">Sync in progress.</p>
+              <p className="inline-flex items-center text-sm text-muted-foreground"><ActivityIndicator label="Pinterest sync in progress" className="mr-2 h-4 w-4" />Sync in progress.</p>
             ) : null}
             {connection.accessTokenExpiresAt ? (
               <p className="text-sm text-muted-foreground">
@@ -161,8 +162,9 @@ export default async function PinterestSettingsPage({
                 </AppTransitionLink>
               </div>
               {latestSync ? (
-                <p className="mt-1 text-muted-foreground">
-                  {latestSync.status === "success" ? "Succeeded" : "Failed"} {formatRelativeTimeShort(latestSync.startedAt)} · {latestSync.createdRecipeCount} added, {latestSync.removedRecipeCount} removed, {latestSync.restoredRecipeCount} restored.
+                <p className="mt-1 inline-flex items-center text-muted-foreground">
+                  {latestSync.status === "running" ? <ActivityIndicator label="Latest Pinterest sync running" className="mr-1.5" /> : null}
+                  {latestSync.status === "success" ? "Succeeded" : latestSync.status === "error" ? "Failed" : "Running"} {formatRelativeTimeShort(latestSync.startedAt)} · {latestSync.createdRecipeCount} added, {latestSync.removedRecipeCount} removed, {latestSync.restoredRecipeCount} restored.
                   {latestSync.message ? ` ${latestSync.message}` : ""}
                 </p>
               ) : (

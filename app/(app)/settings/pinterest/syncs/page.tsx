@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
+import { ActivityIndicator } from "@/components/activity-indicator";
 import { LocalDateTime } from "@/components/local-date-time";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,7 +31,7 @@ export default async function PinterestSyncHistoryPage() {
         <CardContent>
           <div className="space-y-3 md:hidden">
             {runs.length === 0 ? <p className="rounded-2xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">No syncs have run yet.</p> : null}
-            {runs.map((run) => <div key={run.syncRunId} className="rounded-2xl border border-border/60 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><Badge variant={run.status === "success" ? "success" : run.status === "error" ? "destructive" : "secondary"}>{run.status === "success" ? "Succeeded" : run.status === "error" ? "Failed" : "Running"}</Badge><AppTransitionLink href={`/settings/pinterest/syncs/${run.syncRunId}`} className="text-sm text-primary underline-offset-4 hover:underline">Details</AppTransitionLink></div><p className="mt-2 text-sm"><LocalDateTime value={run.startedAt} /> · {run.trigger === "auto_feed_load" ? "Automatic" : run.trigger === "force" ? "Force resync" : "Manual"}</p><p className="mt-2 text-sm text-muted-foreground">{run.createdRecipeCount} added · {run.removedRecipeCount} removed · {run.restoredRecipeCount} restored</p></div>)}
+            {runs.map((run) => <div key={run.syncRunId} className="rounded-2xl border border-border/60 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><SyncStatusBadge status={run.status} /><AppTransitionLink href={`/settings/pinterest/syncs/${run.syncRunId}`} className="text-sm text-primary underline-offset-4 hover:underline">Details</AppTransitionLink></div><p className="mt-2 text-sm"><LocalDateTime value={run.startedAt} /> · {run.trigger === "auto_feed_load" ? "Automatic" : run.trigger === "force" ? "Force resync" : "Manual"}</p><p className="mt-2 text-sm text-muted-foreground">{run.createdRecipeCount} added · {run.removedRecipeCount} removed · {run.restoredRecipeCount} restored</p></div>)}
           </div>
           <div className="hidden md:block"><Table>
             <TableHeader><TableRow><TableHead>Started</TableHead><TableHead>Result</TableHead><TableHead>Trigger</TableHead><TableHead>Changes</TableHead><TableHead /></TableRow></TableHeader>
@@ -39,7 +40,7 @@ export default async function PinterestSyncHistoryPage() {
               {runs.map((run) => (
                 <TableRow key={run.syncRunId}>
                   <TableCell><LocalDateTime value={run.startedAt} /></TableCell>
-                  <TableCell><Badge variant={run.status === "success" ? "success" : run.status === "error" ? "destructive" : "secondary"}>{run.status === "success" ? "Succeeded" : run.status === "error" ? "Failed" : "Running"}</Badge></TableCell>
+                  <TableCell><SyncStatusBadge status={run.status} /></TableCell>
                   <TableCell>{run.trigger === "auto_feed_load" ? "Automatic" : run.trigger === "force" ? "Force resync" : "Manual"}</TableCell>
                   <TableCell>{run.createdRecipeCount} added · {run.removedRecipeCount} removed · {run.restoredRecipeCount} restored</TableCell>
                   <TableCell className="text-right"><AppTransitionLink href={`/settings/pinterest/syncs/${run.syncRunId}`} className="text-primary underline-offset-4 hover:underline">Details</AppTransitionLink></TableCell>
@@ -52,4 +53,11 @@ export default async function PinterestSyncHistoryPage() {
       </Card>
     </div>
   );
+}
+
+function SyncStatusBadge({ status }: { status: string }) {
+  const running = status === "running";
+  const label = status === "success" ? "Succeeded" : status === "error" ? "Failed" : "Running";
+
+  return <Badge variant={status === "success" ? "success" : status === "error" ? "destructive" : "secondary"}>{running ? <ActivityIndicator label="Pinterest sync running" className="mr-1.5" /> : null}{label}</Badge>;
 }

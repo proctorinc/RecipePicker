@@ -8,6 +8,7 @@ import { toast } from "sonner";
 
 import { cancelRecipeParseJobAction, resumeRecipeParseJobAction } from "@/lib/actions/operations";
 import { StatusBadge } from "@/components/status-badge";
+import { ActivityIndicator } from "@/components/activity-indicator";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -37,6 +38,8 @@ const initialState: ActionState = {
   message: "",
 };
 
+const RECIPES_PER_PAGE = 25;
+
 type BoardOption = {
   value: string;
   label: string;
@@ -64,6 +67,7 @@ export function RecipeOpsTable({
   const [boardFilter, setBoardFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [titleFilter, setTitleFilter] = useState("");
+  const [page, setPage] = useState(1);
   const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
   const [state, formAction] = useActionState(rerunRecipesAction, initialState);
   const [cancelState, cancelFormAction] = useActionState(cancelRecipeParseJobAction, initialState);
@@ -100,6 +104,10 @@ export function RecipeOpsTable({
   }, [boardFilter, items, statusFilter, titleFilter]);
 
   const filteredIds = filteredItems.map((item) => item.recipeId);
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / RECIPES_PER_PAGE));
+  const currentPage = Math.min(page, totalPages);
+  const firstItemIndex = (currentPage - 1) * RECIPES_PER_PAGE;
+  const pageItems = filteredItems.slice(firstItemIndex, firstItemIndex + RECIPES_PER_PAGE);
   const allFilteredSelected =
     filteredIds.length > 0 &&
     filteredIds.every((id) => selectedRecipeIds.includes(id));
@@ -142,6 +150,10 @@ export function RecipeOpsTable({
 
     return () => window.clearInterval(timer);
   }, [jobs, router]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [boardFilter, statusFilter, titleFilter]);
 
   function toggleRecipe(recipeId: string, checked: boolean) {
     setSelectedRecipeIds((current) => {
@@ -248,13 +260,13 @@ export function RecipeOpsTable({
         </div>
       </div>
 
-      <div className="space-y-2 md:hidden">
+      <div className="max-h-[60vh] space-y-2 overflow-y-auto overscroll-contain pr-1 md:hidden">
         {filteredItems.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">
             No recipes match the current filters.
           </div>
         ) : null}
-        {filteredItems.map((item) => (
+        {pageItems.map((item) => (
           <RecipeOpsMobileCard
             key={item.recipeId}
             item={item}
@@ -265,7 +277,7 @@ export function RecipeOpsTable({
         ))}
       </div>
 
-      <div className="hidden md:block">
+      <div className="hidden max-h-[60vh] overflow-auto overscroll-contain rounded-2xl border border-border/60 md:block">
       <Table>
         <TableHeader>
           <TableRow>
@@ -288,7 +300,7 @@ export function RecipeOpsTable({
               </TableCell>
             </TableRow>
           ) : null}
-          {filteredItems.map((item) => (
+          {pageItems.map((item) => (
             <TableRow key={item.recipeId}>
               <TableCell>
                 <input
@@ -335,6 +347,51 @@ export function RecipeOpsTable({
         </TableBody>
       </Table>
       </div>
+
+      {filteredItems.length > 0 ? (
+        <RecipeListPagination
+          currentPage={currentPage}
+          firstItemIndex={firstItemIndex}
+          onPageChange={setPage}
+          totalItems={filteredItems.length}
+          totalPages={totalPages}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function RecipeListPagination({
+  currentPage,
+  firstItemIndex,
+  onPageChange,
+  totalItems,
+  totalPages,
+}: {
+  currentPage: number;
+  firstItemIndex: number;
+  onPageChange: (page: number) => void;
+  totalItems: number;
+  totalPages: number;
+}) {
+  const lastItemIndex = Math.min(firstItemIndex + RECIPES_PER_PAGE, totalItems);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-muted-foreground">
+        Showing {firstItemIndex + 1}–{lastItemIndex} of {totalItems} recipes
+      </p>
+      {totalPages > 1 ? (
+        <div className="flex items-center justify-between gap-3 sm:justify-end">
+          <Button type="button" variant="outline" size="sm" disabled={currentPage === 1} onClick={() => onPageChange(currentPage - 1)}>
+            Previous
+          </Button>
+          <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
+          <Button type="button" variant="outline" size="sm" disabled={currentPage === totalPages} onClick={() => onPageChange(currentPage + 1)}>
+            Next
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -397,7 +454,7 @@ function BulkRerunButton({
 
   return (
     <Button type="submit" variant="secondary" disabled={pending || disabled}>
-      {pending ? "Starting job..." : children}
+      {pending ? <><ActivityIndicator label="Starting parse job" className="mr-2 h-4 w-4" />Starting job...</> : children}
     </Button>
   );
 }
@@ -436,7 +493,7 @@ function RecipeParseJobsPanel({
               </p>
             </div>
             <Button type="button" variant="outline" onClick={onRefresh} disabled={refreshing}>
-              {refreshing ? "Refreshing..." : "Refresh jobs"}
+              {refreshing ? <><ActivityIndicator label="Refreshing jobs" className="mr-2 h-4 w-4" />Refreshing...</> : "Refresh jobs"}
             </Button>
           </div>
 
@@ -451,7 +508,7 @@ function RecipeParseJobsPanel({
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">Job {job.jobId.slice(0, 8)}</span>
                   <StatusPill status={job.status} />
-                  <span className="text-sm text-muted-foreground">{job.currentPhase}</span>
+                  <JobPhase status={job.status} phase={job.currentPhase} />
                 </div>
                 <p className="text-sm text-muted-foreground">
                   Requested by {job.requestedByLabel} on {formatDate(job.createdAt)}
@@ -547,10 +604,27 @@ function RecentJobsDialog({ jobs }: { jobs: RecipeParseJobSummary[] }) {
 
 function StatusPill({ status }: { status: RecipeParseJobSummary["status"] }) {
   const label = status.replaceAll("_", " ");
+  const active = ["queued", "running", "cancelling"].includes(status);
 
   return (
-    <span className="rounded-full border border-border/60 px-2 py-1 text-xs uppercase tracking-wide text-muted-foreground">
+    <span className="inline-flex items-center rounded-full border border-border/60 px-2 py-1 text-xs uppercase tracking-wide text-muted-foreground">
+      {active ? <ActivityIndicator label={`${label} parse job`} className="mr-1.5" /> : null}
       {label}
+    </span>
+  );
+}
+
+function JobPhase({ status, phase }: { status: RecipeParseJobSummary["status"]; phase: string }) {
+  const active = ["queued", "running", "cancelling"].includes(status);
+
+  return (
+    <span className="inline-flex items-center text-sm text-muted-foreground">
+      {phase}
+      {active ? (
+        <span className="status-activity-dots ml-1 inline-flex gap-0.5" aria-hidden="true">
+          <span>•</span><span>•</span><span>•</span>
+        </span>
+      ) : null}
     </span>
   );
 }
