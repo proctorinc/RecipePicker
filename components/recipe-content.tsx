@@ -135,27 +135,25 @@ export function RecipeContent({
                         <p className="min-w-0 pt-1 font-medium text-foreground">{parts.description || "New ingredient"}</p>
                       </div>;
                     })()}
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        className="h-12 w-12"
+                        size="sm"
                         disabled={ingredient.isPendingDeletion}
                         onClick={() => setEditingIngredientId(ingredient.id)}
-                        aria-label={`Edit ingredient ${index + 1}`}
                       >
-                        <Pencil className="size-7" />
+                        <Pencil className="size-4" />
+                        Edit
                       </Button>
                       <Button
                         type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-12 w-12"
+                        variant={ingredient.isPendingDeletion ? "ghost" : "destructive"}
+                        size="sm"
                         onClick={() => deleteIngredient(ingredient.id)}
-                        aria-label={`${ingredient.isPendingDeletion ? "Restore" : "Delete"} ingredient ${index + 1}`}
                       >
-                        {ingredient.isPendingDeletion ? <RotateCcw className="size-7" /> : <Trash2 className="size-7" />}
+                        {ingredient.isPendingDeletion ? <RotateCcw className="size-4" /> : <Trash2 className="size-4" />}
+                        {ingredient.isPendingDeletion ? "Restore" : "Delete"}
                       </Button>
                     </div>
                   </div>
@@ -202,13 +200,12 @@ export function RecipeContent({
                       <span className="text-sm font-medium">Step {index + 1}</span>
                       <Button
                         type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-12 w-12"
+                        variant={step.isPendingDeletion ? "ghost" : "destructive"}
+                        size="sm"
                         onClick={() => setSteps((current) => current.map((item) => item.id === step.id ? { ...item, isPendingDeletion: !item.isPendingDeletion } : item))}
-                        aria-label={`${step.isPendingDeletion ? "Restore" : "Remove"} step ${index + 1}`}
                       >
-                        {step.isPendingDeletion ? <RotateCcw className="size-7" /> : <Trash2 className="size-7" />}
+                        {step.isPendingDeletion ? <RotateCcw className="size-4" /> : <Trash2 className="size-4" />}
+                        {step.isPendingDeletion ? "Restore" : "Delete"}
                       </Button>
                     </div>
                     <Textarea

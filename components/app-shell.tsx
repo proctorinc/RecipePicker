@@ -14,6 +14,7 @@ import { AppShellProgress } from "@/components/app-route-transition";
 import { AppShellUserButton } from "@/components/app-shell-user-button";
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { MobileAwareAppHeader } from "@/components/mobile-aware-app-header";
+import { RecipeHeaderBackButton } from "@/components/recipe-header-back-button";
 import { Button } from "@/components/ui/button";
 import { MobileNav } from "@/components/mobile-nav";
 
@@ -99,22 +100,25 @@ export async function AppShell({
       >
         <AppShellProgress />
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <AppTransitionLink
-            href="/"
-            prefetch
-            className="flex items-center gap-3"
-            pendingClassName="opacity-80"
-          >
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
-              <Soup className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="font-[family-name:var(--font-serif)] text-lg font-semibold">
-                Recipe Picker
-              </p>
-              <p className="text-xs text-muted-foreground">{householdName}</p>
-            </div>
-          </AppTransitionLink>
+          <div className="flex items-center gap-1">
+            <RecipeHeaderBackButton />
+            <AppTransitionLink
+              href="/"
+              prefetch
+              className="flex items-center gap-3"
+              pendingClassName="opacity-80"
+            >
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                <Soup className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-[family-name:var(--font-serif)] text-lg font-semibold">
+                  Recipe Picker
+                </p>
+                <p className="text-xs text-muted-foreground">{householdName}</p>
+              </div>
+            </AppTransitionLink>
+          </div>
 
           <nav className="hidden items-center gap-2 md:flex">
             <Button asChild className="rounded-full">

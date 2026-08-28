@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowLeft, Check, Pencil, Plus, X } from "lucide-react";
+import { Check, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -47,7 +47,6 @@ type RecipeMetadataEditorProps = {
   description: string | null;
   tags: Array<{ tagId: string; name: string }>;
   availableTags: Array<{ tagId: string; name: string }>;
-  backHref: string;
   children: React.ReactNode;
   topContent?: React.ReactNode;
   content?: React.ReactNode;
@@ -60,7 +59,6 @@ export function RecipeMetadataEditor({
   description,
   tags,
   availableTags,
-  backHref,
   children,
   topContent,
   content,
@@ -165,8 +163,7 @@ export function RecipeMetadataEditor({
           <input type="hidden" name="recipeId" value={recipeId} />
           <div className="relative left-1/2 w-screen -translate-x-1/2">
             {children}
-            <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between p-4 sm:p-6">
-              <BackButton fallbackHref={backHref} />
+            <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-end p-4 sm:p-6">
               <EditSubmitButton
                 isEditing={isEditing}
                 pending={pending}
@@ -269,30 +266,6 @@ export function RecipeMetadataEditor({
         </div>
       </div>
     </RecipeEditingContext.Provider>
-  );
-}
-
-function BackButton({ fallbackHref }: { fallbackHref: string }) {
-  const router = useRouter();
-
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="icon"
-      className="h-14 w-14 border-white/60 bg-background/85 text-foreground backdrop-blur hover:bg-background"
-      aria-label="Go back"
-      onClick={() => {
-        if (window.history.length > 1) {
-          router.back();
-          return;
-        }
-
-        router.push(fallbackHref);
-      }}
-    >
-      <ArrowLeft className="size-6 shrink-0" />
-    </Button>
   );
 }
 
@@ -478,14 +451,14 @@ function EditSubmitButton({
       type="button"
       variant="outline"
       size="icon"
-      className="h-14 w-14 border-white/60 bg-background/85 text-foreground backdrop-blur hover:bg-background"
+      className="size-11 border-white/60 bg-background/85 text-foreground backdrop-blur hover:bg-background"
       disabled={pending}
       aria-label="Edit recipe"
       onClick={() => {
         onEnableEditing();
       }}
     >
-      <Pencil className="size-6 shrink-0" />
+      <Pencil className="size-4 shrink-0" />
     </Button>
   );
 }

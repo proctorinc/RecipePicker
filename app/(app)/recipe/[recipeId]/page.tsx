@@ -30,13 +30,10 @@ export const dynamic = "force-dynamic";
 
 export default async function RecipePage({
   params,
-  searchParams,
 }: {
   params: Promise<{ recipeId: string }>;
-  searchParams: Promise<{ reviewRecipeId?: string; historyMonth?: string }>;
 }) {
   const { recipeId } = await params;
-  const { reviewRecipeId, historyMonth } = await searchParams;
   const [recipe, access, publishOptions, availableTags] = await Promise.all([
     getRecipeDetail(recipeId),
     getCurrentUserAccess(),
@@ -48,10 +45,6 @@ export default async function RecipePage({
     notFound();
   }
 
-  const backHref =
-    reviewRecipeId && reviewRecipeId === recipeId
-      ? `/history?recipeId=${encodeURIComponent(recipeId)}&from=recipe${historyMonth ? `&month=${encodeURIComponent(historyMonth)}` : ""}`
-      : "/";
   return (
     <PageShell className="max-w-none">
       <RecipePageScrollToTop />
@@ -61,7 +54,6 @@ export default async function RecipePage({
         description={recipe.description}
         tags={recipe.tags}
         availableTags={availableTags}
-        backHref={backHref}
         content={
           <RecipeContent
             recipe={recipe}
