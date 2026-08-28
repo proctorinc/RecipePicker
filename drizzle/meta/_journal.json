@@ -141,6 +141,20 @@
       "when": 1787876781228,
       "tag": "0020_romantic_marvel_boy",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1787934962377,
+      "tag": "0021_ordinary_rawhide_kid",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1787936371918,
+      "tag": "0022_concerned_mad_thinker",
+      "breakpoints": true
     }
   ]
 }

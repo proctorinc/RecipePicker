@@ -1,9 +1,22 @@
-import { ActionForm } from "@/components/action-form";
-import { ShareInviteLink } from "@/components/share-invite-link";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { createInviteAction } from "@/lib/actions/operations";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { KitchenSettingsForm } from "@/components/kitchen-settings-form";
+import { KitchenInviteButton } from "@/components/kitchen-invite-button";
+import { PendingInviteCook } from "@/components/pending-invite-cook";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { getHouseholdInviteUrl } from "@/lib/household-invite-url";
 import { requireHouseholdContext } from "@/lib/server/auth";
 import { getHouseholdMembersView, getLatestInvite } from "@/lib/server/queries";
@@ -17,91 +30,143 @@ export default async function MembersPage() {
     getHouseholdMembersView(),
     getLatestInvite(),
   ]);
-  const inviteUrl = latestInvite ? getHouseholdInviteUrl(latestInvite.inviteToken) : null;
+  const inviteUrl = latestInvite
+    ? getHouseholdInviteUrl(latestInvite.inviteToken)
+    : null;
 
   return (
     <div className="space-y-6">
-
       <Card>
-        <CardHeader>
-          <CardTitle>Shared household</CardTitle>
-          <CardDescription>
-            Members of {context.householdName} share one recipe library and one Pinterest connection.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {context.role === "owner" ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <ActionForm action={createInviteAction} buttonVariant="default">
-                Create invite link
-              </ActionForm>
-              {inviteUrl ? (
-                <>
-                  <ShareInviteLink householdName={context.householdName} inviteUrl={inviteUrl} />
-                  <code className="max-w-full truncate rounded-full bg-secondary px-4 py-2 text-xs">
-                    {inviteUrl}
-                  </code>
-                </>
-              ) : null}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Only owners can create new invite links for this household.
-            </p>
-          )}
-          {latestInvite ? (
-            <p className="text-sm text-muted-foreground">
-              Invite expires {formatDate(latestInvite.expiresAt)}.
-            </p>
-          ) : null}
+        <CardContent className="p-4 sm:p-6">
+          <KitchenSettingsForm
+            name={context.householdName}
+            logoUrl={context.householdLogoUrl}
+          />
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Members</CardTitle>
-          <CardDescription>Roles are intentionally simple for v1: owners manage sharing and integrations, members use the household.</CardDescription>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <div className="space-y-1.5">
+            <CardTitle>Cooks</CardTitle>
+            <CardDescription>
+              Can't have too many cooks in this kitchen! Share to add more
+              people to your family
+            </CardDescription>
+          </div>
+          {context.role === "owner" ? (
+            <KitchenInviteButton
+              kitchenName={context.householdName}
+              inviteUrl={inviteUrl}
+            />
+          ) : null}
         </CardHeader>
         <CardContent>
           <div className="space-y-3 md:hidden">
             {members.map((member) => (
-              <div key={member.clerkUserId} className="rounded-2xl border border-border/60 p-4">
+              <div
+                key={member.clerkUserId}
+                className="rounded-2xl border border-border/60 p-4"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2"><span className="font-medium">{member.name}</span>{member.isCurrentUser ? <Badge variant="outline">You</Badge> : null}</div>
-                  <Badge variant={member.role === "owner" ? "success" : "secondary"}>{member.role}</Badge>
+                  <div className="flex items-center gap-2">
+                    <CookAvatar name={member.name} imageUrl={member.imageUrl} />
+                    <span className="font-medium">{member.name}</span>
+                    {member.isCurrentUser ? (
+                      <Badge variant="outline">You</Badge>
+                    ) : null}
+                  </div>
+                  <Badge
+                    variant={member.role === "owner" ? "success" : "secondary"}
+                  >
+                    {member.role === "owner" ? "Owner" : "Cook"}
+                  </Badge>
                 </div>
-                <p className="mt-2 text-sm text-muted-foreground">Joined {formatDate(member.joinedAt)}</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Joined {formatDate(member.joinedAt)}
+                </p>
               </div>
             ))}
           </div>
-          <div className="hidden md:block"><Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Joined</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {members.map((member) => (
-                <TableRow key={member.clerkUserId}>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{member.name}</span>
-                      {member.isCurrentUser ? <Badge variant="outline">You</Badge> : null}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={member.role === "owner" ? "success" : "secondary"}>{member.role}</Badge>
-                  </TableCell>
-                  <TableCell>{formatDate(member.joinedAt)}</TableCell>
+          <div className="hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Joined</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {members.map((member) => (
+                  <TableRow key={member.clerkUserId}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <CookAvatar
+                          name={member.name}
+                          imageUrl={member.imageUrl}
+                        />
+                        <span className="font-medium">{member.name}</span>
+                        {member.isCurrentUser ? (
+                          <Badge variant="outline">You</Badge>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          member.role === "owner" ? "success" : "secondary"
+                        }
+                      >
+                        {member.role === "owner" ? "Owner" : "Cook"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{formatDate(member.joinedAt)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
+          {latestInvite && inviteUrl ? (
+            <div className="mt-3">
+              <PendingInviteCook
+                inviteToken={latestInvite.inviteToken}
+                inviteUrl={inviteUrl}
+                expiresAt={latestInvite.expiresAt}
+              />
+            </div>
+          ) : null}
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function CookAvatar({
+  name,
+  imageUrl,
+}: {
+  name: string;
+  imageUrl: string | null;
+}) {
+  if (imageUrl) {
+    return (
+      // Clerk profile images are displayed as the cook's avatar.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={imageUrl}
+        alt=""
+        className="h-9 w-9 shrink-0 rounded-full object-cover"
+      />
+    );
+  }
+
+  return (
+    <span
+      aria-hidden
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground"
+    >
+      {name.charAt(0).toUpperCase()}
+    </span>
   );
 }

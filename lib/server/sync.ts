@@ -1101,7 +1101,9 @@ export async function queuePinterestSync(args: {
       requestedByClerkUserId: args.requestedByClerkUserId ?? null,
       trigger: args.trigger, status: "queued", selectedBoardIdsJson: JSON.stringify(subscriptions),
       currentBoardId: null, nextBookmark: null, lastHeartbeatAt: null, lastError: null,
-      parseNewRecipes: args.parseNewRecipes ?? (args.trigger === "force" || args.trigger === "auto_feed_load"),
+      parseNewRecipes: args.parseNewRecipes ?? true,
+      recipeParseJobId: null,
+      recipeParseJobQueuedAt: null,
       createdAt: now, updatedAt: now, completedAt: null,
     }).returning().get();
     if (!job) throw new Error("Unable to create Pinterest sync job.");
@@ -1113,12 +1115,74 @@ export async function queuePinterestSync(args: {
   } finally { await sqlite.close(); }
 }
 
+/**
+ * Create exactly one parse job after a sync has reconciled every selected pin,
+ * then publish its worker event. The job ID is persisted before publication so
+ * an Inngest retry can finish a failed handoff without creating a duplicate.
+ */
+async function queuePinterestSyncRecipeParseJob(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  job: typeof pinterestSyncJobs.$inferSelect,
+) {
+  if (!job.parseNewRecipes || job.recipeParseJobQueuedAt) return;
+
+  let parseJobId = job.recipeParseJobId;
+  if (!parseJobId) {
+    const requester = job.requestedByClerkUserId ?? (await db.query.pinterestAccounts.findFirst({
+      where: (table, { and: whereAnd, eq: whereEq }) => whereAnd(
+        whereEq(table.householdId, job.householdId),
+        whereEq(table.provider, "pinterest"),
+      ),
+      columns: { connectedByClerkUserId: true },
+    }))?.connectedByClerkUserId;
+    const changes = await db.query.pinterestSyncRecipeChanges.findMany({
+      where: (table, { eq: whereEq }) => whereEq(table.syncRunId, job.syncRunId),
+      columns: { changeType: true, recipeId: true },
+    });
+    const recipeIds = changes
+      .filter((change) => change.changeType === "created")
+      .map((change) => change.recipeId);
+
+    if (recipeIds.length === 0) return;
+    if (!requester) throw new Error("Pinterest sync completed without a user available to request recipe parsing.");
+
+    const parseJob = await createRecipeParseJob({
+      householdId: job.householdId,
+      requestedByClerkUserId: requester,
+      recipeIds,
+      rerun: false,
+      mode: "pinterest_sync",
+    });
+    if (!parseJob.ok) throw new Error(`Unable to create the Pinterest recipe parse job: ${parseJob.message}`);
+
+    parseJobId = parseJob.jobId;
+    await db.update(pinterestSyncJobs)
+      .set({ recipeParseJobId: parseJobId, updatedAt: new Date().toISOString() })
+      .where(eq(pinterestSyncJobs.jobId, job.jobId))
+      .run();
+  }
+
+  await sendRecipeParseJobRequestedEvent({
+    jobId: parseJobId,
+    householdId: job.householdId,
+    trigger: "create",
+  });
+  await db.update(pinterestSyncJobs)
+    .set({ recipeParseJobQueuedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
+    .where(eq(pinterestSyncJobs.jobId, job.jobId))
+    .run();
+}
+
 export async function processPinterestSyncJobPage(jobId: string) {
   const { db, sqlite } = await openDatabase();
   try {
     const job = await db.query.pinterestSyncJobs.findFirst({ where: (table, { eq: whereEq }) => whereEq(table.jobId, jobId) });
     if (!job) return { status: "not_found" as const };
-    if (job.status === "success" || job.status === "error" || job.status === "cancelled") return { status: "finished" as const };
+    if (job.status === "success") {
+      await queuePinterestSyncRecipeParseJob(db, job);
+      return { status: "finished" as const };
+    }
+    if (job.status === "error" || job.status === "cancelled") return { status: "finished" as const };
     const boards = JSON.parse(job.selectedBoardIdsJson) as Array<{ id: string; name: string | null }>;
     const board = job.currentBoardId ? boards.find((item) => item.id === job.currentBoardId) : boards[0];
     if (!board) {
@@ -1135,14 +1199,7 @@ export async function processPinterestSyncJobPage(jobId: string) {
       await db.update(pinterestSyncRuns).set({ status: "success", completedAt: now, boardCount: scopeBoardIds.size, pinCount: run?.processedPinCount ?? 0, createdRecipeCount: counts.created, removedRecipeCount: counts.removed, restoredRecipeCount: counts.restored }).where(eq(pinterestSyncRuns.syncRunId, job.syncRunId)).run();
       await db.update(pinterestSyncJobs).set({ status: "success", completedAt: now, lastHeartbeatAt: now, updatedAt: now }).where(eq(pinterestSyncJobs.jobId, jobId)).run();
       await updatePinterestConnectionSyncStatus({ householdId: job.householdId, status: "success" });
-      if (job.parseNewRecipes) {
-        const requester = job.requestedByClerkUserId ?? (await db.query.pinterestAccounts.findFirst({ where: (table, { and: whereAnd, eq: whereEq }) => whereAnd(whereEq(table.householdId, job.householdId), whereEq(table.provider, "pinterest")), columns: { connectedByClerkUserId: true } }))?.connectedByClerkUserId;
-        const recipeIds = changes.filter((change) => change.changeType === "created").map((change) => change.recipeId);
-        if (requester && recipeIds.length > 0) {
-          const parseJob = await createRecipeParseJob({ householdId: job.householdId, requestedByClerkUserId: requester, recipeIds, rerun: false, mode: "pinterest_sync" });
-          if (parseJob.ok) await sendRecipeParseJobRequestedEvent({ jobId: parseJob.jobId, householdId: job.householdId, trigger: "create" });
-        }
-      }
+      await queuePinterestSyncRecipeParseJob(db, job);
       return { status: "completed" as const, syncRunId: job.syncRunId };
     }
     const token = await getValidPinterestAccessToken(job.householdId);
@@ -1168,7 +1225,7 @@ export async function markPinterestSyncJobFailure(jobId: string, error: unknown)
   const { db, sqlite } = await openDatabase();
   try {
     const job = await db.query.pinterestSyncJobs.findFirst({ where: (table, { eq: whereEq }) => whereEq(table.jobId, jobId) });
-    if (!job) return;
+    if (!job || job.status === "success") return;
     const now = new Date().toISOString(); const message = error instanceof Error ? error.message : String(error);
     await db.update(pinterestSyncJobs).set({ status: "error", lastError: message, completedAt: now, updatedAt: now }).where(eq(pinterestSyncJobs.jobId, jobId)).run();
     await db.update(pinterestSyncRuns).set({ status: "error", completedAt: now, message }).where(eq(pinterestSyncRuns.syncRunId, job.syncRunId)).run();
@@ -1211,7 +1268,7 @@ function toSyncClaimError(status: SyncClaimResult["status"]) {
     case "skipped_locked":
       return new Error("Pinterest sync is already running.");
     case "skipped_not_connected":
-      return new Error("Pinterest is not connected for this household.");
+      return new Error("Pinterest is not connected for this kitchen.");
     case "skipped_no_boards":
       return new Error("No boards are selected for sync yet.");
     case "skipped_cooldown":

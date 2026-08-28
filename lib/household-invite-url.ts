@@ -5,7 +5,7 @@ export function getHouseholdInviteUrl(inviteToken: string): string {
   const appUrl = configuredUrl || (process.env.NODE_ENV === "production" ? null : LOCAL_APP_URL);
 
   if (!appUrl) {
-    throw new Error("APP_URL must be configured to create household invite links.");
+    throw new Error("APP_URL must be configured to create kitchen invite links.");
   }
 
   const url = new URL(appUrl);

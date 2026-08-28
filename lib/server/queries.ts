@@ -14,6 +14,7 @@ import {
   householdCanonicalIngredients,
   householdIngredientAliases,
   householdInvites,
+  householdPins,
   householdRecipeParseJobItems,
   householdRecipeParseJobs,
   householdRecipeIngredients,
@@ -435,7 +436,7 @@ export async function getPublicRecipeDetail(
       const imageSources = resolveRecipeImageSources(row.imageUrl, row.recipeInstructions?.imageUrl, row.pin.mediaJson, row.pin.rawJson);
       return {
         recipeId: row.recipeId, title: row.title ?? row.pin.title ?? row.recipeInstructions?.title ?? "Untitled recipe", imageUrl: imageSources.imageUrl, previewImageUrl: imageSources.previewImageUrl,
-        householdName: household?.name ?? "A Food Picker household",
+        householdName: household?.name ?? "A Food Picker kitchen",
         description: row.description ?? row.pin.description ?? row.recipeInstructions?.description ?? null, sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link, dominantColor: row.pin.dominantColor,
         yieldText: row.recipeInstructions?.yieldText ?? null, prepTime: row.recipeInstructions?.prepTime ?? null, cookTime: row.recipeInstructions?.cookTime ?? null, totalTime: row.recipeInstructions?.totalTime ?? null,
         ingredients: row.recipeInstructions?.ingredients.map((ingredient) => ({ id: ingredient.ingredientId, originalText: ingredient.originalText, displayText: ingredient.originalText, amount: ingredient.amountText, amountValue: ingredient.amountValue, amountMaxValue: ingredient.amountMaxValue, unit: ingredient.unit, parsedText: ingredient.ingredientText, notes: ingredient.notes, canonicalIngredientId: ingredient.canonicalIngredientId, canonicalName: ingredient.canonicalIngredient?.displayName ?? null, attributes: parseJsonArray(ingredient.attributesJson), normalizationStatus: toIngredientStatus(ingredient.normalizationStatus) })) ?? [],
@@ -449,7 +450,7 @@ export async function getPublicRecipeDetail(
       where: (table, { eq }) => eq(table.householdId, selected.householdId),
       columns: { name: true },
     });
-    return { ...snapshot, recipeId, previewImageUrl: null, householdName: household?.name ?? "A Food Picker household", versionNumber: selected.versionNumber, latestVersionNumber: versions[0]?.versionNumber ?? selected.versionNumber };
+    return { ...snapshot, recipeId, previewImageUrl: null, householdName: household?.name ?? "A Food Picker kitchen", versionNumber: selected.versionNumber, latestVersionNumber: versions[0]?.versionNumber ?? selected.versionNumber };
   } finally {
     await sqlite.close();
   }
@@ -960,6 +961,11 @@ export async function getPinterestSyncRunDetail(syncRunId: string) {
       where: (table, { eq }) => eq(table.syncRunId, syncRunId),
       columns: { jobId: true, status: true, lastError: true, lastHeartbeatAt: true },
     });
+    const latestRun = await db.query.pinterestSyncRuns.findFirst({
+      where: (table, { eq }) => eq(table.householdId, context.householdId),
+      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.startedAt)],
+      columns: { syncRunId: true },
+    });
     const changes = await db.query.pinterestSyncRecipeChanges.findMany({
       where: (table, { eq }) => eq(table.syncRunId, syncRunId),
       orderBy: (table, { asc: orderAsc }) => [asc(table.createdAt)],
@@ -977,6 +983,7 @@ export async function getPinterestSyncRunDetail(syncRunId: string) {
     return {
       run: countedRun,
       job,
+      isLatestRun: latestRun?.syncRunId === syncRunId,
       changes: changes.map((change) => {
         const recipe = recipeById.get(change.recipeId);
         return {
@@ -1000,6 +1007,33 @@ export async function getPinterestSyncRunProgress(syncRunId: string) {
         eq(table.syncRunId, syncRunId),
         eq(table.householdId, context.householdId),
       ),
+      columns: {
+        syncRunId: true,
+        status: true,
+        startedAt: true,
+        completedAt: true,
+        expectedPinCount: true,
+        processedPinCount: true,
+        pinCount: true,
+        message: true,
+      },
+    });
+  } finally {
+    await sqlite.close();
+  }
+}
+
+/** Returns the current household's active Pinterest sync, if there is one. */
+export async function getActivePinterestSyncRunProgress() {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+  try {
+    return await db.query.pinterestSyncRuns.findFirst({
+      where: (table, { and, eq }) => and(
+        eq(table.householdId, context.householdId),
+        eq(table.status, "running"),
+      ),
+      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.startedAt)],
       columns: {
         syncRunId: true,
         status: true,
@@ -1462,28 +1496,11 @@ export async function getBoardSummaries(): Promise<BoardSyncSummary[]> {
         where: (table, { eq }) => eq(table.householdId, context.householdId),
         orderBy: (table, { asc }) => [asc(table.boardName)],
       });
-    const recipeRows = await db.query.householdRecipes
+    const pinRows = await db.query.householdPins
       .findMany({
         where: (table, { eq }) => eq(table.householdId, context.householdId),
-        with: {
-          pin: {
-            with: {
-              recipeExtractions: {
-                orderBy: (table, { desc: orderDesc }) => [
-                  orderDesc(table.createdAt),
-                ],
-              },
-            },
-          },
-          recipeInstructions: {
-            with: {
-              ingredients: {
-                columns: {
-                  normalizationStatus: true,
-                },
-              },
-            },
-          },
+        columns: {
+          pinterestBoardId: true,
         },
       });
 
@@ -1493,37 +1510,13 @@ export async function getBoardSummaries(): Promise<BoardSyncSummary[]> {
 
     return subscriptionRows.map((subscription) => {
       const syncedBoard = syncedBoardById.get(subscription.pinterestBoardId);
-      const boardRecipes = recipeRows.filter(
-        (recipe) =>
-          recipe.removedAt === null &&
-          recipe.pin.pinterestBoardId === subscription.pinterestBoardId,
-      );
-      const statuses = boardRecipes.map((recipe) =>
-        derivePinStatus({
-          removedAt: recipe.removedAt,
-          hasRecipe: Boolean(recipe.recipeInstructions),
-          latestExtractionStatus: recipe.pin.recipeExtractions[0]?.status,
-          latestExtractionLowConfidence:
-            recipe.pin.recipeExtractions[0]?.lowConfidence,
-          ingredientReviewCount: getIngredientReviewCount(
-            recipe.recipeInstructions?.ingredients,
-          ),
-        }),
-      );
-
       return {
         boardId: subscription.pinterestBoardId,
         name: syncedBoard?.name ?? subscription.boardName,
         syncEnabled: subscription.syncEnabled,
-        pinCount: boardRecipes.length,
-        recipeCount: statuses.filter((status) => status === "recipe_ready")
-          .length,
-        pendingCount: statuses.filter((status) => status === "not_extracted")
-          .length,
-        failedCount: statuses.filter((status) => status === "extraction_failed")
-          .length,
-        reviewCount: statuses.filter((status) => status === "needs_review")
-          .length,
+        pinCount: pinRows.filter(
+          (pin) => pin.pinterestBoardId === subscription.pinterestBoardId,
+        ).length,
         lastSyncedAt: syncedBoard?.lastSyncedAt ?? null,
       } satisfies BoardSyncSummary;
     });
@@ -1556,10 +1549,6 @@ export async function getBoardSyncOptions(): Promise<BoardSyncSummary[]> {
       name: board.name ?? stored?.name ?? null,
       syncEnabled: stored?.syncEnabled ?? false,
       pinCount: stored?.pinCount ?? 0,
-      recipeCount: stored?.recipeCount ?? 0,
-      pendingCount: stored?.pendingCount ?? 0,
-      failedCount: stored?.failedCount ?? 0,
-      reviewCount: stored?.reviewCount ?? 0,
       lastSyncedAt: stored?.lastSyncedAt ?? null,
     });
   }
@@ -1633,20 +1622,24 @@ export async function getHouseholdMembersView(): Promise<
   const members = await listHouseholdMembers(context.householdId);
   const client = await clerkClient();
 
-  const memberNames = await Promise.all(
+  const memberProfiles = await Promise.all(
     members.map(async (member) => {
       try {
         const user = await client.users.getUser(member.clerkUserId);
-        return formatReviewerName(user.firstName, user.lastName, user.username);
+        return {
+          name: formatReviewerName(user.firstName, user.lastName, user.username),
+          imageUrl: user.imageUrl ?? null,
+        };
       } catch {
-        return "Household member";
+        return { name: "Kitchen cook", imageUrl: null };
       }
     }),
   );
 
   return members.map((member, index) => ({
     clerkUserId: member.clerkUserId,
-    name: memberNames[index],
+    name: memberProfiles[index].name,
+    imageUrl: memberProfiles[index].imageUrl,
     role: member.role as "owner" | "member",
     joinedAt: member.joinedAt,
     isCurrentUser: member.clerkUserId === context.clerkUserId,
@@ -2573,7 +2566,7 @@ async function getReviewerNameMap(householdId: string) {
           formatReviewerName(user.firstName, user.lastName, user.username),
         ] as const;
       } catch {
-        return [member.clerkUserId, "Household member"] as const;
+        return [member.clerkUserId, "Kitchen cook"] as const;
       }
     }),
   );
@@ -2830,10 +2823,10 @@ function getReviewerName(
   reviewerNames: Map<string, string>,
 ) {
   if (!reviewerClerkUserId) {
-    return "Household member";
+    return "Kitchen cook";
   }
 
-  return reviewerNames.get(reviewerClerkUserId) ?? "Household member";
+  return reviewerNames.get(reviewerClerkUserId) ?? "Kitchen cook";
 }
 
 function formatReviewerName(
@@ -2851,7 +2844,7 @@ function formatReviewerName(
     return username.trim();
   }
 
-  return `Household member`;
+  return `Kitchen cook`;
 }
 
 function toIngredientStatus(

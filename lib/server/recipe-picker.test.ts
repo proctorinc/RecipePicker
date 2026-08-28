@@ -267,7 +267,7 @@ describe("recipe scoring and set building", () => {
     });
 
     expect(favoriteScore.score).toBeGreaterThan(okayScore.score);
-    expect(favoriteScore.matchedReasons).toContain("Rated 4.9 stars by your household");
+    expect(favoriteScore.matchedReasons).toContain("Rated 4.9 stars by your kitchen");
   });
 
   it("matches review note text when requested", () => {

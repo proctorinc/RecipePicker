@@ -52,10 +52,10 @@ export function PinterestAutoSyncToggle({
       <div className="flex items-center justify-between gap-4">
         <div className="space-y-1">
           <label htmlFor={switchId} className="font-medium">
-            Auto-sync Pinterest data
+            Automatic sync
           </label>
           <p className="text-sm text-muted-foreground">
-            Turn the background Pinterest API sync on or off for this household.
+            Keep this kitchen&apos;s Pinterest boards up to date.
           </p>
         </div>
         <input

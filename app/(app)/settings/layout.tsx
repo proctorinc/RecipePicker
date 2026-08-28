@@ -9,7 +9,11 @@ import { requireHouseholdContext } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
 
-export default async function SettingsLayout({ children }: { children: ReactNode }) {
+export default async function SettingsLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const [household, access] = await Promise.all([
     requireHouseholdContext(),
     getCurrentUserAccess(),
@@ -23,7 +27,7 @@ export default async function SettingsLayout({ children }: { children: ReactNode
     <PageShell>
       <PageIntro
         title="Settings"
-        description="Manage board sync, recipe extraction, and parsing diagnostics from one minimal control surface."
+        description="Manage your kitchen, recipes, ingredients, and integrations"
       />
       <SettingsNav
         canManageSettings={household.role === "owner" || access.isActualAdmin}

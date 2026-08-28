@@ -18,6 +18,7 @@ export type HouseholdRole = "owner" | "member";
 export type HouseholdContext = {
   householdId: string;
   householdName: string;
+  householdLogoUrl: string | null;
   role: HouseholdRole;
   clerkUserId: string;
 };
@@ -65,6 +66,7 @@ export const requireHouseholdContext = cache(async function requireHouseholdCont
       return {
         householdId: membership.householdId,
         householdName: membership.household.name,
+        householdLogoUrl: membership.household.logoUrl,
         role: membership.role as HouseholdRole,
         clerkUserId: userId,
       };
@@ -109,6 +111,7 @@ export const requireHouseholdContext = cache(async function requireHouseholdCont
     return {
       householdId,
       householdName,
+      householdLogoUrl: null,
       role: "owner",
       clerkUserId: userId,
     };

@@ -9,6 +9,7 @@ function generatedId(columnName: string) {
 export const households = sqliteTable("households", {
   householdId: text("household_id").primaryKey(),
   name: text("name").notNull(),
+  logoUrl: text("logo_url"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -162,7 +163,11 @@ export const pinterestSyncJobs = sqliteTable(
     nextBookmark: text("next_bookmark"),
     lastHeartbeatAt: text("last_heartbeat_at"),
     lastError: text("last_error"),
+    // Every completed sync hands newly discovered recipes to one parse job.
+    // These fields make that handoff durable and safe to retry.
     parseNewRecipes: integer("parse_new_recipes", { mode: "boolean" }).notNull().default(false),
+    recipeParseJobId: text("recipe_parse_job_id"),
+    recipeParseJobQueuedAt: text("recipe_parse_job_queued_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
     completedAt: text("completed_at"),

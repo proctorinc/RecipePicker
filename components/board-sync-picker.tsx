@@ -1,13 +1,22 @@
 "use client";
 
+import { Check, Loader2, Plus } from "lucide-react";
 import { useActionState, useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { setBoardSyncEnabledAction } from "@/lib/actions/board-actions";
 import { type ActionState } from "@/lib/actions/types";
+import { cn } from "@/lib/utils";
 import type { BoardSyncSummary } from "@/types/view-models";
 
 const initialState: ActionState = {
@@ -17,6 +26,7 @@ const initialState: ActionState = {
 
 export function BoardSyncPicker({ boards }: { boards: BoardSyncSummary[] }) {
   const availableBoards = boards.filter((board) => !board.syncEnabled);
+  const [open, setOpen] = useState(false);
   const [selectedBoardId, setSelectedBoardId] = useState(availableBoards[0]?.boardId ?? "");
   const [state, formAction] = useActionState(setBoardSyncEnabledAction, initialState);
 
@@ -27,6 +37,7 @@ export function BoardSyncPicker({ boards }: { boards: BoardSyncSummary[] }) {
   useEffect(() => {
     if (state.status === "success") {
       toast.success(state.message);
+      setOpen(false);
     } else if (state.status === "error") {
       toast.error(state.message);
     }
@@ -35,34 +46,61 @@ export function BoardSyncPicker({ boards }: { boards: BoardSyncSummary[] }) {
   const selectedBoard = availableBoards.find((board) => board.boardId === selectedBoardId) ?? null;
 
   return (
-    <form action={formAction} className="flex flex-col gap-3 rounded-[22px] border border-border/60 bg-secondary/20 p-4 md:flex-row md:items-center">
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="font-medium">Select board to sync</p>
-        <p className="text-sm text-muted-foreground">Add a Pinterest board here to include it in global sync and board management.</p>
-      </div>
-      <div className="flex w-full flex-col gap-3 md:w-auto md:min-w-[320px] md:flex-row">
-        <select
-          name="boardId"
-          value={selectedBoardId}
-          onChange={(event) => setSelectedBoardId(event.target.value)}
-          disabled={availableBoards.length === 0}
-          className="h-12 w-full rounded-full border border-border bg-background/90 px-5 text-sm shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:min-w-[260px]"
-        >
-          {availableBoards.length === 0 ? (
-            <option value="">No unselected boards available</option>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button aria-label="Add Pinterest board" size="icon" title="Add board" type="button">
+          <Plus className="h-5 w-5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[min(92vw,34rem)] flex-col p-5 sm:p-6">
+        <DialogHeader className="shrink-0 pr-8">
+          <DialogTitle>Add a board</DialogTitle>
+          <DialogDescription>
+            Choose a Pinterest board to include in automatic syncs.
+          </DialogDescription>
+        </DialogHeader>
+        <form action={formAction} className="mt-5 flex min-h-0 flex-1 flex-col gap-4">
+          <input name="boardId" type="hidden" value={selectedBoard?.boardId ?? ""} />
+          <input name="boardName" type="hidden" value={selectedBoard?.name ?? ""} />
+          <input name="syncEnabled" type="hidden" value="true" />
+          {availableBoards.length > 0 ? (
+            <div aria-label="Available Pinterest boards" className="max-h-[min(50vh,22rem)] space-y-2 overflow-y-auto pr-1" role="listbox">
+              {availableBoards.map((board) => {
+                const selected = board.boardId === selectedBoardId;
+                const boardName = board.name ?? board.boardId;
+
+                return (
+                  <button
+                    aria-selected={selected}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-2xl border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      selected
+                        ? "border-primary bg-primary/10"
+                        : "border-border/60 hover:border-primary/40 hover:bg-secondary/40",
+                    )}
+                    key={board.boardId}
+                    onClick={() => setSelectedBoardId(board.boardId)}
+                    role="option"
+                    type="button"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{boardName}</span>
+                      {board.name ? <span className="block truncate text-xs text-muted-foreground">{board.boardId}</span> : null}
+                    </span>
+                    {selected ? <Check aria-hidden="true" className="h-5 w-5 shrink-0 text-primary" /> : null}
+                  </button>
+                );
+              })}
+            </div>
           ) : (
-            availableBoards.map((board) => (
-              <option key={board.boardId} value={board.boardId}>
-                {board.name ?? board.boardId}
-              </option>
-            ))
+            <p className="rounded-2xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">
+              All available Pinterest boards are already syncing.
+            </p>
           )}
-        </select>
-        <input type="hidden" name="boardName" value={selectedBoard?.name ?? ""} />
-        <input type="hidden" name="syncEnabled" value="true" />
-        <PickerSubmitButton disabled={!selectedBoard} />
-      </div>
-    </form>
+          <PickerSubmitButton disabled={!selectedBoard} />
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -70,7 +108,7 @@ function PickerSubmitButton({ disabled }: { disabled: boolean }) {
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" disabled={pending || disabled}>
+    <Button className="w-full" type="submit" disabled={pending || disabled}>
       {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
       Add board
     </Button>

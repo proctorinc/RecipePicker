@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
 
 import { ActionForm } from "@/components/action-form";
-import { ActivityIndicator } from "@/components/activity-indicator";
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { BoardSyncPicker } from "@/components/board-sync-picker";
 import { LocalDateTime } from "@/components/local-date-time";
 import { PinterestAutoSyncToggle } from "@/components/pinterest-auto-sync-toggle";
+import { PinterestConnectionSettings } from "@/components/pinterest-connection-settings";
 import { PinterestSyncProgress } from "@/components/pinterest-sync-progress";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -27,10 +27,7 @@ import {
 import {
   setBoardSyncEnabledAction,
   forcePinterestResyncAction,
-  syncAllBoardsAction,
-  syncBoardAction,
 } from "@/lib/actions/board-actions";
-import { disconnectPinterestAction } from "@/lib/actions/operations";
 import {
   requireOwnerOrAdminIntegrationAccess,
 } from "@/lib/server/access";
@@ -80,14 +77,21 @@ export default async function PinterestSettingsPage({
   const latestSync = syncRuns[0] ?? null;
   const syncInProgress = latestSync?.status === "running";
   const syncedBoards = boards.filter((board) => board.syncEnabled);
+  const totalPins = syncedBoards.reduce(
+    (total, board) => total + board.pinCount,
+    0,
+  );
   const syncFrequency = formatPinterestAutoSyncFrequency(
     appAccess.subscriptionTier,
   );
   const canManagePinterest = household.role === "owner";
   const canManageAutoSync = appAccess.isActualAdmin;
-  const syncRecency = connection.lastSyncAt
-    ? formatRelativeTimeShort(connection.lastSyncAt)
-    : "No sync run yet";
+  const canForcePinterestResync = appAccess.isActualAdmin;
+  const requiresReconnect = [
+    "expired",
+    "reauthorization_required",
+    "revoked",
+  ].includes(connection.status);
   const nextAutoSyncAt = getNextPinterestAutoSyncEligibleAt({
     autoSyncEnabled: connection.autoSyncEnabled,
     lastSyncAttemptAt: connection.lastSyncAttemptAt,
@@ -99,10 +103,9 @@ export default async function PinterestSettingsPage({
 
       <Card className="bg-white/90">
         <CardHeader>
-          <CardTitle>Pinterest connection</CardTitle>
+          <CardTitle>Pinterest</CardTitle>
           <CardDescription>
-            {household.householdName} shares one Pinterest connection for all
-            synced boards and recipes.
+            Connect an account to choose boards and import recipes.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-[1fr_minmax(280px,360px)]">
@@ -117,57 +120,9 @@ export default async function PinterestSettingsPage({
                 </p>
               ) : null}
             </div>
-            <p className="text-sm text-muted-foreground">
-              Auto-sync frequency: {syncFrequency}.
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {connection.lastSyncAt ? <>Synced {syncRecency} (<LocalDateTime value={connection.lastSyncAt} />). Last result: {connection.lastSyncStatus ?? "success"}.</> : "No sync run yet."}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {!connection.autoSyncEnabled
-                ? "Auto-sync is currently off."
-                : syncInProgress
-                  ? "Next auto-sync is running now."
-                  : nextAutoSyncAt && new Date(nextAutoSyncAt).getTime() > Date.now()
-                    ? <>Next auto-sync becomes eligible {formatRelativeTimeShort(nextAutoSyncAt)} (<LocalDateTime value={nextAutoSyncAt} />).</>
-                    : "Next auto-sync can run on the next feed load."}
-            </p>
-            {latestSync?.status === "running" ? <PinterestSyncProgress run={latestSync} /> : null}
-            {connection.accessTokenExpiresAt ? (
-              <p className="text-sm text-muted-foreground">
-                Access token expires <LocalDateTime value={connection.accessTokenExpiresAt} />.
-              </p>
-            ) : null}
-            {connection.scope.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {connection.scope.map((scope) => (
-                  <Badge key={scope} variant="outline">
-                    {scope}
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
-            {connection.lastSyncError ? (
-              <p className="rounded-[18px] bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                {connection.lastSyncError}
-              </p>
-            ) : null}
-            <div className="rounded-[18px] border border-border/60 px-4 py-3 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-medium">Latest sync</p>
-                <AppTransitionLink href="/settings/pinterest/syncs" className="text-primary underline-offset-4 hover:underline">
-                  View all syncs
-                </AppTransitionLink>
-              </div>
-              {latestSync ? (
-                <p className="mt-1 inline-flex items-center text-muted-foreground">
-                  {latestSync.status === "running" ? <ActivityIndicator label="Latest Pinterest sync running" className="mr-1.5" /> : null}
-                  {latestSync.status === "success" ? "Succeeded" : latestSync.status === "error" ? "Failed" : "Running"} {formatRelativeTimeShort(latestSync.startedAt)} · {latestSync.createdRecipeCount} added, {latestSync.removedRecipeCount} removed, {latestSync.restoredRecipeCount} restored.
-                  {latestSync.message ? ` ${latestSync.message}` : ""}
-                </p>
-              ) : (
-                <p className="mt-1 text-muted-foreground">No recorded syncs yet.</p>
-              )}
+            <div className="grid max-w-sm grid-cols-2 gap-3">
+              <PinterestStat label="Boards syncing" value={syncedBoards.length} />
+              <PinterestStat label="Total pins" value={totalPins} />
             </div>
             {oauthError ? (
               <p className="rounded-[18px] bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -176,54 +131,104 @@ export default async function PinterestSettingsPage({
             ) : null}
           </div>
           <div className="space-y-4">
-            {canManageAutoSync && connection.status !== "not_connected" ? (
-              <PinterestAutoSyncToggle enabled={connection.autoSyncEnabled} />
-            ) : null}
             <div className="flex flex-wrap items-start gap-3">
-              {canManagePinterest ? (
-              <AppTransitionLink
-                href="/api/pinterest/connect?returnTo=/settings/pinterest"
-                prefetch
-                className={buttonVariants({ variant: "default" })}
-              >
-                {connection.status === "not_connected"
-                  ? "Connect Pinterest"
-                  : "Reconnect Pinterest"}
-              </AppTransitionLink>
-            ) : null}
-              {canManagePinterest && connection.status !== "not_connected" ? (
-                <ActionForm
-                  action={disconnectPinterestAction}
-                  buttonVariant="outline"
+              {canManagePinterest && connection.status === "not_connected" ? (
+                <AppTransitionLink
+                  href="/api/pinterest/connect?returnTo=/settings/pinterest"
+                  prefetch
+                  className={buttonVariants({ variant: "default" })}
                 >
-                  Disconnect
-                </ActionForm>
+                  Connect Pinterest
+                </AppTransitionLink>
+              ) : null}
+              {canManagePinterest && requiresReconnect ? (
+                <AppTransitionLink
+                  href="/api/pinterest/connect?returnTo=/settings/pinterest"
+                  prefetch
+                  className={buttonVariants({ variant: "default" })}
+                >
+                  Reconnect Pinterest
+                </AppTransitionLink>
+              ) : null}
+              {canManagePinterest && connection.status !== "not_connected" ? (
+                <PinterestConnectionSettings />
               ) : null}
             </div>
           </div>
         </CardContent>
       </Card>
 
+      <Card className="bg-white/90">
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle>Sync</CardTitle>
+              <CardDescription>
+                {connection.status === "not_connected"
+                  ? "Connect Pinterest to start syncing boards."
+                  : `Automatic syncs run every ${syncFrequency}.`}
+              </CardDescription>
+            </div>
+            <AppTransitionLink
+              href="/settings/pinterest/syncs"
+              className="text-sm text-primary underline-offset-4 hover:underline"
+            >
+              View sync history
+            </AppTransitionLink>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {latestSync?.status === "running" ? (
+            <PinterestSyncProgress run={latestSync} />
+          ) : latestSync ? (
+            <p className="text-sm text-muted-foreground">
+              {latestSync.status === "success" ? "Last sync succeeded" : "Last sync failed"}{" "}
+              {formatRelativeTimeShort(latestSync.startedAt)} · {latestSync.createdRecipeCount} added, {latestSync.removedRecipeCount} removed, {latestSync.restoredRecipeCount} restored.
+              {latestSync.message ? ` ${latestSync.message}` : ""}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">No syncs yet.</p>
+          )}
+          {connection.lastSyncError ? (
+            <p className="rounded-[18px] bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {connection.lastSyncError}
+            </p>
+          ) : null}
+          {connection.status !== "not_connected" ? (
+            <p className="text-sm text-muted-foreground">
+              {!connection.autoSyncEnabled
+                ? "Automatic sync is off."
+                : syncInProgress
+                  ? "Automatic sync is running now."
+                  : nextAutoSyncAt && new Date(nextAutoSyncAt).getTime() > Date.now()
+                    ? <>Next sync is eligible {formatRelativeTimeShort(nextAutoSyncAt)}.</>
+                    : "The next sync can run when you open the feed."}
+            </p>
+          ) : null}
+          {canManageAutoSync && connection.status !== "not_connected" ? (
+            <PinterestAutoSyncToggle enabled={connection.autoSyncEnabled} />
+          ) : null}
+          {canForcePinterestResync ? (
+            <ActionForm action={forcePinterestResyncAction} buttonVariant="secondary">
+              Force resync
+            </ActionForm>
+          ) : null}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
-          <CardTitle>Board sync management</CardTitle>
-          <CardDescription>
-            Select which Pinterest boards belong to this household and run syncs
-            from one place.
-          </CardDescription>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <CardTitle>Boards</CardTitle>
+              <CardDescription>
+                Choose the Pinterest boards to include.
+              </CardDescription>
+            </div>
+            {canManagePinterest ? <BoardSyncPicker boards={boards} /> : null}
+          </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          {canManagePinterest ? (
-            <div className="flex flex-wrap gap-3">
-              <ActionForm action={forcePinterestResyncAction} buttonVariant="secondary">
-                Force resync
-              </ActionForm>
-              <ActionForm action={syncAllBoardsAction} buttonVariant="default">
-                Sync all boards
-              </ActionForm>
-            </div>
-          ) : null}
-          {canManagePinterest ? <BoardSyncPicker boards={boards} /> : null}
           <div className="space-y-3 md:hidden">
             {syncedBoards.length === 0 ? <p className="rounded-2xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">No boards are selected for sync yet. Connect Pinterest, then choose the boards you want to include.</p> : null}
             {syncedBoards.map((board) => (
@@ -231,8 +236,8 @@ export default async function PinterestSettingsPage({
                 <p className="font-medium">{board.name ?? board.boardId}</p>
                 {board.name ? <p className="text-xs text-muted-foreground">{board.boardId}</p> : null}
                 <p className="mt-2 text-sm text-muted-foreground">Last synced <LocalDateTime value={board.lastSyncedAt} /></p>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm"><Stat label="Pins" value={board.pinCount} /><Stat label="Ready" value={board.recipeCount} /><Stat label="Pending" value={board.pendingCount} /><Stat label="Needs attention" value={board.reviewCount + board.failedCount} /></div>
-                {canManagePinterest ? <div className="mt-4 flex flex-wrap gap-2"><ActionForm action={setBoardSyncEnabledAction} fields={{ boardId: board.boardId, boardName: board.name ?? "", syncEnabled: "false" }} buttonVariant="ghost">Pause</ActionForm><ActionForm action={syncBoardAction} fields={{ boardId: board.boardId, boardName: board.name ?? "" }} buttonVariant="secondary">Sync board</ActionForm></div> : null}
+                <div className="mt-3 text-sm"><Stat label="Pins" value={board.pinCount} /></div>
+                {canManagePinterest ? <div className="mt-4 flex flex-wrap gap-2"><ActionForm action={setBoardSyncEnabledAction} fields={{ boardId: board.boardId, boardName: board.name ?? "", syncEnabled: "false" }} buttonVariant="ghost">Disable</ActionForm></div> : null}
               </div>
             ))}
           </div>
@@ -242,9 +247,6 @@ export default async function PinterestSettingsPage({
                 <TableHead>Board</TableHead>
                 <TableHead>Last synced</TableHead>
                 <TableHead>Pins</TableHead>
-                <TableHead>Ready</TableHead>
-                <TableHead>Pending</TableHead>
-                <TableHead>Needs attention</TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -252,7 +254,7 @@ export default async function PinterestSettingsPage({
               {syncedBoards.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={4}
                     className="py-8 text-center text-sm text-muted-foreground"
                   >
                     No boards are selected for sync yet. Connect Pinterest, then
@@ -276,9 +278,6 @@ export default async function PinterestSettingsPage({
                   </TableCell>
                   <TableCell><LocalDateTime value={board.lastSyncedAt} /></TableCell>
                   <TableCell>{board.pinCount}</TableCell>
-                  <TableCell>{board.recipeCount}</TableCell>
-                  <TableCell>{board.pendingCount}</TableCell>
-                  <TableCell>{board.reviewCount + board.failedCount}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap justify-end gap-3">
                       {canManagePinterest ? (
@@ -292,17 +291,7 @@ export default async function PinterestSettingsPage({
                             }}
                             buttonVariant="ghost"
                           >
-                            Pause
-                          </ActionForm>
-                          <ActionForm
-                            action={syncBoardAction}
-                            fields={{
-                              boardId: board.boardId,
-                              boardName: board.name ?? "",
-                            }}
-                            buttonVariant="secondary"
-                          >
-                            Sync board
+                            Disable
                           </ActionForm>
                         </>
                       ) : null}
@@ -321,6 +310,15 @@ export default async function PinterestSettingsPage({
 
 function Stat({ label, value }: { label: string; value: number }) {
   return <div className="rounded-xl bg-secondary/40 px-3 py-2"><p className="text-xs text-muted-foreground">{label}</p><p className="font-medium">{value}</p></div>;
+}
+
+function PinterestStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="aspect-square rounded-2xl border border-border/60 bg-secondary/30 p-4">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p>
+    </div>
+  );
 }
 
 function formatConnectionStatus(status: PinterestConnectionStatus) {

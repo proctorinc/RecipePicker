@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/settings", label: "Overview" },
-  { href: "/settings/members", label: "Household" },
+  { href: "/settings/members", label: "Kitchen" },
 ];
 
 const elevatedItems = [

@@ -152,7 +152,7 @@ export function RecipePicker({ initialState }: RecipePickerProps) {
 
     if (picker.requiresAiSetup) {
       setMessage(
-        "Connect the household AI in Settings before prompting the picker.",
+        "Connect the kitchen AI in Settings before prompting the picker.",
       );
       return;
     }
@@ -456,7 +456,7 @@ export function RecipePicker({ initialState }: RecipePickerProps) {
 
                             <p className="line-clamp-3 text-sm leading-6 text-stone-700">
                               {recipe.shortDescription ??
-                                "Saved to your household recipe collection."}
+                                "Saved to your kitchen recipe collection."}
                             </p>
 
                             <div className="space-y-2">
@@ -717,7 +717,7 @@ export function RecipePicker({ initialState }: RecipePickerProps) {
             {picker.requiresAiSetup ? (
               <div className="mt-3 flex flex-col gap-3 rounded-[28px] border border-amber-200/70 bg-amber-50/95 px-4 py-4 text-sm text-stone-800 shadow-sm sm:flex-row sm:items-center sm:justify-between">
                 <p>
-                  Connect the household AI in Settings before prompting the
+                  Connect the kitchen AI in Settings before prompting the
                   picker.
                 </p>
                 <Button

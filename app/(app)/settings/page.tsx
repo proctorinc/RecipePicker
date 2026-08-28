@@ -117,13 +117,13 @@ export default async function SettingsPage() {
           <CardDescription>
             {overviewItems.length > 0
               ? "Quick links for anything that still needs setup or review"
-              : "Manage your household"}
+              : "Manage your kitchen"}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
           <OverviewItem
-            title="My Household"
-            description="View and invite household members"
+            title="My Kitchen"
+            description="Update kitchen details and invite cooks"
             href="/settings/members"
             ctaLabel="View"
             emphasized={true}

@@ -26,7 +26,7 @@ export default async function PinterestSyncHistoryPage() {
       <Card>
         <CardHeader>
           <CardTitle>Pinterest sync history</CardTitle>
-          <CardDescription>Recent imports and reconciliation changes for this household.</CardDescription>
+          <CardDescription>Recent imports and reconciliation changes for this kitchen.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3 md:hidden">

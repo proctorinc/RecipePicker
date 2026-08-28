@@ -381,7 +381,7 @@ export async function setPinterestConnectionAutoSyncEnabled(args: {
         : result.rowsAffected;
 
     if ((affectedRows ?? 0) === 0) {
-      throw new Error("Pinterest is not connected for this household.");
+      throw new Error("Pinterest is not connected for this kitchen.");
     }
   } finally {
     await sqlite.close();
@@ -415,7 +415,7 @@ export async function getValidPinterestAccessToken(householdId: string) {
     });
 
     if (!connection) {
-      throw new Error("Pinterest is not connected for this household.");
+      throw new Error("Pinterest is not connected for this kitchen.");
     }
 
     if (!shouldRefreshConnection(connection)) {

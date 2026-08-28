@@ -27,8 +27,8 @@ export default async function JoinHouseholdPage({ params }: { params: Promise<{ 
     return (
       <PageShell>
         <PageIntro
-          title="Join shared household"
-          description="Accept this invite to share one Pinterest-backed recipe space with another member."
+          title="Join shared kitchen"
+          description="Accept this invite to share one Pinterest-backed recipe space with another cook."
         />
         <Card className="max-w-2xl bg-white/90">
           <CardHeader>
@@ -39,10 +39,10 @@ export default async function JoinHouseholdPage({ params }: { params: Promise<{ 
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Joining this household will give you access to the same synced boards, recipes, and Pinterest connection state.
+              Joining this kitchen will give you access to the same synced boards, recipes, and Pinterest connection state.
             </p>
             <ActionForm action={joinHouseholdInviteAction} fields={{ inviteToken }} buttonVariant="default">
-              Join household
+              Join kitchen
             </ActionForm>
           </CardContent>
         </Card>

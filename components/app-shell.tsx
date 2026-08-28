@@ -54,12 +54,14 @@ const baseLinks = [
 export async function AppShell({
   children,
   householdName,
+  householdLogoUrl,
   showAiPicker = false,
   showSettings = true,
   mobileProfileLinksToSettings = false,
 }: {
   children: ReactNode;
   householdName: string;
+  householdLogoUrl: string | null;
   showAiPicker?: boolean;
   showSettings?: boolean;
   mobileProfileLinksToSettings?: boolean;
@@ -87,14 +89,12 @@ export async function AppShell({
           <AppTransitionLink
             href="/"
             prefetch
-            aria-label="Recipe Picker home"
+            aria-label={`${householdName} home`}
             className="flex items-center gap-1 justify-center font-[family-name:var(--font-serif)]"
             pendingClassName="opacity-80"
           >
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
-              <Soup className="h-3 w-3" />
-            </div>
-            Recipe Picker
+            <KitchenLogo logoUrl={householdLogoUrl} size="small" />
+            {householdName}
           </AppTransitionLink>
         }
       >
@@ -108,15 +108,10 @@ export async function AppShell({
               className="flex items-center gap-3"
               pendingClassName="opacity-80"
             >
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
-                <Soup className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="font-[family-name:var(--font-serif)] text-lg font-semibold">
-                  Recipe Picker
-                </p>
-                <p className="text-xs text-muted-foreground">{householdName}</p>
-              </div>
+              <KitchenLogo logoUrl={householdLogoUrl} size="large" />
+              <p className="font-[family-name:var(--font-serif)] text-lg font-semibold">
+                {householdName}
+              </p>
             </AppTransitionLink>
           </div>
 
@@ -164,6 +159,21 @@ export async function AppShell({
         showAiPicker={showAiPicker}
         profileLinksToSettings={mobileProfileLinksToSettings}
       />
+    </div>
+  );
+}
+
+function KitchenLogo({ logoUrl, size }: { logoUrl: string | null; size: "small" | "large" }) {
+  const dimensions = size === "small" ? "h-6 w-6" : "h-11 w-11";
+  const iconDimensions = size === "small" ? "h-3 w-3" : "h-5 w-5";
+
+  return logoUrl ? (
+    // The uploaded image comes from the kitchen's trusted Blob URL.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={logoUrl} alt="" className={`${dimensions} rounded-full object-cover shadow-sm`} />
+  ) : (
+    <div className={`flex ${dimensions} items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm`}>
+      <Soup className={iconDimensions} />
     </div>
   );
 }

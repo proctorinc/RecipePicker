@@ -116,7 +116,10 @@ export async function createRecipeParseJob(input: {
       },
     });
 
-    if (existingActiveJob) {
+    // Pinterest syncs must not drop newly discovered recipes merely because a
+    // prior parse job is still active. Inngest serializes household workers,
+    // so this job will wait its turn without competing for extraction work.
+    if (existingActiveJob && input.mode !== "pinterest_sync") {
       logRecipeParseJobEvent("warn", "recipe_parse_job.create_conflict", {
         householdId: input.householdId,
         jobId: existingActiveJob.jobId,
@@ -128,7 +131,7 @@ export async function createRecipeParseJob(input: {
       });
       return {
         ok: false,
-        message: "A bulk parse job is already running for this household.",
+        message: "A bulk parse job is already running for this kitchen.",
         activeJobId: existingActiveJob.jobId,
       };
     }

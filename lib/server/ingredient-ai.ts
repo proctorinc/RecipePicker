@@ -152,7 +152,7 @@ function buildPrompt(request: IngredientAiRequest) {
     .join("\n");
 
   return [
-    "You are helping normalize recipe ingredients into a household ingredient catalog.",
+    "You are helping normalize recipe ingredients into a kitchen ingredient catalog.",
     "Return 1 to 3 suggestions ranked best-first.",
     "Prefer matching an existing ingredient when it is clearly correct.",
     "Use action=create_new when the phrase is materially distinct and should become its own canonical ingredient.",

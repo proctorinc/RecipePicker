@@ -1,0 +1,1 @@
+ALTER TABLE `households` ADD `logo_url` text;

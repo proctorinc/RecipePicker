@@ -1,8 +1,9 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
-import { requireHouseholdRole } from "@/lib/server/auth";
+import { requireHouseholdContext, requireHouseholdRole } from "@/lib/server/auth";
+import { requireAdminAccess } from "@/lib/server/access";
 import { openDatabase } from "@/lib/server/database";
 import { boardSyncSubscriptions, pinterestAccounts, pinterestSyncJobs, pinterestSyncRuns } from "@/lib/server/db";
 import { extractRecipes } from "@/lib/server/extract";
@@ -80,7 +81,10 @@ export const forcePinterestResyncAction = withActionLogging(
   "action.force_pinterest_resync",
   async (_: ActionState, _formData: FormData): Promise<ActionState> => {
     try {
-      const context = await requireHouseholdRole("owner");
+      const [context] = await Promise.all([
+        requireHouseholdContext(),
+        requireAdminAccess(),
+      ]);
       const result = await requestPinterestSync({ householdId: context.householdId, trigger: "force", requestedByClerkUserId: context.clerkUserId });
       revalidateAll(recipeScopedPaths());
       return {
@@ -107,8 +111,16 @@ export const retryPinterestSyncAction = withActionLogging(
           where: (table, { and, eq }) => and(eq(table.syncRunId, syncRunId), eq(table.householdId, context.householdId)),
         });
         if (!job || job.status !== "error") return { status: "error", message: "This sync cannot be retried." };
+        const latestRun = await db.query.pinterestSyncRuns.findFirst({
+          where: (table, { eq }) => eq(table.householdId, context.householdId),
+          orderBy: (table) => [desc(table.startedAt)],
+          columns: { syncRunId: true, status: true },
+        });
+        if (latestRun?.syncRunId !== syncRunId || latestRun.status !== "error") {
+          return { status: "error", message: "Only the most recent failed sync can be retried." };
+        }
         const now = new Date().toISOString();
-        await db.update(pinterestSyncJobs).set({ status: "queued", lastError: null, completedAt: null, updatedAt: now }).where(eq(pinterestSyncJobs.jobId, job.jobId)).run();
+        await db.update(pinterestSyncJobs).set({ status: "queued", parseNewRecipes: true, lastError: null, completedAt: null, updatedAt: now }).where(eq(pinterestSyncJobs.jobId, job.jobId)).run();
         try {
           await sendPinterestSyncRequestedEvent({ jobId: job.jobId, householdId: context.householdId });
         } catch (error) {
@@ -211,7 +223,7 @@ export const setBoardSyncEnabledAction = withActionLogging(
         status: "success",
         message: syncEnabled
           ? `Added ${boardName ?? boardId} to synced boards.`
-          : `Paused sync for ${boardName ?? boardId}.`,
+          : `Disabled sync for ${boardName ?? boardId}.`,
       };
     } catch (error) {
       return toErrorState(error, "Unable to update board sync selection.");

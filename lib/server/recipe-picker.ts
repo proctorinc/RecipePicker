@@ -669,8 +669,8 @@ async function interpretRecipePrompt(args: {
       ? `Pinned recipes:\n${pinnedRecipes}`
       : "Pinned recipes: none",
     topRatedRecipes
-      ? `Top reviewed household recipes:\n${topRatedRecipes}`
-      : "Top reviewed household recipes: none",
+      ? `Top reviewed kitchen recipes:\n${topRatedRecipes}`
+      : "Top reviewed kitchen recipes: none",
   ].join("\n");
 
   const parsed = await generateRecipePickerWithHouseholdAi({
@@ -905,7 +905,7 @@ export function fallbackInterpretRecipePrompt(args: {
         "Give me quick dinners under 30 minutes",
       ],
       explanation:
-        "Starting with a broad mix of recipes from your household collection.",
+        "Starting with a broad mix of recipes from your kitchen collection.",
     };
   }
 
@@ -1025,7 +1025,7 @@ export function fallbackInterpretRecipePrompt(args: {
     }),
     explanation:
       preferHighlyRated || preferRecipesYouLike || reviewTerms.length > 0
-        ? "Using your household ratings and review notes alongside recipe details to steer the carousel."
+      ? "Using your kitchen ratings and review notes alongside recipe details to steer the carousel."
         : "Using title, ingredient, and keyword matches from your saved recipes to steer the carousel.",
   };
 }
@@ -1044,7 +1044,7 @@ function scoreRecipeCandidate(
     score += getReviewPreferenceBoost(recipe);
     if (recipe.reviewCount > 0 && recipe.averageRating !== null) {
       reasons.push(
-        `Rated ${recipe.averageRating.toFixed(1)} stars by your household`,
+        `Rated ${recipe.averageRating.toFixed(1)} stars by your kitchen`,
       );
     }
   }
@@ -1247,12 +1247,12 @@ function buildSetExplanation(args: {
 
   if (args.requiresAiSetup) {
     return args.request.prompt
-      ? "Connect the household AI in settings to turn prompts into recipe picks. Showing a best-effort recipe mix for now."
-      : "Connect the household AI in settings to start prompting for recipe picks. Showing a starter carousel from your saved recipes.";
+      ? "Connect the kitchen AI in settings to turn prompts into recipe picks. Showing a best-effort recipe mix for now."
+      : "Connect the kitchen AI in settings to start prompting for recipe picks. Showing a starter carousel from your saved recipes.";
   }
 
   if (args.request.prompt.trim().length === 0) {
-    return "Starting with a broad mix of recipes from your household collection.";
+    return "Starting with a broad mix of recipes from your kitchen collection.";
   }
 
   if (args.selected.length < MIN_SET_SIZE) {
@@ -1275,8 +1275,8 @@ function buildAssistantMessage(args: {
 
   if (args.requiresAiSetup) {
     return args.request.prompt
-      ? "Connect your household AI in settings and I can respond more conversationally. For now, I pulled together a best-effort set from your saved recipes."
-      : "Connect your household AI in settings and I can guide you with follow-up questions. For now, here’s a starter mix from your saved recipes.";
+      ? "Connect your kitchen AI in settings and I can respond more conversationally. For now, I pulled together a best-effort set from your saved recipes."
+      : "Connect your kitchen AI in settings and I can guide you with follow-up questions. For now, here’s a starter mix from your saved recipes.";
   }
 
   if (args.request.prompt.trim().length === 0) {
@@ -1709,7 +1709,7 @@ function compareRecipesByPreferenceSignal(
 
 function formatReviewSummary(recipe: RecipeCandidate) {
   if (recipe.reviewCount === 0 || recipe.averageRating === null) {
-    return "No household reviews yet";
+    return "No kitchen reviews yet";
   }
 
   return `${recipe.averageRating.toFixed(1)} stars across ${recipe.reviewCount} review${recipe.reviewCount === 1 ? "" : "s"}`;
@@ -1749,7 +1749,7 @@ function buildFallbackAssistantMessage(args: {
   reviewTerms: string[];
 }) {
   if (args.preferHighlyRated || args.preferRecipesYouLike) {
-    return "I’m leaning on your household ratings and reviews here, so these should feel closer to the recipes you already love.";
+    return "I’m leaning on your kitchen ratings and reviews here, so these should feel closer to the recipes you already love.";
   }
 
   if (args.reviewTerms.length > 0) {

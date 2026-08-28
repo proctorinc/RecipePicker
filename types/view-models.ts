@@ -306,10 +306,6 @@ export type BoardSyncSummary = {
   name: string | null;
   syncEnabled: boolean;
   pinCount: number;
-  recipeCount: number;
-  pendingCount: number;
-  failedCount: number;
-  reviewCount: number;
   lastSyncedAt: string | null;
 };
 
@@ -522,6 +518,7 @@ export type DashboardSummary = {
 export type HouseholdMemberView = {
   clerkUserId: string;
   name: string;
+  imageUrl: string | null;
   role: "owner" | "member";
   joinedAt: string;
   isCurrentUser: boolean;

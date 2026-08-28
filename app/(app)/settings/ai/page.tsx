@@ -133,14 +133,14 @@ export default async function AiSettingsPage() {
             {appAccess.isPremium && context.role !== "owner" ? (
               <div className="rounded-[22px] border border-border/60 bg-secondary/20 px-5 py-4">
                 <p className="text-sm text-muted-foreground">
-                  Only household owners can update the shared AI connection.
+                  Only kitchen owners can update the shared AI connection.
                 </p>
               </div>
             ) : null}
             {canEditAi && connection.status === "active" ? (
               <div className="rounded-[22px] border border-border/60 bg-secondary/20 px-5 py-4">
                 <p className="text-sm text-muted-foreground">
-                  This household already has an active AI connection. Disconnect
+                  This kitchen already has an active AI connection. Disconnect
                   it to connect a different provider or model.
                 </p>
               </div>

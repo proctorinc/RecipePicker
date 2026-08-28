@@ -3,6 +3,7 @@
 import crypto from "node:crypto";
 
 import { auth } from "@clerk/nextjs/server";
+import { put } from "@vercel/blob";
 import { cookies } from "next/headers";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
@@ -20,6 +21,7 @@ import { openDatabase } from "@/lib/server/database";
 import {
   householdInvites,
   householdMembers,
+  households,
   householdRecipeExtractionFeedback,
   householdRecipeEvents,
   householdRecipeFeedback,
@@ -588,13 +590,124 @@ export const createInviteAction = withActionLogging(
     revalidateAll(recipeScopedPaths());
     return {
       status: "success",
-      message: "Created a fresh household invite link.",
+      message: "Created a fresh kitchen invite link.",
     };
   } catch (error) {
     return toErrorState(error, "Unable to create an invite.");
   }
 },
 );
+
+export async function createKitchenInviteLinkAction(): Promise<ActionState> {
+  try {
+    const context = await requireHouseholdRole("owner");
+    const { db, sqlite } = await openDatabase();
+    const token = crypto.randomUUID();
+    const now = new Date();
+    try {
+      await db.insert(householdInvites).values({
+        inviteToken: token,
+        householdId: context.householdId,
+        createdByClerkUserId: context.clerkUserId,
+        createdAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        consumedAt: null,
+        consumedByClerkUserId: null,
+      }).run();
+    } finally {
+      await sqlite.close();
+    }
+    logAudit("kitchen.invite_created", { target: { householdId: context.householdId } });
+    revalidateAll(recipeScopedPaths());
+    return { status: "success", message: "Invite link created.", data: { inviteToken: token } };
+  } catch (error) {
+    return toErrorState(error, "Unable to create an invite link.");
+  }
+}
+
+export async function revokeKitchenInviteAction(inviteToken: string): Promise<ActionState> {
+  try {
+    const context = await requireHouseholdRole("owner");
+    const { db, sqlite } = await openDatabase();
+    try {
+      await db.delete(householdInvites).where(and(
+        eq(householdInvites.inviteToken, inviteToken),
+        eq(householdInvites.householdId, context.householdId),
+      )).run();
+    } finally {
+      await sqlite.close();
+    }
+    logAudit("kitchen.invite_revoked", { target: { householdId: context.householdId, inviteToken } });
+    revalidateAll(recipeScopedPaths());
+    return { status: "success", message: "Invite link revoked." };
+  } catch (error) {
+    return toErrorState(error, "Unable to revoke the invite link.");
+  }
+}
+
+const KITCHEN_LOGO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_KITCHEN_LOGO_BYTES = 5 * 1024 * 1024;
+
+export const updateKitchenNameAction = withActionLogging(
+  "action.update_kitchen_name",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
+
+    if (!name || name.length > 80) {
+      return { status: "error", message: "Kitchen name must be between 1 and 80 characters." };
+    }
+
+    try {
+      const context = await requireHouseholdRole("owner");
+      const { db, sqlite } = await openDatabase();
+      try {
+        await db.update(households).set({ name, updatedAt: new Date().toISOString() })
+          .where(eq(households.householdId, context.householdId)).run();
+      } finally {
+        await sqlite.close();
+      }
+
+      logAudit("kitchen.name_updated", { target: { householdId: context.householdId } });
+      revalidateAll(recipeScopedPaths());
+      return { status: "success", message: "Kitchen name updated." };
+    } catch (error) {
+      return toErrorState(error, "Unable to update the kitchen name.");
+    }
+  },
+);
+
+export async function uploadKitchenLogoAction(formData: FormData): Promise<ActionState> {
+  const submittedLogo = formData.get("logo");
+  const logo = submittedLogo instanceof File && submittedLogo.size > 0 ? submittedLogo : null;
+  if (!logo) return { status: "error", message: "Choose an image to upload." };
+  if (!KITCHEN_LOGO_TYPES.has(logo.type) || logo.size > MAX_KITCHEN_LOGO_BYTES) {
+    return { status: "error", message: "Use a JPG, PNG, or WebP logo no larger than 5 MB." };
+  }
+
+  try {
+    const context = await requireHouseholdRole("owner");
+    const extension = logo.type === "image/png" ? "png" : logo.type === "image/webp" ? "webp" : "jpg";
+    const uploaded = await put(`kitchens/${context.householdId}/logo-${crypto.randomUUID()}.${extension}`, Buffer.from(await logo.arrayBuffer()), {
+      access: "public",
+      contentType: logo.type,
+      addRandomSuffix: false,
+      token: process.env.BLOB_READ_WRITE_TOKEN ?? process.env.RECIPES_BLOB_READ_WRITE_TOKEN,
+      storeId: process.env.BLOB_STORE_ID ?? process.env.RECIPES_BLOB_STORE_ID,
+    });
+    const { db, sqlite } = await openDatabase();
+    try {
+      await db.update(households).set({ logoUrl: uploaded.url, updatedAt: new Date().toISOString() })
+        .where(eq(households.householdId, context.householdId)).run();
+    } finally {
+      await sqlite.close();
+    }
+    logAudit("kitchen.logo_updated", { target: { householdId: context.householdId } });
+    revalidateAll(recipeScopedPaths());
+    return { status: "success", message: "Kitchen logo updated." };
+  } catch (error) {
+    return toErrorState(error, "Unable to upload the kitchen logo.");
+  }
+}
 
 export const disconnectPinterestAction = withActionLogging(
   "action.disconnect_pinterest",
@@ -610,7 +723,7 @@ export const disconnectPinterestAction = withActionLogging(
     revalidateAll(recipeScopedPaths());
     return {
       status: "success",
-      message: "Disconnected Pinterest for this household.",
+      message: "Disconnected Pinterest for this kitchen.",
     };
   } catch (error) {
     return toErrorState(error, "Unable to disconnect Pinterest.");
@@ -692,7 +805,7 @@ export const saveAiConnectionAction = withActionLogging(
 
     return {
       status: "success",
-      message: "Saved and validated the household AI connection.",
+      message: "Saved and validated the kitchen AI connection.",
     };
   } catch (error) {
     return toErrorState(error, "Unable to save the AI connection.");
@@ -735,7 +848,7 @@ export const disconnectAiConnectionAction = withActionLogging(
     revalidateAll(recipeScopedPaths());
     return {
       status: "success",
-      message: "Disconnected the household AI connection.",
+      message: "Disconnected the kitchen AI connection.",
     };
   } catch (error) {
     return toErrorState(error, "Unable to disconnect the AI connection.");
@@ -880,7 +993,7 @@ export const joinHouseholdInviteAction = withActionLogging(
     const { userId } = await auth();
 
     if (!userId) {
-      return { status: "error", message: "You need to sign in before joining a household." };
+      return { status: "error", message: "You need to sign in before joining a kitchen." };
     }
 
     const { db, sqlite } = await openDatabase();
@@ -925,10 +1038,10 @@ export const joinHouseholdInviteAction = withActionLogging(
     revalidateAll(recipeScopedPaths());
     return {
       status: "success",
-      message: "Joined the shared household.",
+      message: "Joined the shared kitchen.",
     };
   } catch (error) {
-    return toErrorState(error, "Unable to join this household.");
+    return toErrorState(error, "Unable to join this kitchen.");
   }
 },
 );
@@ -989,7 +1102,7 @@ export const setShoppingCartItemCheckedAction = withActionLogging(
     const cartId = String(formData.get("cartId") ?? "").trim(); const itemId = String(formData.get("itemId") ?? "").trim(); const checked = String(formData.get("checked")) === "true";
     if (!cartId || !itemId) return { status: "error", message: "Cart item details are incomplete." };
     try { const { db, sqlite, cart } = await getOwnedActiveCart(cartId); try {
-      if (!cart) return { status: "error", message: "This is not the active household cart." };
+      if (!cart) return { status: "error", message: "This is not the active kitchen cart." };
       const now = new Date().toISOString();
       await db.insert(householdShoppingCartItemStates).values({ cartId, itemId, checked, sortPosition: 0, createdAt: now, updatedAt: now }).onConflictDoUpdate({ target: [householdShoppingCartItemStates.cartId, householdShoppingCartItemStates.itemId], set: { checked, updatedAt: now } }).run();
     } finally { await sqlite.close(); } revalidateAll(["/shopping-cart"]); return { status: "success", message: "Cart item updated." }; } catch (error) { return toErrorState(error, "Unable to update the cart item."); }
@@ -1003,7 +1116,7 @@ export const reorderShoppingCartItemsAction = withActionLogging(
     let itemIds: string[] = []; try { const parsed = JSON.parse(String(formData.get("itemIds") ?? "[]")); itemIds = Array.isArray(parsed) ? [...new Set(parsed.filter((item): item is string => typeof item === "string" && item.length > 0))] : []; } catch { /* invalid payload */ }
     if (!cartId || itemIds.length === 0) return { status: "error", message: "Cart ordering details are incomplete." };
     try { const { db, sqlite, cart } = await getOwnedActiveCart(cartId); try {
-      if (!cart) return { status: "error", message: "This is not the active household cart." };
+      if (!cart) return { status: "error", message: "This is not the active kitchen cart." };
       const now = new Date().toISOString();
       for (const [sortPosition, itemId] of itemIds.entries()) await db.insert(householdShoppingCartItemStates).values({ cartId, itemId, checked: false, sortPosition, createdAt: now, updatedAt: now }).onConflictDoUpdate({ target: [householdShoppingCartItemStates.cartId, householdShoppingCartItemStates.itemId], set: { sortPosition, updatedAt: now } }).run();
     } finally { await sqlite.close(); } revalidateAll(["/shopping-cart"]); return { status: "success", message: "Cart order saved." }; } catch (error) { return toErrorState(error, "Unable to save cart order."); }
