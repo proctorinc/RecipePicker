@@ -154,11 +154,11 @@ export async function AppShell({
         </div>
       </MobileAwareAppHeader>
 
-      <main className="mx-auto flex w-full max-w-7xl flex-col px-2 pb-24 pt-16 sm:px-6 md:pb-4 md:pt-[5.75rem] lg:px-8">
-        {topContent ? <div className="w-screen self-center">{topContent}</div> : null}
-        <div className="flex flex-col gap-8">
-          {children}
-        </div>
+      <main className="mx-auto flex w-full max-w-7xl flex-col px-2 pb-24 pt-12 sm:px-6 md:pb-4 md:pt-[5.75rem] lg:px-8">
+        {topContent ? (
+          <div className="w-screen self-center">{topContent}</div>
+        ) : null}
+        <div className="flex flex-col gap-8">{children}</div>
       </main>
       <MobileNav
         showAiPicker={showAiPicker}
@@ -168,16 +168,28 @@ export async function AppShell({
   );
 }
 
-function KitchenLogo({ logoUrl, size }: { logoUrl: string | null; size: "small" | "large" }) {
+function KitchenLogo({
+  logoUrl,
+  size,
+}: {
+  logoUrl: string | null;
+  size: "small" | "large";
+}) {
   const dimensions = size === "small" ? "h-6 w-6" : "h-11 w-11";
   const iconDimensions = size === "small" ? "h-3 w-3" : "h-5 w-5";
 
   return logoUrl ? (
     // The uploaded image comes from the kitchen's trusted Blob URL.
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={logoUrl} alt="" className={`${dimensions} rounded-full object-cover shadow-sm`} />
+    <img
+      src={logoUrl}
+      alt=""
+      className={`${dimensions} rounded-full object-cover shadow-sm`}
+    />
   ) : (
-    <div className={`flex ${dimensions} items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm`}>
+    <div
+      className={`flex ${dimensions} items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm`}
+    >
       <Soup className={iconDimensions} />
     </div>
   );
