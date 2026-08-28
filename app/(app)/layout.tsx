@@ -20,17 +20,15 @@ export default async function AuthenticatedAppLayout({
   ]);
 
   return (
-    <>
-      <PinterestSyncIndicator initialRun={activePinterestSync ?? null} />
-      <AppShell
-        householdName={household.householdName}
-        householdLogoUrl={household.householdLogoUrl}
-        showAiPicker={access.isPremium}
-        showSettings={household.role === "owner" || access.isActualAdmin}
-        mobileProfileLinksToSettings={household.role === "owner"}
-      >
-        {children}
-      </AppShell>
-    </>
+    <AppShell
+      householdName={household.householdName}
+      householdLogoUrl={household.householdLogoUrl}
+      showAiPicker={access.isPremium}
+      showSettings={household.role === "owner" || access.isActualAdmin}
+      mobileProfileLinksToSettings={household.role === "owner"}
+      topContent={<PinterestSyncIndicator initialRun={activePinterestSync ?? null} />}
+    >
+      {children}
+    </AppShell>
   );
 }

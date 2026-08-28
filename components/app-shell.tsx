@@ -55,6 +55,7 @@ export async function AppShell({
   children,
   householdName,
   householdLogoUrl,
+  topContent,
   showAiPicker = false,
   showSettings = true,
   mobileProfileLinksToSettings = false,
@@ -62,6 +63,7 @@ export async function AppShell({
   children: ReactNode;
   householdName: string;
   householdLogoUrl: string | null;
+  topContent?: ReactNode;
   showAiPicker?: boolean;
   showSettings?: boolean;
   mobileProfileLinksToSettings?: boolean;
@@ -152,8 +154,11 @@ export async function AppShell({
         </div>
       </MobileAwareAppHeader>
 
-      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-2 pb-24 pt-16 sm:px-6 md:pb-4 md:pt-[5.75rem] lg:px-8">
-        {children}
+      <main className="mx-auto flex w-full max-w-7xl flex-col px-2 pb-24 pt-16 sm:px-6 md:pb-4 md:pt-[5.75rem] lg:px-8">
+        {topContent ? <div className="w-screen self-center">{topContent}</div> : null}
+        <div className="flex flex-col gap-8">
+          {children}
+        </div>
       </main>
       <MobileNav
         showAiPicker={showAiPicker}
