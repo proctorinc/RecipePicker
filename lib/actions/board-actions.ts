@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 
 import { requireHouseholdRole } from "@/lib/server/auth";
 import { openDatabase } from "@/lib/server/database";
-import { boardSyncSubscriptions, pinterestSyncJobs } from "@/lib/server/db";
+import { boardSyncSubscriptions, pinterestAccounts, pinterestSyncJobs, pinterestSyncRuns } from "@/lib/server/db";
 import { extractRecipes } from "@/lib/server/extract";
 import { withActionLogging } from "@/lib/server/logger";
 import {
@@ -119,6 +119,36 @@ export const retryPinterestSyncAction = withActionLogging(
       revalidateAll(recipeScopedPaths());
       return { status: "success", message: "Pinterest sync retry queued." };
     } catch (error) { return toErrorState(error, "Unable to retry Pinterest sync."); }
+  },
+);
+
+export const cancelPinterestSyncAction = withActionLogging(
+  "action.cancel_pinterest_sync",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const syncRunId = String(formData.get("syncRunId") ?? "").trim();
+    if (!syncRunId) return { status: "error", message: "Sync run is required." };
+    try {
+      const context = await requireHouseholdRole("owner");
+      const { db, sqlite } = await openDatabase();
+      try {
+        const job = await db.query.pinterestSyncJobs.findFirst({
+          where: (table, { and, eq, inArray }) => and(
+            eq(table.syncRunId, syncRunId),
+            eq(table.householdId, context.householdId),
+            inArray(table.status, ["queued", "running"]),
+          ),
+          columns: { jobId: true },
+        });
+        if (!job) return { status: "error", message: "This sync is no longer active." };
+        const now = new Date().toISOString();
+        const message = "Pinterest sync cancelled by an owner.";
+        await db.update(pinterestSyncJobs).set({ status: "cancelled", completedAt: now, lastError: null, updatedAt: now }).where(eq(pinterestSyncJobs.jobId, job.jobId)).run();
+        await db.update(pinterestSyncRuns).set({ status: "cancelled", completedAt: now, message }).where(eq(pinterestSyncRuns.syncRunId, syncRunId)).run();
+        await db.update(pinterestAccounts).set({ syncInProgressAt: null, updatedAt: now }).where(and(eq(pinterestAccounts.householdId, context.householdId), eq(pinterestAccounts.provider, "pinterest"))).run();
+      } finally { await sqlite.close(); }
+      revalidateAll(recipeScopedPaths());
+      return { status: "success", message: "Pinterest sync cancelled." };
+    } catch (error) { return toErrorState(error, "Unable to cancel Pinterest sync."); }
   },
 );
 

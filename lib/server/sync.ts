@@ -1,5 +1,5 @@
 import { createId } from "@paralleldrive/cuid2";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 
 import { type SubscriptionTier } from "@/lib/server/access";
 import { openDatabase } from "@/lib/server/database";
@@ -1118,7 +1118,7 @@ export async function processPinterestSyncJobPage(jobId: string) {
   try {
     const job = await db.query.pinterestSyncJobs.findFirst({ where: (table, { eq: whereEq }) => whereEq(table.jobId, jobId) });
     if (!job) return { status: "not_found" as const };
-    if (job.status === "success" || job.status === "error") return { status: "finished" as const };
+    if (job.status === "success" || job.status === "error" || job.status === "cancelled") return { status: "finished" as const };
     const boards = JSON.parse(job.selectedBoardIdsJson) as Array<{ id: string; name: string | null }>;
     const board = job.currentBoardId ? boards.find((item) => item.id === job.currentBoardId) : boards[0];
     if (!board) {
@@ -1127,6 +1127,8 @@ export async function processPinterestSyncJobPage(jobId: string) {
       const scopeBoardIds = new Set((run?.syncScopeKey ?? "").split(",").filter(Boolean));
       const completionContext: PinterestSyncRunContext = { syncRunId: job.syncRunId, trigger: job.trigger as PinterestSyncTrigger, changes: { created: 0, removed: 0, restored: 0 }, processedPinCount: run?.processedPinCount ?? 0, persistedPinCount: run?.processedPinCount ?? 0, lastProgressPersistedAt: Date.now() };
       await reconcileRemovedRecipes({ db, householdId: job.householdId, boardIds: scopeBoardIds, seenRecipeIds: new Set(seen.map((item) => item.recipeId)), syncNow: new Date().toISOString(), syncRun: completionContext });
+      const latestJob = await db.query.pinterestSyncJobs.findFirst({ where: (table, { eq: whereEq }) => whereEq(table.jobId, jobId), columns: { status: true } });
+      if (latestJob?.status === "cancelled") return { status: "finished" as const };
       const changes = await db.query.pinterestSyncRecipeChanges.findMany({ where: (table, { eq: whereEq }) => whereEq(table.syncRunId, job.syncRunId), columns: { changeType: true, recipeId: true } });
       const counts = { created: changes.filter((change) => change.changeType === "created").length, removed: changes.filter((change) => change.changeType === "removed").length, restored: changes.filter((change) => change.changeType === "restored").length };
       const now = new Date().toISOString();
@@ -1153,7 +1155,10 @@ export async function processPinterestSyncJobPage(jobId: string) {
     for (const recipeId of result.seenRecipeIds) await db.insert(pinterestSyncJobSeenRecipes).values({ jobId, recipeId, boardId: board.id, createdAt: now }).onConflictDoNothing().run();
     const nextBoardId = page.bookmark ? board.id : null;
     const remaining = page.bookmark ? boards : boards.filter((item) => item.id !== board.id);
-    await db.update(pinterestSyncJobs).set({ status: "running", selectedBoardIdsJson: JSON.stringify(remaining), currentBoardId: nextBoardId, nextBookmark: page.bookmark ?? null, lastHeartbeatAt: now, updatedAt: now }).where(eq(pinterestSyncJobs.jobId, jobId)).run();
+    await db.update(pinterestSyncJobs).set({ status: "running", selectedBoardIdsJson: JSON.stringify(remaining), currentBoardId: nextBoardId, nextBookmark: page.bookmark ?? null, lastHeartbeatAt: now, updatedAt: now }).where(and(
+      eq(pinterestSyncJobs.jobId, jobId),
+      inArray(pinterestSyncJobs.status, ["queued", "running"]),
+    )).run();
     await flushPinterestSyncRunProgress(context);
     return { status: "continued" as const, syncRunId: job.syncRunId };
   } finally { await sqlite.close(); }
