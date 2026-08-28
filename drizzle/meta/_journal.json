@@ -127,6 +127,20 @@
       "when": 1787859802109,
       "tag": "0018_free_joseph",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1787861811958,
+      "tag": "0019_unique_the_hunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1787876781228,
+      "tag": "0020_romantic_marvel_boy",
+      "breakpoints": true
     }
   ]
 }

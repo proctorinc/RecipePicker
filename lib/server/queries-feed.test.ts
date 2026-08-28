@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import BetterSqlite3 from "better-sqlite3";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -245,6 +246,30 @@ describe("getFeedPinsPage", () => {
     expect(page.items.map((item) => item.searchMatches)).toEqual([
       [{ tier: 1, field: "title", matchedText: null, relatedText: null }],
       [{ tier: 1, field: "title", matchedText: null, relatedText: null }],
+    ]);
+  });
+
+  it("matches title phrases when the query ends with a plural word", async () => {
+    const { db, sqlite } = await createTestDatabaseHandle(sqlitePath);
+
+    try {
+      await db.update(householdRecipes)
+        .set({ title: "One-pot Creamy Beef and Shells" })
+        .where(eq(householdRecipes.recipeId, "recipe_c"))
+        .run();
+      await db.update(householdPins)
+        .set({ title: "One-pot Creamy Beef and Shells" })
+        .where(eq(householdPins.pinId, "pin_c"))
+        .run();
+    } finally {
+      await sqlite.close();
+    }
+
+    const page = await getFeedPinsPage({ searchText: "beef and shells" });
+
+    expect(page.items.map((item) => item.recipeId)).toEqual(["recipe_c"]);
+    expect(page.items[0]?.searchMatches).toEqual([
+      { tier: 1, field: "title", matchedText: null, relatedText: null },
     ]);
   });
 

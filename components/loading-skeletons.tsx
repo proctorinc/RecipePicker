@@ -27,14 +27,7 @@ export function Skeleton({
 
 export function FeedPageSkeleton() {
   return (
-    <div className="space-y-6">
-      <FeedCardsSkeleton />
-      <div className="fixed bottom-24 left-0 right-0 z-30 px-3 md:bottom-4 md:px-0">
-        <div className="mx-auto max-w-md">
-          <Skeleton className="h-14 rounded-full border border-white/80" />
-        </div>
-      </div>
-    </div>
+    <FeedCardsSkeleton />
   );
 }
 
@@ -119,11 +112,10 @@ function FeedSkeletonColumn({
   const cards: FeedCardAspectVariant[] = [
     columnIndex % 3 === 0 ? "taller" : "tall",
     columnIndex % 2 === 0 ? "square" : "taller",
+    columnIndex % 2 === 0 ? "tall" : "square",
+    columnIndex % 3 === 1 ? "taller" : "tall",
+    "square",
   ];
-
-  if (columnIndex < Math.max(1, columnCount - 2)) {
-    cards.push("tall");
-  }
 
   return (
     <div className="flex flex-col gap-2 md:gap-5">

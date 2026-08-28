@@ -23,6 +23,7 @@ import {
   householdRecipeVersions,
   pinterestSyncRecipeChanges,
   pinterestSyncRuns,
+  pinterestSyncJobs,
   householdShoppingCarts,
   householdShoppingCartItemStates,
   pinterestAccounts,
@@ -955,6 +956,10 @@ export async function getPinterestSyncRunDetail(syncRunId: string) {
       ),
     });
     if (!run) return null;
+    const job = await db.query.pinterestSyncJobs.findFirst({
+      where: (table, { eq }) => eq(table.syncRunId, syncRunId),
+      columns: { jobId: true, status: true, lastError: true, lastHeartbeatAt: true },
+    });
     const changes = await db.query.pinterestSyncRecipeChanges.findMany({
       where: (table, { eq }) => eq(table.syncRunId, syncRunId),
       orderBy: (table, { asc: orderAsc }) => [asc(table.createdAt)],
@@ -971,6 +976,7 @@ export async function getPinterestSyncRunDetail(syncRunId: string) {
     const [countedRun] = await withPinterestSyncChangeCounts(db, [run]);
     return {
       run: countedRun,
+      job,
       changes: changes.map((change) => {
         const recipe = recipeById.get(change.recipeId);
         return {
@@ -985,10 +991,45 @@ export async function getPinterestSyncRunDetail(syncRunId: string) {
   }
 }
 
+export async function getPinterestSyncRunProgress(syncRunId: string) {
+  const context = await requireHouseholdContext();
+  const { db, sqlite } = await openDatabase();
+  try {
+    return await db.query.pinterestSyncRuns.findFirst({
+      where: (table, { and, eq }) => and(
+        eq(table.syncRunId, syncRunId),
+        eq(table.householdId, context.householdId),
+      ),
+      columns: {
+        syncRunId: true,
+        status: true,
+        startedAt: true,
+        completedAt: true,
+        expectedPinCount: true,
+        processedPinCount: true,
+        pinCount: true,
+        message: true,
+      },
+    });
+  } finally {
+    await sqlite.close();
+  }
+}
+
 async function reconcileIncompletePinterestSyncRuns(
   db: DatabaseHandle,
   householdId: string,
 ) {
+  const staleBefore = new Date(Date.now() - (10 * 60 * 1000)).toISOString();
+  await db.update(pinterestSyncRuns).set({
+    status: "error",
+    completedAt: new Date().toISOString(),
+    message: "Pinterest sync was interrupted before completion. You can retry it.",
+  }).where(and(
+    eq(pinterestSyncRuns.householdId, householdId),
+    eq(pinterestSyncRuns.status, "running"),
+    lt(pinterestSyncRuns.startedAt, staleBefore),
+  )).run();
   const connection = await db.query.pinterestAccounts.findFirst({
     where: (table, { and, eq }) => and(
       eq(table.householdId, householdId),
@@ -1955,7 +1996,9 @@ async function prepareFeedCards({
   searchText?: string;
   subscriptionTier: "free" | "premium";
 }) {
-  const normalizedQuery = searchText?.trim().toLowerCase() ?? "";
+  const normalizedQuery = searchText
+    ? normalizeIngredientKey(searchText)
+    : "";
   const ingredientQuery = normalizedQuery
     ? await resolveIngredientSearchQuery(db, householdId, normalizedQuery)
     : null;

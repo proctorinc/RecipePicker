@@ -10,7 +10,7 @@ import {
   households,
   householdRecipes,
 } from "@/lib/server/db";
-import { syncBoard } from "@/lib/server/sync";
+import { createPinterestSyncScopeKey, syncBoard } from "@/lib/server/sync";
 
 const {
   mockFetchAllPins,
@@ -391,5 +391,14 @@ describe("syncBoard", () => {
         await opened.sqlite.close();
       }
     });
+  });
+});
+
+describe("createPinterestSyncScopeKey", () => {
+  it("is stable for the same board set and distinct for a changed selection", () => {
+    expect(createPinterestSyncScopeKey(["board-b", "board-a", "board-a"]))
+      .toBe("board-a,board-b");
+    expect(createPinterestSyncScopeKey(["board-a"]))
+      .not.toBe(createPinterestSyncScopeKey(["board-a", "board-b"]));
   });
 });

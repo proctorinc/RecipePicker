@@ -2,6 +2,7 @@ import { inngest } from "@/src/inngest/client";
 import { logError, logInfo } from "@/lib/server/logger";
 
 export const RECIPE_PARSE_JOB_REQUESTED_EVENT = "app/recipe-parse-job.requested" as const;
+export const PINTEREST_SYNC_REQUESTED_EVENT = "app/pinterest-sync.requested" as const;
 
 export type RecipeParseJobRequestedTrigger = "create" | "resume";
 
@@ -56,4 +57,8 @@ export async function sendRecipeParseJobRequestedEvent(
     });
     throw error;
   }
+}
+
+export async function sendPinterestSyncRequestedEvent(payload: { jobId: string; householdId: string }) {
+  return inngest.send({ name: PINTEREST_SYNC_REQUESTED_EVENT, data: payload });
 }

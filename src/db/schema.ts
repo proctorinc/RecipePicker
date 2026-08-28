@@ -116,6 +116,9 @@ export const pinterestSyncRuns = sqliteTable(
     status: text("status").notNull(),
     startedAt: text("started_at").notNull(),
     completedAt: text("completed_at"),
+    syncScopeKey: text("sync_scope_key"),
+    expectedPinCount: integer("expected_pin_count"),
+    processedPinCount: integer("processed_pin_count").notNull().default(0),
     boardCount: integer("board_count").notNull().default(0),
     pinCount: integer("pin_count").notNull().default(0),
     createdRecipeCount: integer("created_recipe_count").notNull().default(0),
@@ -140,6 +143,47 @@ export const pinterestSyncRecipeChanges = sqliteTable(
   (table) => ({
     runIdx: index("idx_pinterest_sync_recipe_changes_run").on(table.syncRunId, table.createdAt),
     runRecipeUniqueIdx: uniqueIndex("idx_pinterest_sync_recipe_changes_run_recipe_unique").on(table.syncRunId, table.recipeId),
+  }),
+);
+
+// Pinterest sync history is intentionally kept separate from the durable work
+// record. A run is what we show to people; a job is what Inngest resumes.
+export const pinterestSyncJobs = sqliteTable(
+  "pinterest_sync_jobs",
+  {
+    jobId: generatedId("job_id"),
+    syncRunId: text("sync_run_id").notNull().references(() => pinterestSyncRuns.syncRunId),
+    householdId: text("household_id").notNull().references(() => households.householdId),
+    requestedByClerkUserId: text("requested_by_clerk_user_id"),
+    trigger: text("trigger").notNull(),
+    status: text("status").notNull(),
+    selectedBoardIdsJson: text("selected_board_ids_json").notNull(),
+    currentBoardId: text("current_board_id"),
+    nextBookmark: text("next_bookmark"),
+    lastHeartbeatAt: text("last_heartbeat_at"),
+    lastError: text("last_error"),
+    parseNewRecipes: integer("parse_new_recipes", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    completedAt: text("completed_at"),
+  },
+  (table) => ({
+    runUniqueIdx: uniqueIndex("idx_pinterest_sync_jobs_run_unique").on(table.syncRunId),
+    householdStatusIdx: index("idx_pinterest_sync_jobs_household_status").on(table.householdId, table.status),
+  }),
+);
+
+export const pinterestSyncJobSeenRecipes = sqliteTable(
+  "pinterest_sync_job_seen_recipes",
+  {
+    jobId: text("job_id").notNull().references(() => pinterestSyncJobs.jobId),
+    recipeId: text("recipe_id").notNull().references(() => householdRecipes.recipeId),
+    boardId: text("board_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => ({
+    jobRecipeUniqueIdx: uniqueIndex("idx_pinterest_sync_job_seen_unique").on(table.jobId, table.recipeId),
+    jobBoardIdx: index("idx_pinterest_sync_job_seen_board").on(table.jobId, table.boardId),
   }),
 );
 

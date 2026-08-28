@@ -20,7 +20,7 @@ describe("/api/inngest", () => {
     expect(mockServe).toHaveBeenCalledTimes(1);
     expect(mockServe).toHaveBeenCalledWith({
       client: expect.anything(),
-      functions: [expect.anything()],
+      functions: [expect.anything(), expect.anything()],
     });
     expect(route.GET).toBe("get-handler");
     expect(route.POST).toBe("post-handler");

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -32,14 +33,17 @@ export function ActionForm({
   className?: string;
 }) {
   const [state, formAction] = useActionState(action, initialActionState);
+  const router = useRouter();
 
   useEffect(() => {
     if (state.status === "success") {
       toast.success(state.message);
+      const redirectTo = state.data?.redirectTo;
+      if (typeof redirectTo === "string") router.push(redirectTo);
     } else if (state.status === "error") {
       toast.error(state.message);
     }
-  }, [state]);
+  }, [router, state]);
 
   return (
     <form action={formAction} className={className}>

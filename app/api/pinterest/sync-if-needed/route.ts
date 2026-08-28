@@ -1,4 +1,3 @@
-import { after } from "next/server";
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccess } from "@/lib/server/access";
@@ -6,14 +5,14 @@ import { requireHouseholdContext } from "@/lib/server/auth";
 import {
   logInfo,
   logWarn,
-  runBackgroundJob,
   toErrorResponse,
   withRouteLogging,
 } from "@/lib/server/logger";
 import {
   planPinterestAutoSync,
-  runClaimedPinterestAutoSync,
+  queuePinterestSync,
 } from "@/lib/server/sync";
+import { sendPinterestSyncRequestedEvent } from "@/src/inngest/events";
 
 export const POST = withRouteLogging(
   "api.pinterest_sync_if_needed",
@@ -28,25 +27,15 @@ export const POST = withRouteLogging(
     });
 
     if (plan.status === "claimed") {
-      after(async () => {
-        await runBackgroundJob({
-          name: "background.pinterest_auto_sync",
-          target: {
-            householdId: household.householdId,
-          },
-          fn: async () =>
-            runClaimedPinterestAutoSync({
-              householdId: household.householdId,
-            }),
-        });
-      });
+      const job = await queuePinterestSync({ householdId: household.householdId, trigger: "auto_feed_load", alreadyClaimed: true });
+      await sendPinterestSyncRequestedEvent({ jobId: job.jobId, householdId: household.householdId });
 
       logInfo("pinterest.sync.claimed", {
         target: {
           householdId: household.householdId,
         },
       });
-      return NextResponse.json({ status: "triggered" });
+      return NextResponse.json({ status: "triggered", syncRunId: job.syncRunId });
     }
 
     logWarn("pinterest.sync.skipped", {

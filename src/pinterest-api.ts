@@ -47,7 +47,7 @@ export type CreatePinterestPinInput = {
   contentType: string;
 };
 
-type PinterestPage<T> = {
+export type PinterestPage<T> = {
   items?: T[];
   bookmark?: string | null;
   code?: number;
@@ -67,7 +67,7 @@ export function getApiBaseUrl(): string {
   return process.env.PINTEREST_API_BASE_URL?.trim() || "https://api.pinterest.com/v5";
 }
 
-async function fetchPage<T>(pathname: string, accessToken: string, bookmark?: string): Promise<PinterestPage<T>> {
+export async function fetchPinterestPage<T>(pathname: string, accessToken: string, bookmark?: string): Promise<PinterestPage<T>> {
   const url = new URL(`${getApiBaseUrl().replace(/\/$/, "")}${pathname}`);
   url.searchParams.set("page_size", String(DEFAULT_PAGE_SIZE));
 
@@ -95,7 +95,7 @@ export async function fetchAllBoards(accessToken: string): Promise<PinterestBoar
   let bookmark: string | null | undefined = undefined;
 
   do {
-    const page: PinterestPage<PinterestBoard> = await fetchPage<PinterestBoard>(
+      const page: PinterestPage<PinterestBoard> = await fetchPinterestPage<PinterestBoard>(
       "/boards",
       accessToken,
       bookmark ?? undefined,
@@ -112,7 +112,7 @@ export async function fetchAllPins(boardId: string, accessToken: string): Promis
   let bookmark: string | null | undefined = undefined;
 
   do {
-    const page: PinterestPage<PinterestPin> = await fetchPage<PinterestPin>(
+    const page: PinterestPage<PinterestPin> = await fetchPinterestPage<PinterestPin>(
       `/boards/${encodeURIComponent(boardId)}/pins`,
       accessToken,
       bookmark ?? undefined,
@@ -122,6 +122,15 @@ export async function fetchAllPins(boardId: string, accessToken: string): Promis
   } while (bookmark);
 
   return pins;
+}
+
+/** Fetch one bounded Pinterest page. Durable workers persist `bookmark` after it succeeds. */
+export async function fetchPinterestPinsPage(boardId: string, accessToken: string, bookmark?: string | null) {
+  return fetchPinterestPage<PinterestPin>(
+    `/boards/${encodeURIComponent(boardId)}/pins`,
+    accessToken,
+    bookmark ?? undefined,
+  );
 }
 
 export async function createPinterestPin(

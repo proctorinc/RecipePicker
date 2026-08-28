@@ -16,6 +16,7 @@ import { decryptSecret, encryptSecret } from "@/lib/server/security";
 import {
   fetchAllBoards,
   fetchAllPins,
+  fetchPinterestPinsPage,
   createPinterestPin,
   getApiBaseUrl,
   requireEnv,
@@ -63,7 +64,7 @@ export type PinterestConnectionSummary = {
   connectedByClerkUserId: string | null;
 };
 
-export { fetchAllBoards, fetchAllPins, createPinterestPin, getApiBaseUrl, requireEnv, type PinterestBoard, type PinterestPin };
+export { fetchAllBoards, fetchAllPins, fetchPinterestPinsPage, createPinterestPin, getApiBaseUrl, requireEnv, type PinterestBoard, type PinterestPin };
 
 export function getPinterestOauthScopes() {
   return process.env.PINTEREST_OAUTH_SCOPES?.trim() || "boards:read,boards:write,pins:read,pins:write";

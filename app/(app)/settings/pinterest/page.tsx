@@ -6,6 +6,7 @@ import { AppTransitionLink } from "@/components/app-transition-link";
 import { BoardSyncPicker } from "@/components/board-sync-picker";
 import { LocalDateTime } from "@/components/local-date-time";
 import { PinterestAutoSyncToggle } from "@/components/pinterest-auto-sync-toggle";
+import { PinterestSyncProgress } from "@/components/pinterest-sync-progress";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -42,7 +43,6 @@ import { getBoardSyncOptions, getPinterestSyncHistory } from "@/lib/server/queri
 import {
   formatPinterestAutoSyncFrequency,
   getNextPinterestAutoSyncEligibleAt,
-  isPinterestSyncLeaseActive,
 } from "@/lib/server/sync";
 import { formatRelativeTimeShort } from "@/lib/utils";
 
@@ -78,6 +78,7 @@ export default async function PinterestSettingsPage({
     getPinterestSyncHistory(1),
   ]);
   const latestSync = syncRuns[0] ?? null;
+  const syncInProgress = latestSync?.status === "running";
   const syncedBoards = boards.filter((board) => board.syncEnabled);
   const syncFrequency = formatPinterestAutoSyncFrequency(
     appAccess.subscriptionTier,
@@ -87,7 +88,6 @@ export default async function PinterestSettingsPage({
   const syncRecency = connection.lastSyncAt
     ? formatRelativeTimeShort(connection.lastSyncAt)
     : "No sync run yet";
-  const syncInProgress = isPinterestSyncLeaseActive(connection.syncInProgressAt);
   const nextAutoSyncAt = getNextPinterestAutoSyncEligibleAt({
     autoSyncEnabled: connection.autoSyncEnabled,
     lastSyncAttemptAt: connection.lastSyncAttemptAt,
@@ -132,9 +132,7 @@ export default async function PinterestSettingsPage({
                     ? <>Next auto-sync becomes eligible {formatRelativeTimeShort(nextAutoSyncAt)} (<LocalDateTime value={nextAutoSyncAt} />).</>
                     : "Next auto-sync can run on the next feed load."}
             </p>
-            {syncInProgress ? (
-              <p className="inline-flex items-center text-sm text-muted-foreground"><ActivityIndicator label="Pinterest sync in progress" className="mr-2 h-4 w-4" />Sync in progress.</p>
-            ) : null}
+            {latestSync?.status === "running" ? <PinterestSyncProgress run={latestSync} /> : null}
             {connection.accessTokenExpiresAt ? (
               <p className="text-sm text-muted-foreground">
                 Access token expires <LocalDateTime value={connection.accessTokenExpiresAt} />.

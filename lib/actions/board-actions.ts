@@ -1,17 +1,16 @@
 "use server";
 
-import { after } from "next/server";
+import { and, eq } from "drizzle-orm";
 
 import { requireHouseholdRole } from "@/lib/server/auth";
 import { openDatabase } from "@/lib/server/database";
-import { boardSyncSubscriptions } from "@/lib/server/db";
+import { boardSyncSubscriptions, pinterestSyncJobs } from "@/lib/server/db";
 import { extractRecipes } from "@/lib/server/extract";
-import { runBackgroundJob, withActionLogging } from "@/lib/server/logger";
+import { withActionLogging } from "@/lib/server/logger";
 import {
-  runManualBoardSync,
-  runManualSyncAllBoards,
-  runForcePinterestResync,
+  queuePinterestSync,
 } from "@/lib/server/sync";
+import { sendPinterestSyncRequestedEvent } from "@/src/inngest/events";
 import {
   revalidateAll,
   recipeScopedPaths,
@@ -35,15 +34,13 @@ export const syncBoardAction = withActionLogging(
 
     try {
       const context = await requireHouseholdRole("owner");
-      const result = await runManualBoardSync({
-        householdId: context.householdId,
-        boardId,
-        boardName,
-      });
+      const result = await queuePinterestSync({ householdId: context.householdId, trigger: "manual", requestedByClerkUserId: context.clerkUserId, boardId, boardName });
+      await sendPinterestSyncRequestedEvent({ jobId: result.jobId, householdId: context.householdId });
       revalidateAll(recipeScopedPaths());
       return {
         status: "success",
-        message: `Synced ${result.syncedPins} pins from ${boardName ?? boardId}.`,
+        message: `Sync queued for ${boardName ?? boardId}.`,
+        data: { redirectTo: `/settings/pinterest/syncs/${result.syncRunId}` },
       };
     } catch (error) {
       return toErrorState(error, `Unable to sync board ${boardId}.`);
@@ -66,16 +63,13 @@ export const syncAllBoardsAction = withActionLogging(
   ): Promise<ActionState> => {
     try {
       const context = await requireHouseholdRole("owner");
-      const results = await runManualSyncAllBoards({
-        householdId: context.householdId,
-      });
+      const result = await queuePinterestSync({ householdId: context.householdId, trigger: "manual", requestedByClerkUserId: context.clerkUserId });
+      await sendPinterestSyncRequestedEvent({ jobId: result.jobId, householdId: context.householdId });
       revalidateAll(recipeScopedPaths());
       return {
         status: "success",
-        message:
-          results.boards.length > 0
-            ? `Synced ${results.boards.length} selected boards.`
-            : "No boards are selected for sync yet.",
+        message: "Pinterest sync queued.",
+        data: { redirectTo: `/settings/pinterest/syncs/${result.syncRunId}` },
       };
     } catch (error) {
       return toErrorState(error, "Unable to sync all boards.");
@@ -88,17 +82,40 @@ export const forcePinterestResyncAction = withActionLogging(
   async (_: ActionState, _formData: FormData): Promise<ActionState> => {
     try {
       const context = await requireHouseholdRole("owner");
-      const result = await runForcePinterestResync({ householdId: context.householdId });
+      const result = await queuePinterestSync({ householdId: context.householdId, trigger: "force", requestedByClerkUserId: context.clerkUserId });
+      await sendPinterestSyncRequestedEvent({ jobId: result.jobId, householdId: context.householdId });
       revalidateAll(recipeScopedPaths());
       return {
         status: "success",
-        message: result.boards.length > 0
-          ? `Force resynced ${result.boards.length} selected boards.`
-          : "No boards are selected for sync yet.",
+        message: "Force resync queued.",
+        data: { redirectTo: `/settings/pinterest/syncs/${result.syncRunId}` },
       };
     } catch (error) {
       return toErrorState(error, "Unable to force Pinterest resync.");
     }
+  },
+);
+
+export const retryPinterestSyncAction = withActionLogging(
+  "action.retry_pinterest_sync",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const syncRunId = String(formData.get("syncRunId") ?? "").trim();
+    if (!syncRunId) return { status: "error", message: "Sync run is required." };
+    try {
+      const context = await requireHouseholdRole("owner");
+      const { db, sqlite } = await openDatabase();
+      try {
+        const job = await db.query.pinterestSyncJobs.findFirst({
+          where: (table, { and, eq }) => and(eq(table.syncRunId, syncRunId), eq(table.householdId, context.householdId)),
+        });
+        if (!job || job.status !== "error") return { status: "error", message: "This sync cannot be retried." };
+        const now = new Date().toISOString();
+        await db.update(pinterestSyncJobs).set({ status: "queued", lastError: null, completedAt: null, updatedAt: now }).where(eq(pinterestSyncJobs.jobId, job.jobId)).run();
+        await sendPinterestSyncRequestedEvent({ jobId: job.jobId, householdId: context.householdId });
+      } finally { await sqlite.close(); }
+      revalidateAll(recipeScopedPaths());
+      return { status: "success", message: "Pinterest sync retry queued." };
+    } catch (error) { return toErrorState(error, "Unable to retry Pinterest sync."); }
   },
 );
 
@@ -146,35 +163,14 @@ export const setBoardSyncEnabledAction = withActionLogging(
         .run();
 
       if (syncEnabled) {
-        after(async () => {
-          await runBackgroundJob({
-            name: "background.board_enable_sync",
-            target: {
-              boardId,
-              householdId: context.householdId,
-            },
-            fn: async () => {
-              await runManualBoardSync({
-                householdId: context.householdId,
-                boardId,
-                boardName,
-                syncEnabled: true,
-              });
-
-              await extractRecipes({
-                householdId: context.householdId,
-                boardId,
-              });
-
-              revalidateAll(recipeScopedPaths(boardId));
-            },
-          });
-        });
+        const result = await queuePinterestSync({ householdId: context.householdId, trigger: "manual", requestedByClerkUserId: context.clerkUserId, boardId, boardName, parseNewRecipes: true });
+        await sendPinterestSyncRequestedEvent({ jobId: result.jobId, householdId: context.householdId });
 
         revalidateAll(recipeScopedPaths(boardId));
         return {
           status: "success",
-          message: `Added ${boardName ?? boardId} to synced boards. Sync and recipe parsing are running in the background.`,
+          message: `Added ${boardName ?? boardId} to synced boards. Sync and recipe parsing are queued.`,
+          data: { redirectTo: `/settings/pinterest/syncs/${result.syncRunId}` },
         };
       }
 
