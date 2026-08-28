@@ -18,7 +18,7 @@ import {
 } from "@/lib/server/db";
 import { extractRecipes } from "@/lib/server/extract";
 import { createRecipeParseJob } from "@/lib/server/recipe-parse-jobs";
-import { sendRecipeParseJobRequestedEvent } from "@/src/inngest/events";
+import { sendPinterestSyncRequestedEvent, sendRecipeParseJobRequestedEvent } from "@/src/inngest/events";
 import { logError, logInfo, logWarn } from "@/lib/server/logger";
 import { getPinImageUrl } from "@/lib/server/media";
 import { normalizeRecipeSourceUrl } from "@/lib/recipe-source-url";
@@ -1169,6 +1169,19 @@ export async function markPinterestSyncJobFailure(jobId: string, error: unknown)
     await db.update(pinterestSyncRuns).set({ status: "error", completedAt: now, message }).where(eq(pinterestSyncRuns.syncRunId, job.syncRunId)).run();
     await updatePinterestConnectionSyncStatus({ householdId: job.householdId, status: "error", errorMessage: message });
   } finally { await sqlite.close(); }
+}
+
+/** Queue publication is part of creating a durable sync: a rejected Inngest
+ * event must be reflected in the run rather than leaving it queued forever. */
+export async function requestPinterestSync(args: Parameters<typeof queuePinterestSync>[0]) {
+  const queued = await queuePinterestSync(args);
+  try {
+    await sendPinterestSyncRequestedEvent({ jobId: queued.jobId, householdId: args.householdId });
+    return queued;
+  } catch (error) {
+    await markPinterestSyncJobFailure(queued.jobId, error);
+    throw error;
+  }
 }
 
 function isWithinCooldown(

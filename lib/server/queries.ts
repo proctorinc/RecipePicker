@@ -1021,10 +1021,22 @@ async function reconcileIncompletePinterestSyncRuns(
   householdId: string,
 ) {
   const staleBefore = new Date(Date.now() - (10 * 60 * 1000)).toISOString();
+  const staleNow = new Date().toISOString();
+  const staleMessage = "Pinterest sync was interrupted before Inngest began processing. You can retry it.";
+  await db.update(pinterestSyncJobs).set({
+    status: "error",
+    completedAt: staleNow,
+    lastError: staleMessage,
+    updatedAt: staleNow,
+  }).where(and(
+    eq(pinterestSyncJobs.householdId, householdId),
+    inArray(pinterestSyncJobs.status, ["queued", "running"]),
+    lt(pinterestSyncJobs.updatedAt, staleBefore),
+  )).run();
   await db.update(pinterestSyncRuns).set({
     status: "error",
-    completedAt: new Date().toISOString(),
-    message: "Pinterest sync was interrupted before completion. You can retry it.",
+    completedAt: staleNow,
+    message: staleMessage,
   }).where(and(
     eq(pinterestSyncRuns.householdId, householdId),
     eq(pinterestSyncRuns.status, "running"),

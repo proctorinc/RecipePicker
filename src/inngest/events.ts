@@ -60,5 +60,25 @@ export async function sendRecipeParseJobRequestedEvent(
 }
 
 export async function sendPinterestSyncRequestedEvent(payload: { jobId: string; householdId: string }) {
-  return inngest.send({ name: PINTEREST_SYNC_REQUESTED_EVENT, data: payload });
+  logInfo("pinterest_sync_job.queue_requested", {
+    target: { householdId: payload.householdId, jobId: payload.jobId },
+    eventName: PINTEREST_SYNC_REQUESTED_EVENT,
+  });
+
+  try {
+    const result = await inngest.send({ name: PINTEREST_SYNC_REQUESTED_EVENT, data: payload });
+    logInfo("pinterest_sync_job.queue_completed", {
+      target: { householdId: payload.householdId, jobId: payload.jobId },
+      eventName: PINTEREST_SYNC_REQUESTED_EVENT,
+      result: { status: "success" },
+    });
+    return result;
+  } catch (error) {
+    logError("pinterest_sync_job.queue_failed", error, {
+      target: { householdId: payload.householdId, jobId: payload.jobId },
+      eventName: PINTEREST_SYNC_REQUESTED_EVENT,
+      result: { status: "error" },
+    });
+    throw error;
+  }
 }

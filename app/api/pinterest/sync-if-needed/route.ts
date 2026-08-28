@@ -10,9 +10,8 @@ import {
 } from "@/lib/server/logger";
 import {
   planPinterestAutoSync,
-  queuePinterestSync,
+  requestPinterestSync,
 } from "@/lib/server/sync";
-import { sendPinterestSyncRequestedEvent } from "@/src/inngest/events";
 
 export const POST = withRouteLogging(
   "api.pinterest_sync_if_needed",
@@ -27,8 +26,7 @@ export const POST = withRouteLogging(
     });
 
     if (plan.status === "claimed") {
-      const job = await queuePinterestSync({ householdId: household.householdId, trigger: "auto_feed_load", alreadyClaimed: true });
-      await sendPinterestSyncRequestedEvent({ jobId: job.jobId, householdId: household.householdId });
+      const job = await requestPinterestSync({ householdId: household.householdId, trigger: "auto_feed_load", alreadyClaimed: true });
 
       logInfo("pinterest.sync.claimed", {
         target: {
