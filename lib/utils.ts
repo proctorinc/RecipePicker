@@ -54,8 +54,13 @@ export function formatDay(value: string | null | undefined) {
     return "Date not included";
   }
 
+  const isDayString = /^\d{4}-\d{2}-\d{2}$/.test(value);
+
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
+    // Calendar dates have no time or timezone. Parse and display them in UTC so
+    // a browser west of UTC does not render the preceding local day.
+    ...(isDayString ? { timeZone: "UTC" } : {}),
   }).format(new Date(value));
 }
 

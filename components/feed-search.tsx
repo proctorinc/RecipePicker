@@ -21,7 +21,7 @@ export function FeedSearch({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder="Search recipes, ingredients, and more"
-          className="h-14 rounded-full border-0 bg-background/65 pl-10 pr-12 text-base shadow-[0_18px_40px_rgba(73,49,31,0.14)] backdrop-blur-sm"
+          className="h-14 rounded-full border border-border/80 bg-background/80 pl-10 pr-12 text-base shadow-[0_12px_28px_rgba(73,49,31,0.18)] backdrop-blur-md transition-shadow focus-visible:shadow-[0_14px_32px_rgba(73,49,31,0.24)]"
           aria-busy={isSearching}
         />
         {value ? (

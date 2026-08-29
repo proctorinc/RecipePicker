@@ -64,6 +64,7 @@ import type {
   FeedPinsPage,
   FeedSearchMatch,
   HouseholdMemberView,
+  HouseholdCookRatingView,
   IngredientReviewItemView,
   IngredientReviewQueuePageView,
   IngredientCatalogPageView,
@@ -1644,6 +1645,55 @@ export async function getHouseholdMembersView(): Promise<
     joinedAt: member.joinedAt,
     isCurrentUser: member.clerkUserId === context.clerkUserId,
   }));
+}
+
+export async function getHouseholdCookRatingsView(): Promise<
+  HouseholdCookRatingView[]
+> {
+  const context = await requireHouseholdContext();
+  const [members, database] = await Promise.all([
+    getHouseholdMembersView(),
+    openDatabase(),
+  ]);
+
+  try {
+    const reviews = await database.db.query.householdRecipeReviews.findMany({
+      where: (table, { eq }) => eq(table.householdId, context.householdId),
+      columns: {
+        reviewedByClerkUserId: true,
+        ratingValue: true,
+      },
+    });
+    const ratingsByCook = new Map<string, { total: number; count: number }>();
+
+    for (const review of reviews) {
+      if (!review.reviewedByClerkUserId) {
+        continue;
+      }
+
+      const current = ratingsByCook.get(review.reviewedByClerkUserId) ?? {
+        total: 0,
+        count: 0,
+      };
+      current.total += review.ratingValue;
+      current.count += 1;
+      ratingsByCook.set(review.reviewedByClerkUserId, current);
+    }
+
+    return members.map((member) => {
+      const ratings = ratingsByCook.get(member.clerkUserId);
+
+      return {
+        ...member,
+        ratingCount: ratings?.count ?? 0,
+        averageRating: ratings
+          ? Math.round((ratings.total / ratings.count) * 10) / 10
+          : null,
+      };
+    });
+  } finally {
+    await database.sqlite.close();
+  }
 }
 
 export async function getLatestInvite() {

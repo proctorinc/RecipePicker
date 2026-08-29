@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  --pinterest-sync-indicator-height: 0px;
   --background: 34 45% 96%;
   --foreground: 24 24% 16%;
   --card: 0 0% 100%;

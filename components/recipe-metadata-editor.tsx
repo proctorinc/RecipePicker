@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useTransition,
 } from "react";
 import { Check, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -235,7 +236,7 @@ export function RecipeMetadataEditor({
 
         {editBanner}
 
-        <div className="mx-auto w-full max-w-4xl space-y-2 px-4">
+        <div className="mx-auto w-full max-w-4xl space-y-2">
           <RecipeTags
             recipeId={recipeId}
             initialTags={tags}
@@ -287,6 +288,7 @@ function RecipeTags({
     saveRecipeTagsAction,
     initialActionState,
   );
+  const [, startSaveTagsTransition] = useTransition();
   const normalizedTags = new Set(tags.map((tag) => tag.toLocaleLowerCase()));
   const suggestions = availableTags
     .filter(
@@ -314,7 +316,9 @@ function RecipeTags({
     formData.set("tagsJson", JSON.stringify(nextTags));
     setTags(nextTags);
     setSelectedTag(null);
-    saveTags(formData);
+    startSaveTagsTransition(() => {
+      saveTags(formData);
+    });
   }
 
   function addTag(raw: string) {
@@ -333,6 +337,7 @@ function RecipeTags({
 
   return (
     <section aria-label="Recipe tags" className="space-y-2">
+      <p className="text-sm font-medium text-muted-foreground">Tags</p>
       <div className="flex flex-wrap items-center gap-2">
         {tags.map((tag) => (
           <button
@@ -363,29 +368,47 @@ function RecipeTags({
           <Plus className="size-4" />
         </button>
       </div>
-      {isAdding ? (
-        <div className="relative flex max-w-md gap-2">
-          <div className="relative min-w-0 flex-1">
+      <Dialog
+        open={isAdding}
+        onOpenChange={(open) => {
+          setIsAdding(open);
+          if (!open) setInput("");
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add a tag</DialogTitle>
+            <DialogDescription>
+              Choose an existing tag or create a new one for this recipe.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              addTag(input);
+            }}
+          >
             <Input
+              autoFocus
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === ",") {
+                if (event.key === ",") {
                   event.preventDefault();
                   addTag(input);
                 }
               }}
               placeholder="Add a tag"
-              aria-label="Add a tag"
+              aria-label="Tag name"
             />
             {input.trim() && suggestions.length > 0 ? (
-              <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-lg">
+              <div className="overflow-hidden rounded-xl border border-border p-1">
                 {suggestions.map((tag) => (
                   <button
                     key={tag.tagId}
                     type="button"
                     className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-secondary"
-                    onMouseDown={(event) => event.preventDefault()}
                     onClick={() => addTag(tag.name)}
                   >
                     {tag.name}
@@ -393,18 +416,15 @@ function RecipeTags({
                 ))}
               </div>
             ) : null}
-          </div>
-          <Button
-            type="button"
-            size="icon"
-            disabled={pending || !input.trim()}
-            onClick={() => addTag(input)}
-            aria-label="Add tag"
-          >
-            <Check className="size-4" />
-          </Button>
-        </div>
-      ) : null}
+            <div className="flex justify-end">
+              <Button type="submit" disabled={pending || !input.trim()}>
+                <Check className="size-4" />
+                Add tag
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

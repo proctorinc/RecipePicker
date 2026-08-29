@@ -23,6 +23,18 @@ export function PinterestSyncIndicator({ initialRun }: { initialRun: SyncRun | n
   }, [initialRun]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty(
+      "--pinterest-sync-indicator-height",
+      run?.status === "running" ? "1.25rem" : "0px",
+    );
+
+    return () => {
+      root.style.removeProperty("--pinterest-sync-indicator-height");
+    };
+  }, [run?.status]);
+
+  useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
       try {
@@ -56,32 +68,35 @@ export function PinterestSyncIndicator({ initialRun }: { initialRun: SyncRun | n
     : `${display.processedPinCount} / ${expectedPinCount} pins synced (${percentComplete}%)`;
 
   return (
-    <div className="mb-8 h-5 bg-primary text-primary-foreground shadow-sm">
-      <button
-        aria-describedby="pinterest-sync-tooltip"
-        aria-label={`Pinterest is syncing: ${progressLabel}. Show details.`}
-        aria-expanded={tooltipOpen}
-        className="group relative flex h-full w-full items-center justify-center overflow-visible text-[10px] font-medium leading-none"
-        onClick={() => setTooltipOpen((open) => !open)}
-        onMouseEnter={() => setTooltipOpen(true)}
-        onMouseLeave={() => setTooltipOpen(false)}
-        type="button"
-      >
-        <span className="absolute inset-y-0 left-0 bg-primary-foreground/20 transition-[width] duration-300" style={{ width: `${percentComplete}%` }} />
-        <span className="relative flex items-center gap-1 drop-shadow-sm">
-          <span aria-hidden="true" className="flex h-3 w-3 items-center justify-center rounded-full bg-primary-foreground text-[9px] font-bold leading-none text-primary">P</span>
-          <span>{expectedPinCount === null ? `${display.processedPinCount} pins` : `${percentComplete}% · ${display.processedPinCount}/${expectedPinCount}`}</span>
-        </span>
-        {timeRemaining ? <span className="absolute right-2 text-primary-foreground/60">{timeRemaining}</span> : null}
-        <span
-          className={`absolute top-full mt-1 w-max max-w-[calc(100vw-2rem)] rounded-md bg-foreground px-2.5 py-2 text-left text-xs font-normal leading-4 text-background shadow-lg transition-opacity ${tooltipOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
-          id="pinterest-sync-tooltip"
-          role="tooltip"
+    <>
+      <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3rem)] z-40 h-5 bg-primary text-primary-foreground shadow-sm md:top-[4.75rem]">
+        <button
+          aria-describedby="pinterest-sync-tooltip"
+          aria-label={`Pinterest is syncing: ${progressLabel}. Show details.`}
+          aria-expanded={tooltipOpen}
+          className="group relative flex h-full w-full items-center justify-center overflow-visible text-[10px] font-medium leading-none"
+          onClick={() => setTooltipOpen((open) => !open)}
+          onMouseEnter={() => setTooltipOpen(true)}
+          onMouseLeave={() => setTooltipOpen(false)}
+          type="button"
         >
-          Pinterest is syncing. {progressLabel}.{timeRemaining ? ` Estimated time remaining: ${timeRemaining}.` : ""}
-        </span>
-      </button>
-    </div>
+          <span className="absolute inset-y-0 left-0 bg-primary-foreground/20 transition-[width] duration-300" style={{ width: `${percentComplete}%` }} />
+          <span className="relative flex items-center gap-1 drop-shadow-sm">
+            <span aria-hidden="true" className="flex h-3 w-3 items-center justify-center rounded-full bg-primary-foreground text-[9px] font-bold leading-none text-primary">P</span>
+            <span>{expectedPinCount === null ? `${display.processedPinCount} pins` : `${percentComplete}% · ${display.processedPinCount}/${expectedPinCount}`}</span>
+          </span>
+          {timeRemaining ? <span className="absolute right-2 text-primary-foreground/60">{timeRemaining}</span> : null}
+          <span
+            className={`absolute top-full mt-1 w-max max-w-[calc(100vw-2rem)] rounded-md bg-foreground px-2.5 py-2 text-left text-xs font-normal leading-4 text-background shadow-lg transition-opacity ${tooltipOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
+            id="pinterest-sync-tooltip"
+            role="tooltip"
+          >
+            Pinterest is syncing. {progressLabel}.{timeRemaining ? ` Estimated time remaining: ${timeRemaining}.` : ""}
+          </span>
+        </button>
+      </div>
+      <div aria-hidden="true" className="h-5" />
+    </>
   );
 }
 

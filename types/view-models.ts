@@ -524,6 +524,11 @@ export type HouseholdMemberView = {
   isCurrentUser: boolean;
 };
 
+export type HouseholdCookRatingView = HouseholdMemberView & {
+  ratingCount: number;
+  averageRating: number | null;
+};
+
 export type RecipeHistoryPageView = {
   month: string;
   monthLabel: string;

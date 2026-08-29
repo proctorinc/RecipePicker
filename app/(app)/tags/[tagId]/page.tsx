@@ -14,8 +14,32 @@ export default async function TagPage({ params }: { params: Promise<{ tagId: str
   const tag = await getRecipeTag(tagId);
   if (!tag) notFound();
   const page = await getFeedPinsPage({ tagId });
-  return <PageShell>
-    <div className="flex items-center gap-3 px-2"><Button asChild variant="outline"><AppTransitionLink href="/tags" prefetch><ArrowLeft className="size-4" />Back to tags</AppTransitionLink></Button><div><p className="flex items-center gap-2 font-[family-name:var(--font-serif)] text-3xl font-semibold"><Tag className="size-5" />{tag.name}</p><p className="text-sm text-muted-foreground">Recipes in this collection</p></div></div>
-    <HomeFeedShell initialPage={page} initialQuery="" tagId={tagId} />
-  </PageShell>;
+  return (
+    <PageShell>
+      <HomeFeedShell
+        initialPage={page}
+        initialQuery=""
+        tagId={tagId}
+        header={
+          <div className="flex items-center gap-3 px-2">
+            <Button asChild variant="outline">
+              <AppTransitionLink href="/tags" prefetch>
+                <ArrowLeft className="size-4" />
+                Back to tags
+              </AppTransitionLink>
+            </Button>
+            <div>
+              <h1 className="flex items-center gap-2 font-[family-name:var(--font-serif)] text-3xl font-semibold">
+                <Tag className="size-5" />
+                {tag.name}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Recipes in this collection
+              </p>
+            </div>
+          </div>
+        }
+      />
+    </PageShell>
+  );
 }

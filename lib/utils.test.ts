@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCalendarDays,
   expandDayRange,
+  formatDay,
   formatIso8601Duration,
   formatRelativeTimeShort,
   getTodayDayString,
@@ -57,6 +58,10 @@ describe("formatIso8601Duration", () => {
 });
 
 describe("calendar helpers", () => {
+  it("formats date-only calendar values without shifting the day by timezone", () => {
+    expect(formatDay("2026-06-11")).toBe("Jun 11, 2026");
+  });
+
   it("validates day and month strings", () => {
     expect(isValidDayString("2026-06-11")).toBe(true);
     expect(isValidDayString("2026-13-11")).toBe(false);

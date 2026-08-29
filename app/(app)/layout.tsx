@@ -4,7 +4,10 @@ import { AppShell } from "@/components/app-shell";
 import { PinterestSyncIndicator } from "@/components/pinterest-sync-indicator";
 import { getCurrentUserAccess } from "@/lib/server/access";
 import { requireHouseholdContext } from "@/lib/server/auth";
-import { getActivePinterestSyncRunProgress } from "@/lib/server/queries";
+import {
+  getActivePinterestSyncRunProgress,
+  getHouseholdCookRatingsView,
+} from "@/lib/server/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -13,16 +16,18 @@ export default async function AuthenticatedAppLayout({
 }: {
   children: ReactNode;
 }) {
-  const [household, access, activePinterestSync] = await Promise.all([
+  const [household, access, activePinterestSync, cooks] = await Promise.all([
     requireHouseholdContext(),
     getCurrentUserAccess(),
     getActivePinterestSyncRunProgress(),
+    getHouseholdCookRatingsView(),
   ]);
 
   return (
     <AppShell
       householdName={household.householdName}
       householdLogoUrl={household.householdLogoUrl}
+      cooks={cooks}
       showAiPicker={access.isPremium}
       showSettings={household.role === "owner" || access.isActualAdmin}
       mobileProfileLinksToSettings={household.role === "owner"}

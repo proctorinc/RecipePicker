@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { FeedSearch } from "@/components/feed-search";
 import { HomeFeed } from "@/components/home-feed";
@@ -19,25 +25,39 @@ type HomeFeedShellProps = {
   initialPage: FeedPinsPage;
   initialQuery: string;
   tagId?: string;
+  header?: ReactNode;
 };
 
 export function HomeFeedShell({
   initialPage,
   initialQuery,
   tagId,
+  header,
 }: HomeFeedShellProps) {
   const normalizedInitialQuery = initialQuery.trim();
-  const savedQuery = getSavedHomeFeedQuery(tagId);
-  const restoredQuery = normalizedInitialQuery || savedQuery;
-  const cacheKey = getFeedCacheKey(restoredQuery, tagId);
-  const cachedFeed = getCachedFeed(cacheKey);
-  const [inputValue, setInputValue] = useState(restoredQuery);
-  const [activeQuery, setActiveQuery] = useState(restoredQuery);
-  const [page, setPage] = useState(() => cachedFeed?.page ?? initialPage);
-  const [isSearching, setIsSearching] = useState(
-    Boolean(savedQuery && !normalizedInitialQuery && !cachedFeed),
+  const initialCachedFeed = getCachedFeed(
+    getFeedCacheKey(normalizedInitialQuery, tagId),
   );
+  const [inputValue, setInputValue] = useState(normalizedInitialQuery);
+  const [activeQuery, setActiveQuery] = useState(normalizedInitialQuery);
+  const [page, setPage] = useState(() => initialCachedFeed?.page ?? initialPage);
+  const [isSearching, setIsSearching] = useState(false);
   const searchAbortRef = useRef<AbortController | null>(null);
+  const cacheKey = getFeedCacheKey(activeQuery, tagId);
+  const cachedFeed = getCachedFeed(cacheKey);
+
+  useEffect(() => {
+    const nextCachedFeed = getCachedFeed(
+      getFeedCacheKey(normalizedInitialQuery, tagId),
+    );
+
+    searchAbortRef.current?.abort();
+    searchAbortRef.current = null;
+    setInputValue(normalizedInitialQuery);
+    setActiveQuery(normalizedInitialQuery);
+    setPage(nextCachedFeed?.page ?? initialPage);
+    setIsSearching(false);
+  }, [initialPage, normalizedInitialQuery, tagId]);
 
   useEffect(() => {
     if (tagId) {
@@ -53,13 +73,34 @@ export function HomeFeedShell({
   }, [activeQuery, tagId]);
 
   useEffect(() => {
-    if (tagId || !savedQuery || normalizedInitialQuery || cachedFeed) {
+    if (tagId || normalizedInitialQuery) {
       return;
     }
 
+    const savedQuery = getSavedHomeFeedQuery();
+    if (!savedQuery) {
+      return;
+    }
+
+    setInputValue(savedQuery);
+    setActiveQuery(savedQuery);
     const controller = new AbortController();
+    searchAbortRef.current = controller;
     syncUrl(savedQuery);
 
+    const cachedSavedFeed = getCachedFeed(getFeedCacheKey(savedQuery));
+    if (cachedSavedFeed) {
+      setPage(cachedSavedFeed.page);
+      setIsSearching(false);
+      return () => {
+        controller.abort();
+        if (searchAbortRef.current === controller) {
+          searchAbortRef.current = null;
+        }
+      };
+    }
+
+    setIsSearching(true);
     void fetchSearchPage(savedQuery, controller.signal)
       .then((nextPage) => {
         if (controller.signal.aborted) {
@@ -78,8 +119,13 @@ export function HomeFeedShell({
         console.error("Unable to restore feed search.", error);
       });
 
-    return () => controller.abort();
-  }, [cachedFeed, normalizedInitialQuery, savedQuery, tagId]);
+    return () => {
+      controller.abort();
+      if (searchAbortRef.current === controller) {
+        searchAbortRef.current = null;
+      }
+    };
+  }, [normalizedInitialQuery, tagId]);
 
   useEffect(() => {
     cacheFeedPage(getFeedCacheKey(activeQuery, tagId), page);
@@ -132,7 +178,6 @@ export function HomeFeedShell({
 
     const timeout = window.setTimeout(() => {
       if (trimmedValue === activeQuery) {
-        setIsSearching(false);
         syncUrl(trimmedValue);
         return;
       }
@@ -176,7 +221,8 @@ export function HomeFeedShell({
 
   return (
     <>
-      <div className="pt-[calc(env(safe-area-inset-top)+4.25rem)] md:pt-0">
+      <div className="pt-[calc(env(safe-area-inset-top)+5.25rem+var(--pinterest-sync-indicator-height))] md:pt-0">
+        {header ? <div className="mb-6">{header}</div> : null}
         <HomeFeed
           initialItems={page.items}
           initialCursor={page.nextCursor}
@@ -187,7 +233,7 @@ export function HomeFeedShell({
           onPageChange={setPage}
         />
       </div>
-      <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3.75rem)] z-30 px-3 md:top-auto md:bottom-4 md:px-0">
+      <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3.75rem+var(--pinterest-sync-indicator-height))] z-30 px-3 md:top-auto md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">
           <FeedSearch
             value={inputValue}
