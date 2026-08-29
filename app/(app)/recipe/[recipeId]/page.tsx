@@ -11,6 +11,7 @@ import { RecipeMetadataEditor } from "@/components/recipe-metadata-editor";
 import { RecipeReviewLauncher } from "@/components/recipe-review-launcher";
 import { RecipeVersionHistory } from "@/components/recipe-version-history";
 import { RecipeFlagButton } from "@/components/recipe-flag-button";
+import { SaveForLaterButton } from "@/components/save-for-later-button";
 import { StatusBadge } from "@/components/status-badge";
 import { PublishPersonalRecipe } from "@/components/publish-personal-recipe";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import {
 import { formatIso8601Duration } from "@/lib/utils";
 import { getCurrentUserAccess } from "@/lib/server/access";
 import { getPublicRecipeUrl } from "@/lib/public-recipe-url";
+import { SAVE_FOR_LATER_TAG_NORMALIZED_NAME } from "@/lib/recipe-tags";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +66,12 @@ export default async function RecipePage({
         topContent={
           <>
             <div className="flex w-full flex-wrap gap-2">
+              <SaveForLaterButton
+                recipeId={recipe.recipeId}
+                initiallySaved={recipe.tags.some(
+                  (tag) => tag.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME,
+                )}
+              />
               <Button asChild variant="secondary">
                 <AppTransitionLink
                   href={`/history?recipeId=${encodeURIComponent(recipe.recipeId)}&from=recipe`}

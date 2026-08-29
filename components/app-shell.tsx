@@ -15,6 +15,7 @@ import { AppTransitionLink } from "@/components/app-transition-link";
 import { MobileAwareAppHeader } from "@/components/mobile-aware-app-header";
 import { RecipeHeaderBackButton, RecipeHeaderBackButtonProvider } from "@/components/recipe-header-back-button";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { MobileNav } from "@/components/mobile-nav";
 import { KitchenSummaryMenu } from "@/components/kitchen-summary-menu";
 import type { HouseholdCookRatingView } from "@/types/view-models";
@@ -119,7 +120,7 @@ export async function AppShell({
                 prefetch
                 className="flex items-center gap-2"
               >
-                <Plus className="h-4 w-4" />
+                <Icon icon={Plus} size="sm" />
                 Create recipe
               </AppTransitionLink>
             </Button>
@@ -137,7 +138,7 @@ export async function AppShell({
                   pendingClassName="opacity-60"
                 >
                   {"icon" in link && link.icon ? (
-                    <link.icon className="h-4 w-4" />
+                    <Icon icon={link.icon} size="sm" />
                   ) : null}
                   {link.label}
                 </AppTransitionLink>

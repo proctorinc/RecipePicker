@@ -13,6 +13,7 @@ import { usePathname } from "next/navigation";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { MobileProfileButton } from "@/components/mobile-profile-button";
+import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -69,7 +70,7 @@ export function MobileNav({
       <div className="mx-auto flex w-full max-w-sm items-center justify-between gap-2 rounded-full bg-background/65 p-2 shadow-[0_18px_40px_rgba(73,49,31,0.14)] backdrop-blur-sm">
         {navItems.map((item) => {
           const isActive = item.matches(pathname);
-          const Icon = item.icon;
+          const NavIcon = item.icon;
 
           return (
             <AppTransitionLink
@@ -94,7 +95,7 @@ export function MobileNav({
                     : "border-border/70 bg-white/75",
                 )}
               >
-                <Icon className="h-6 w-6" />
+                <Icon icon={NavIcon} size="lg" />
               </span>
             </AppTransitionLink>
           );

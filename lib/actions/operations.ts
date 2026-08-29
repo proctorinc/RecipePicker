@@ -215,22 +215,38 @@ export const toggleSaveForLaterAction = withActionLogging(
         });
         if (!recipe) return { status: "error", message: "Recipe not found." };
 
-        const saved = await sqlite.transaction(async (tx) => {
-          const now = new Date().toISOString();
-          await tx.insert(recipeTags)
-            .values({ householdId: context.householdId, name: SAVE_FOR_LATER_TAG_NAME, normalizedName: SAVE_FOR_LATER_TAG_NORMALIZED_NAME, createdAt: now, updatedAt: now })
+        const now = new Date().toISOString();
+        await db.insert(recipeTags)
+          .values({ householdId: context.householdId, name: SAVE_FOR_LATER_TAG_NAME, normalizedName: SAVE_FOR_LATER_TAG_NORMALIZED_NAME, createdAt: now, updatedAt: now })
+          .onConflictDoNothing()
+          .run();
+        const tag = await db.query.recipeTags.findFirst({
+          where: (table, { and, eq }) => and(
+            eq(table.householdId, context.householdId),
+            eq(table.normalizedName, SAVE_FOR_LATER_TAG_NORMALIZED_NAME),
+          ),
+          columns: { tagId: true },
+        });
+        if (!tag) throw new Error("Save for later collection is unavailable.");
+        const membership = await db.query.recipeTagMemberships.findFirst({
+          where: (table, { and, eq }) => and(
+            eq(table.householdId, context.householdId),
+            eq(table.recipeId, recipeId),
+            eq(table.tagId, tag.tagId),
+          ),
+          columns: { membershipId: true },
+        });
+        const saved = !membership;
+        if (membership) {
+          await db.delete(recipeTagMemberships)
+            .where(eq(recipeTagMemberships.membershipId, membership.membershipId))
+            .run();
+        } else {
+          await db.insert(recipeTagMemberships)
+            .values({ householdId: context.householdId, recipeId, tagId: tag.tagId, createdAt: now, updatedAt: now })
             .onConflictDoNothing()
             .run();
-          const [tag] = await tx.all<{ tag_id: string }>(sql`SELECT tag_id FROM recipe_tags WHERE household_id = ${context.householdId} AND normalized_name = ${SAVE_FOR_LATER_TAG_NORMALIZED_NAME} LIMIT 1`);
-          if (!tag) throw new Error("Save for later collection is unavailable.");
-          const [membership] = await tx.all<{ membership_id: string }>(sql`SELECT membership_id FROM recipe_tag_memberships WHERE household_id = ${context.householdId} AND recipe_id = ${recipeId} AND tag_id = ${tag.tag_id} LIMIT 1`);
-          if (membership) {
-            await tx.delete(recipeTagMemberships).where(eq(recipeTagMemberships.membershipId, membership.membership_id)).run();
-            return false;
-          }
-          await tx.insert(recipeTagMemberships).values({ householdId: context.householdId, recipeId, tagId: tag.tag_id, createdAt: now, updatedAt: now }).run();
-          return true;
-        });
+        }
         revalidateAll(recipeScopedPaths(undefined, recipeId).concat("/tags"));
         return { status: "success", message: saved ? "Saved for later." : "Removed from Save for later." };
       } finally {

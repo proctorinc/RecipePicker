@@ -43,7 +43,7 @@ export function SaveForLaterButton({
         type="submit"
         variant="secondary"
         size="icon"
-        className="size-7 rounded-full"
+        className="size-10 rounded-full"
         aria-label={isSaved ? "Remove from Save for later" : "Save for later"}
         title={isSaved ? "Remove from Save for later" : "Save for later"}
         disabled={pending}

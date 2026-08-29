@@ -14,7 +14,6 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { SaveForLaterButton } from "@/components/save-for-later-button";
 import {
   Dialog,
   DialogContent,
@@ -30,7 +29,6 @@ import {
 } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
 import { cn } from "@/lib/utils";
-import { SAVE_FOR_LATER_TAG_NORMALIZED_NAME } from "@/lib/recipe-tags";
 
 const initialActionState: ActionState = {
   status: "idle",
@@ -339,15 +337,7 @@ function RecipeTags({
 
   return (
     <section aria-label="Recipe tags" className="space-y-2">
-      <div className="flex items-center gap-1">
-        <p className="text-sm font-medium text-muted-foreground">Tags</p>
-        <SaveForLaterButton
-          recipeId={recipeId}
-          initiallySaved={initialTags.some(
-            (tag) => tag.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME,
-          )}
-        />
-      </div>
+      <p className="text-sm font-medium text-muted-foreground">Tags</p>
       <div className="flex flex-wrap items-center gap-2">
         {tags.map((tag) => (
           <button

@@ -3,6 +3,7 @@
 import { Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
+import { Icon } from "@/components/ui/icon";
 
 export function FeedSearch({
   value,
@@ -16,7 +17,7 @@ export function FeedSearch({
   return (
     <div className="relative">
       <div className="relative">
-        <Search className="z-50 pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground" />
+        <Icon icon={Search} size="sm" className="z-50 pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-foreground" />
         <Input
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -30,7 +31,7 @@ export function FeedSearch({
             onClick={() => onChange("")}
             className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground transition hover:bg-muted"
           >
-            <X className="h-4 w-4" />
+            <Icon icon={X} size="sm" />
             <span className="sr-only">Clear search</span>
           </button>
         ) : null}
