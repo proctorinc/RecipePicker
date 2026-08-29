@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Settings2 } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { PageIntro, PageShell } from "@/components/page-shell";
@@ -27,6 +28,7 @@ export default async function SettingsLayout({
     <PageShell>
       <PageIntro
         title="Settings"
+        icon={Settings2}
         description="Manage your kitchen, recipes, ingredients, and integrations"
       />
       <SettingsNav

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Check, GripVertical, History, PackageCheck, Settings2, Trash2 } from "lucide-react";
+import { Check, GripVertical, History, PackageCheck, Settings2, ShoppingCart as ShoppingCartIcon, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -10,6 +10,7 @@ import { RecipeImage } from "@/components/recipe-image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Icon } from "@/components/ui/icon";
 import { Switch } from "@/components/ui/switch";
 import { addAlwaysHaveIngredientAction, removeAlwaysHaveIngredientAction, reorderShoppingCartItemsAction, restoreShoppingCartAction, setAlwaysHaveIngredientEnabledAction, setShoppingCartItemCheckedAction } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
@@ -59,7 +60,7 @@ export function ShoppingCart({ cart }: { cart: ShoppingCartPageView }) {
 
   const selectionHref = `/history?cart=select&month=${encodeURIComponent((cart.startDate ?? new Date().toISOString().slice(0, 7)).slice(0, 7))}`;
   return <section className="space-y-6">
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Meal plan</p><h1 className="font-[family-name:var(--font-serif)] text-3xl font-semibold">Shopping cart</h1><p className="mt-1 text-sm text-muted-foreground">{cart.startDate && cart.endDate ? `${formatDay(cart.startDate)} – ${formatDay(cart.endDate)} · ${cart.sourceMeals.length} ${cart.sourceMeals.length === 1 ? "meal" : "meals"}` : "Select a date range to build a shared list."}</p></div><div className="flex gap-2"><Button variant="outline" onClick={() => setHistoryOpen(true)} disabled={!cart.history.length}><History className="h-4 w-4" />Cart history</Button><Button variant="outline" onClick={() => setAlwaysOpen(true)}><Settings2 className="h-4 w-4" />Always haves</Button></div></div>
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Meal plan</p><h1 className="flex items-center gap-3 font-[family-name:var(--font-serif)] text-3xl font-semibold"><Icon icon={ShoppingCartIcon} size="lg" />Shopping cart</h1><p className="mt-1 text-sm text-muted-foreground">{cart.startDate && cart.endDate ? `${formatDay(cart.startDate)} – ${formatDay(cart.endDate)} · ${cart.sourceMeals.length} ${cart.sourceMeals.length === 1 ? "meal" : "meals"}` : "Select a date range to build a shared list."}</p></div><div className="flex gap-2"><Button variant="outline" onClick={() => setHistoryOpen(true)} disabled={!cart.history.length}><History className="h-4 w-4" />Cart history</Button><Button variant="outline" onClick={() => setAlwaysOpen(true)}><Settings2 className="h-4 w-4" />Always haves</Button></div></div>
     {cart.cartId ? <><div className="flex gap-2"><Button asChild><AppTransitionLink href={selectionHref}>Change days</AppTransitionLink></Button></div><RangeStrip dates={cart.selectedDates} mealsByDate={mealsByDate} />
       <Card><CardHeader><CardTitle>Your list</CardTitle><CardDescription>Checked ingredients move to the bottom. Drag the handle, or focus it and use ↑/↓, to reorder items.</CardDescription></CardHeader><CardContent className="space-y-2">{items.length ? items.map((item) => <CartItem key={item.itemId} item={item} onChecked={setChecked} onMove={moveItem} onDragStart={setDraggedItemId} onDrop={dropItem} />) : <p className="py-5 text-center text-sm text-muted-foreground">No ingredients for this date range yet.</p>}</CardContent></Card></> : <Card><CardContent className="flex flex-col items-center gap-3 py-14 text-center"><PackageCheck className="h-9 w-9 text-muted-foreground" /><p className="font-medium">Nothing to shop for yet.</p><p className="max-w-sm text-sm text-muted-foreground">Choose a start and end day; meals can be added to the range later.</p><Button asChild><AppTransitionLink href={selectionHref}>Select days</AppTransitionLink></Button></CardContent></Card>}
     <Dialog open={historyOpen} onOpenChange={setHistoryOpen}><DialogContent><DialogHeader><DialogTitle>Cart history</DialogTitle><DialogDescription>Restore a previous shared date range and its saved list state.</DialogDescription></DialogHeader><div className="space-y-2">{cart.history.map((entry) => <Button key={entry.cartId} variant="outline" className="w-full justify-between" disabled={isPending} onClick={() => { const data = new FormData(); data.set("cartId", entry.cartId); runAction(restoreShoppingCartAction as typeof addAlwaysHaveIngredientAction, data, () => setHistoryOpen(false)); }}><span>{formatDay(entry.startDate)} – {formatDay(entry.endDate)}</span><span className="text-xs text-muted-foreground">Restore</span></Button>)}</div></DialogContent></Dialog>

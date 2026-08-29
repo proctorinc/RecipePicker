@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { isAuthorizationError } from "@/lib/server/errors";
 import { getPinterestSyncRunDetail } from "@/lib/server/queries";
+import { formatPinterestSyncTrigger } from "@/lib/server/sync";
 import { requireOwnerOrAdminIntegrationAccess } from "@/lib/server/access";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export default async function PinterestSyncDetailPage({ params }: { params: Prom
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle>Sync details</CardTitle><CardDescription><LocalDateTime value={detail.run.startedAt} /> · {detail.run.trigger === "auto_feed_load" ? "Automatic" : detail.run.trigger === "force" ? "Force resync" : "Manual"}</CardDescription></div><Badge variant={detail.run.status === "success" ? "success" : detail.run.status === "error" ? "destructive" : "secondary"}>{detail.run.status === "running" ? <ActivityIndicator label="Pinterest sync running" className="mr-1.5" /> : null}{detail.run.status}</Badge></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle>Sync details</CardTitle><CardDescription><LocalDateTime value={detail.run.startedAt} /> · {formatPinterestSyncTrigger(detail.run.trigger)}</CardDescription></div><Badge variant={detail.run.status === "success" ? "success" : detail.run.status === "error" ? "destructive" : "secondary"}>{detail.run.status === "running" ? <ActivityIndicator label="Pinterest sync running" className="mr-1.5" /> : null}{detail.run.status}</Badge></div>
           {detail.run.message ? <p className="text-sm text-destructive">{detail.run.message}</p> : null}
           {detail.isLatestRun && detail.run.status === "error" && detail.job?.status === "error" ? <ActionForm action={retryPinterestSyncAction} fields={{ syncRunId }}>Retry sync</ActionForm> : null}
           {(detail.job?.status === "queued" || detail.job?.status === "running") ? <ActionForm action={cancelPinterestSyncAction} fields={{ syncRunId }} buttonVariant="secondary">Cancel sync</ActionForm> : null}

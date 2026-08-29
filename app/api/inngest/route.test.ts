@@ -13,14 +13,14 @@ vi.mock("inngest/next", () => ({
 }));
 
 describe("/api/inngest", () => {
-  it("registers the recipe parse function with the Inngest serve handler", async () => {
+  it("registers the recipe, Pinterest worker, and nightly scheduler", async () => {
     const route = await import("@/app/api/inngest/route");
 
     expect(route.maxDuration).toBe(300);
     expect(mockServe).toHaveBeenCalledTimes(1);
     expect(mockServe).toHaveBeenCalledWith({
       client: expect.anything(),
-      functions: [expect.anything(), expect.anything()],
+      functions: [expect.anything(), expect.anything(), expect.anything()],
     });
     expect(route.GET).toBe("get-handler");
     expect(route.POST).toBe("post-handler");

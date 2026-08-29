@@ -5,6 +5,7 @@ import { createContext, type ReactNode, useContext, useEffect, useState } from "
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 
 const RecipeHeaderBackButtonContext = createContext({
   showBack: false,
@@ -72,7 +73,7 @@ export function RecipeHeaderBackButton() {
         router.push("/");
       }}
     >
-      <ArrowLeft className="size-4" />
+      <Icon icon={ArrowLeft} size="sm" />
       <span className="hidden md:inline">Back</span>
     </Button>
   );

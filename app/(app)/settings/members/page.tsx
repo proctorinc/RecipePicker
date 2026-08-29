@@ -41,6 +41,7 @@ export default async function MembersPage() {
           <KitchenSettingsForm
             name={context.householdName}
             logoUrl={context.householdLogoUrl}
+            timeZone={context.householdTimeZone}
           />
         </CardContent>
       </Card>

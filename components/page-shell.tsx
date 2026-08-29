@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 
+import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 
 export function PageShell({
@@ -21,13 +23,16 @@ export function PageShell({
 export function PageIntro({
   title,
   description,
+  icon,
 }: {
   title: string;
   description?: string;
+  icon?: LucideIcon;
 }) {
   return (
     <section className="space-y-3">
-      <h1 className="max-w-4xl font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight sm:text-5xl">
+      <h1 className="flex max-w-4xl items-center gap-3 font-[family-name:var(--font-serif)] text-4xl font-semibold tracking-tight sm:text-5xl">
+        {icon ? <Icon icon={icon} size="lg" /> : null}
         {title}
       </h1>
       {description ? (

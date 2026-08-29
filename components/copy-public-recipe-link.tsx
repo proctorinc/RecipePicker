@@ -29,7 +29,7 @@ export function CopyPublicRecipeLink({ url }: { url: string }) {
   };
 
   return (
-    <Button type="button" variant="outline" onClick={shareRecipeUrl}>
+    <Button type="button" variant="secondary" onClick={shareRecipeUrl}>
       {shared ? <Check className="size-4" /> : <Share2 className="size-4" />}
       {shared ? "Shared" : "Share"}
     </Button>

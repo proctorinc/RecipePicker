@@ -5,9 +5,7 @@ import {
   ShoppingCart,
   LayoutDashboard,
   Sparkles,
-  Tags,
-  Blocks,
-  Layers,
+  Tag,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 
@@ -26,7 +24,7 @@ const navItems = [
   {
     href: "/tags",
     label: "Tags",
-    icon: Layers,
+    icon: Tag,
     matches: (pathname: string) => pathname.startsWith("/tags"),
   },
   {

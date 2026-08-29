@@ -1,11 +1,13 @@
-import { ArrowLeft, Tag } from "lucide-react";
+import { ArrowLeft, Bookmark, Tag } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { HomeFeedShell } from "@/components/home-feed-shell";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { getFeedPinsPage, getRecipeTag } from "@/lib/server/queries";
+import { SAVE_FOR_LATER_TAG_NORMALIZED_NAME } from "@/lib/recipe-tags";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +16,9 @@ export default async function TagPage({ params }: { params: Promise<{ tagId: str
   const tag = await getRecipeTag(tagId);
   if (!tag) notFound();
   const page = await getFeedPinsPage({ tagId });
+  const CollectionIcon = tag.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME
+    ? Bookmark
+    : Tag;
   return (
     <PageShell>
       <HomeFeedShell
@@ -30,7 +35,7 @@ export default async function TagPage({ params }: { params: Promise<{ tagId: str
             </Button>
             <div>
               <h1 className="flex items-center gap-2 font-[family-name:var(--font-serif)] text-3xl font-semibold">
-                <Tag className="size-5" />
+                <Icon icon={CollectionIcon} size="md" />
                 {tag.name}
               </h1>
               <p className="text-sm text-muted-foreground">

@@ -200,6 +200,8 @@ export async function upsertPinterestConnection(args: {
       lastRefreshAttemptAt: null,
       lastRefreshSucceededAt: null,
       lastSyncAttemptAt: null,
+      lastNewPinSyncAttemptAt: null,
+      lastNightlyFullSyncLocalDate: null,
       lastSyncTrigger: null,
       lastSyncAt: null,
       lastSyncStatus: null,

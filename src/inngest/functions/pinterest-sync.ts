@@ -2,7 +2,7 @@ import type { GetStepTools } from "inngest";
 
 import { inngest } from "@/src/inngest/client";
 import { PINTEREST_SYNC_REQUESTED_EVENT } from "@/src/inngest/events";
-import { markPinterestSyncJobFailure, processPinterestSyncJobPage } from "@/lib/server/sync";
+import { markPinterestSyncJobFailure, processPinterestSyncJobPage, queueDueNightlyPinterestSyncs } from "@/lib/server/sync";
 
 type WorkflowStep = Pick<GetStepTools<typeof inngest>, "run">;
 
@@ -28,4 +28,13 @@ export const pinterestSyncRunner = inngest.createFunction(
   async ({ event, step }) => {
     return runWorkflow(event.data.jobId, step);
   },
+);
+
+export const pinterestNightlySyncScheduler = inngest.createFunction(
+  {
+    id: "pinterest-nightly-sync-scheduler",
+    triggers: { cron: "* * * * *" },
+    retries: 2,
+  },
+  async () => queueDueNightlyPinterestSyncs(),
 );

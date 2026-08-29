@@ -16,6 +16,7 @@ import {
   getFeedPrefetchTriggerIndex,
 } from "@/lib/feed-layout";
 import type { FeedPinCard, FeedPinsPage } from "@/types/view-models";
+import { appendFeedFilters, type FeedFilters } from "@/lib/feed-filters";
 
 const DEFAULT_FEED_PAGE_SIZE = 50;
 
@@ -24,6 +25,7 @@ type HomeFeedProps = {
   initialCursor: string | null;
   initialHasMore: boolean;
   query: string;
+  filters: FeedFilters;
   tagId?: string;
   isSearching?: boolean;
   onPageChange: (page: FeedPinsPage) => void;
@@ -34,6 +36,7 @@ export function HomeFeed({
   initialCursor,
   initialHasMore,
   query,
+  filters,
   tagId,
   isSearching = false,
   onPageChange,
@@ -80,7 +83,7 @@ export function HomeFeed({
     setIsLoadingMore(false);
     setLastBatchSize(initialItems.length);
     isFetchingRef.current = false;
-  }, [initialCursor, initialHasMore, initialItems, query]);
+  }, [filters, initialCursor, initialHasMore, initialItems, query]);
 
   useEffect(() => {
     setColumns(buildFeedColumns(itemsRef.current, columnCount));
@@ -117,7 +120,7 @@ export function HomeFeed({
     }
 
     return () => observer.disconnect();
-  }, [cursor, hasMore, items, lastBatchSize, query, tagId]);
+  }, [cursor, filters, hasMore, items, lastBatchSize, query, tagId]);
 
   async function loadMore() {
     if (isFetchingRef.current || !hasMore) {
@@ -135,6 +138,7 @@ export function HomeFeed({
       if (tagId) {
         params.set("tagId", tagId);
       }
+      appendFeedFilters(params, filters);
       if (cursor) {
         params.set("cursor", cursor);
       }
@@ -190,8 +194,8 @@ export function HomeFeed({
     return (
       <Card className="border-dashed border-white/80 bg-white/70">
         <CardContent className="py-12 text-center text-muted-foreground">
-          No recipes matched this search yet. Try a broader ingredient, title,
-          or site query.
+          No recipes matched this search or filter. Try broadening your search
+          or clearing a filter.
         </CardContent>
       </Card>
     );

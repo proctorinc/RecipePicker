@@ -1,4 +1,5 @@
 import type { FeedPinsPage } from "@/types/view-models";
+import { appendFeedFilters, type FeedFilters } from "@/lib/feed-filters";
 
 type FeedCacheEntry = {
   page: FeedPinsPage;
@@ -7,8 +8,12 @@ type FeedCacheEntry = {
 
 const feedCache = new Map<string, FeedCacheEntry>();
 
-export function getFeedCacheKey(query: string, tagId?: string) {
-  return `${tagId ?? "home"}:${query.trim()}`;
+export function getFeedCacheKey(query: string, tagId?: string, filters?: FeedFilters) {
+  const params = new URLSearchParams();
+  appendFeedFilters(params, filters ?? {
+    rating: "all", minRating: null, maxRating: null, calendar: "all", readyOnly: false,
+  });
+  return `${tagId ?? "home"}:${query.trim()}:${params.toString()}`;
 }
 
 export function getCachedFeed(key: string) {

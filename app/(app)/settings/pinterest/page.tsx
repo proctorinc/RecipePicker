@@ -166,7 +166,7 @@ export default async function PinterestSettingsPage({
               <CardDescription>
                 {connection.status === "not_connected"
                   ? "Connect Pinterest to start syncing boards."
-                  : `Automatic syncs run every ${syncFrequency}.`}
+                  : `New pin checks run ${syncFrequency}; a full sync runs nightly at midnight in the kitchen time zone.`}
               </CardDescription>
             </div>
             <AppTransitionLink
@@ -202,7 +202,7 @@ export default async function PinterestSettingsPage({
                   ? "Automatic sync is running now."
                   : nextAutoSyncAt && new Date(nextAutoSyncAt).getTime() > Date.now()
                     ? <>Next sync is eligible {formatRelativeTimeShort(nextAutoSyncAt)}.</>
-                    : "The next sync can run when you open the feed."}
+                    : "The next new-pin sync can run when you open the feed."}
             </p>
           ) : null}
           {canManageAutoSync && connection.status !== "not_connected" ? (

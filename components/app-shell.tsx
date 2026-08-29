@@ -6,7 +6,7 @@ import {
   Settings2,
   LayoutDashboard,
   Plus,
-  Tags,
+  Tag,
 } from "lucide-react";
 
 import { AppShellProgress } from "@/components/app-route-transition";
@@ -42,7 +42,7 @@ const baseLinks = [
   {
     href: "/tags",
     label: "Tags",
-    icon: Tags,
+    icon: Tag,
     matches: (pathname: string) => pathname.startsWith("/tags"),
   },
   {

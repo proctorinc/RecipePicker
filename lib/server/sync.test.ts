@@ -10,7 +10,7 @@ import {
   households,
   householdRecipes,
 } from "@/lib/server/db";
-import { createPinterestSyncScopeKey, syncBoard } from "@/lib/server/sync";
+import { createPinterestSyncScopeKey, formatPinterestSyncTrigger, getLocalDateTimeParts, syncBoard } from "@/lib/server/sync";
 
 const {
   mockFetchAllPins,
@@ -400,5 +400,27 @@ describe("createPinterestSyncScopeKey", () => {
       .toBe("board-a,board-b");
     expect(createPinterestSyncScopeKey(["board-a"]))
       .not.toBe(createPinterestSyncScopeKey(["board-a", "board-b"]));
+  });
+});
+
+describe("automatic sync helpers", () => {
+  it("labels the distinct automatic sync modes", () => {
+    expect(formatPinterestSyncTrigger("auto_new_pins")).toBe("New pin sync");
+    expect(formatPinterestSyncTrigger("nightly_full")).toBe("Nightly full sync");
+    expect(formatPinterestSyncTrigger("auto_feed_load")).toBe("Automatic (legacy)");
+  });
+
+  it("uses the kitchen time zone when determining local midnight", () => {
+    const now = new Date("2026-08-29T07:00:00.000Z");
+    expect(getLocalDateTimeParts(now, "America/Los_Angeles")).toEqual({
+      date: "2026-08-29",
+      hour: "00",
+      minute: "00",
+    });
+    expect(getLocalDateTimeParts(now, "Invalid/Zone")).toEqual({
+      date: "2026-08-29",
+      hour: "07",
+      minute: "00",
+    });
   });
 });

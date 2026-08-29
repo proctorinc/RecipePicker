@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { FeedSearch } from "@/components/feed-search";
+import { FeedFilters } from "@/components/feed-filters";
 import { HomeFeed } from "@/components/home-feed";
 import {
   cacheFeedPage,
@@ -16,6 +17,12 @@ import {
   getCachedFeed,
   getFeedCacheKey,
 } from "@/lib/feed-cache";
+import {
+  appendFeedFilters,
+  defaultFeedFilters,
+  getFeedFilterSummary,
+  type FeedFilters as FeedFiltersValue,
+} from "@/lib/feed-filters";
 import type { FeedPinsPage } from "@/types/view-models";
 
 const SEARCH_DEBOUNCE_MS = 350;
@@ -24,6 +31,7 @@ const LAST_HOME_FEED_QUERY_KEY = "food-picker:last-home-feed-query";
 type HomeFeedShellProps = {
   initialPage: FeedPinsPage;
   initialQuery: string;
+  initialFilters?: FeedFiltersValue;
   tagId?: string;
   header?: ReactNode;
 };
@@ -31,33 +39,37 @@ type HomeFeedShellProps = {
 export function HomeFeedShell({
   initialPage,
   initialQuery,
+  initialFilters = defaultFeedFilters,
   tagId,
   header,
 }: HomeFeedShellProps) {
   const normalizedInitialQuery = initialQuery.trim();
   const initialCachedFeed = getCachedFeed(
-    getFeedCacheKey(normalizedInitialQuery, tagId),
+    getFeedCacheKey(normalizedInitialQuery, tagId, initialFilters),
   );
   const [inputValue, setInputValue] = useState(normalizedInitialQuery);
   const [activeQuery, setActiveQuery] = useState(normalizedInitialQuery);
+  const [activeFilters, setActiveFilters] = useState(initialFilters);
   const [page, setPage] = useState(() => initialCachedFeed?.page ?? initialPage);
   const [isSearching, setIsSearching] = useState(false);
   const searchAbortRef = useRef<AbortController | null>(null);
-  const cacheKey = getFeedCacheKey(activeQuery, tagId);
+  const cacheKey = getFeedCacheKey(activeQuery, tagId, activeFilters);
   const cachedFeed = getCachedFeed(cacheKey);
+  const filterSummary = getFeedFilterSummary(activeFilters);
 
   useEffect(() => {
     const nextCachedFeed = getCachedFeed(
-      getFeedCacheKey(normalizedInitialQuery, tagId),
+      getFeedCacheKey(normalizedInitialQuery, tagId, initialFilters),
     );
 
     searchAbortRef.current?.abort();
     searchAbortRef.current = null;
     setInputValue(normalizedInitialQuery);
     setActiveQuery(normalizedInitialQuery);
+    setActiveFilters(initialFilters);
     setPage(nextCachedFeed?.page ?? initialPage);
     setIsSearching(false);
-  }, [initialPage, normalizedInitialQuery, tagId]);
+  }, [initialFilters, initialPage, normalizedInitialQuery, tagId]);
 
   useEffect(() => {
     if (tagId) {
@@ -86,9 +98,9 @@ export function HomeFeedShell({
     setActiveQuery(savedQuery);
     const controller = new AbortController();
     searchAbortRef.current = controller;
-    syncUrl(savedQuery);
+    syncUrl(savedQuery, initialFilters);
 
-    const cachedSavedFeed = getCachedFeed(getFeedCacheKey(savedQuery));
+    const cachedSavedFeed = getCachedFeed(getFeedCacheKey(savedQuery, undefined, initialFilters));
     if (cachedSavedFeed) {
       setPage(cachedSavedFeed.page);
       setIsSearching(false);
@@ -101,7 +113,7 @@ export function HomeFeedShell({
     }
 
     setIsSearching(true);
-    void fetchSearchPage(savedQuery, controller.signal)
+    void fetchSearchPage(savedQuery, initialFilters, controller.signal)
       .then((nextPage) => {
         if (controller.signal.aborted) {
           return;
@@ -125,11 +137,11 @@ export function HomeFeedShell({
         searchAbortRef.current = null;
       }
     };
-  }, [normalizedInitialQuery, tagId]);
+  }, [initialFilters, normalizedInitialQuery, tagId]);
 
   useEffect(() => {
-    cacheFeedPage(getFeedCacheKey(activeQuery, tagId), page);
-  }, [activeQuery, page, tagId]);
+    cacheFeedPage(getFeedCacheKey(activeQuery, tagId, activeFilters), page);
+  }, [activeFilters, activeQuery, page, tagId]);
 
   useLayoutEffect(() => {
     if (!cachedFeed || cachedFeed.scrollY === 0) {
@@ -178,7 +190,7 @@ export function HomeFeedShell({
 
     const timeout = window.setTimeout(() => {
       if (trimmedValue === activeQuery) {
-        syncUrl(trimmedValue);
+        syncUrl(trimmedValue, activeFilters);
         return;
       }
 
@@ -186,9 +198,9 @@ export function HomeFeedShell({
       const controller = new AbortController();
       searchAbortRef.current = controller;
       setIsSearching(true);
-      syncUrl(trimmedValue);
+      syncUrl(trimmedValue, activeFilters);
 
-      void fetchSearchPage(trimmedValue, controller.signal, tagId)
+      void fetchSearchPage(trimmedValue, activeFilters, controller.signal, tagId)
         .then((nextPage) => {
           if (controller.signal.aborted) {
             return;
@@ -211,7 +223,7 @@ export function HomeFeedShell({
     return () => {
       window.clearTimeout(timeout);
     };
-  }, [activeQuery, inputValue, tagId]);
+  }, [activeFilters, activeQuery, inputValue, tagId]);
 
   useEffect(() => {
     return () => {
@@ -221,13 +233,17 @@ export function HomeFeedShell({
 
   return (
     <>
-      <div className="pt-[calc(env(safe-area-inset-top)+5.25rem+var(--pinterest-sync-indicator-height))] md:pt-0">
+      <div className={filterSummary.length > 0
+        ? "pt-[calc(env(safe-area-inset-top)+6.875rem+var(--pinterest-sync-indicator-height))] md:pt-0"
+        : "pt-[calc(env(safe-area-inset-top)+5.25rem+var(--pinterest-sync-indicator-height))] md:pt-0"}
+      >
         {header ? <div className="mb-6">{header}</div> : null}
         <HomeFeed
           initialItems={page.items}
           initialCursor={page.nextCursor}
           initialHasMore={page.hasMore}
           query={activeQuery}
+          filters={activeFilters}
           tagId={tagId}
           isSearching={isSearching}
           onPageChange={setPage}
@@ -235,11 +251,21 @@ export function HomeFeedShell({
       </div>
       <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3.75rem+var(--pinterest-sync-indicator-height))] z-30 px-3 md:top-auto md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">
-          <FeedSearch
-            value={inputValue}
-            onChange={handleSearchChange}
-            isSearching={isSearching}
-          />
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <FeedSearch
+                value={inputValue}
+                onChange={handleSearchChange}
+                isSearching={isSearching}
+              />
+            </div>
+            <FeedFilters filters={activeFilters} onApply={handleFiltersApply} />
+          </div>
+          {filterSummary.length > 0 ? (
+            <p className="px-4 pt-2 text-center text-xs font-medium text-muted-foreground">
+              {filterSummary.join(" · ")}
+            </p>
+          ) : null}
         </div>
       </div>
     </>
@@ -251,6 +277,39 @@ export function HomeFeedShell({
     setInputValue(nextValue);
     setIsSearching(nextValue.trim() !== activeQuery);
   }
+
+  function handleFiltersApply(nextFilters: FeedFiltersValue) {
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    const nextQuery = inputValue.trim();
+    const nextCacheKey = getFeedCacheKey(nextQuery, tagId, nextFilters);
+    setActiveFilters(nextFilters);
+    setActiveQuery(nextQuery);
+    syncUrl(nextQuery, nextFilters);
+
+    const cached = getCachedFeed(nextCacheKey);
+    if (cached) {
+      setPage(cached.page);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    void fetchSearchPage(nextQuery, nextFilters, controller.signal, tagId)
+      .then((nextPage) => {
+        if (!controller.signal.aborted) {
+          setPage(nextPage);
+          setIsSearching(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setIsSearching(false);
+          console.error("Unable to refresh feed filters.", error);
+        }
+      });
+  }
 }
 
 function getSavedHomeFeedQuery(tagId?: string) {
@@ -261,7 +320,7 @@ function getSavedHomeFeedQuery(tagId?: string) {
   return window.localStorage.getItem(LAST_HOME_FEED_QUERY_KEY)?.trim() ?? "";
 }
 
-function syncUrl(query: string) {
+function syncUrl(query: string, filters: FeedFiltersValue) {
   const url = new URL(window.location.href);
 
   if (query) {
@@ -269,6 +328,10 @@ function syncUrl(query: string) {
   } else {
     url.searchParams.delete("q");
   }
+  for (const key of ["rating", "minRating", "maxRating", "calendar", "ready"]) {
+    url.searchParams.delete(key);
+  }
+  appendFeedFilters(url.searchParams, filters);
 
   const nextHref = `${url.pathname}${url.search}${url.hash}`;
   const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -280,6 +343,7 @@ function syncUrl(query: string) {
 
 async function fetchSearchPage(
   query: string,
+  filters: FeedFiltersValue,
   signal: AbortSignal,
   tagId?: string,
 ): Promise<FeedPinsPage> {
@@ -291,6 +355,7 @@ async function fetchSearchPage(
   if (tagId) {
     params.set("tagId", tagId);
   }
+  appendFeedFilters(params, filters);
 
   const response = await fetch(`/api/feed?${params.toString()}`, {
     method: "GET",

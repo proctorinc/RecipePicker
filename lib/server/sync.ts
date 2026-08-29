@@ -45,7 +45,7 @@ type SyncBoardOptions = {
   pinRecords?: Awaited<ReturnType<typeof fetchAllPins>>;
 };
 
-export type PinterestSyncTrigger = "manual" | "auto_feed_load" | "force";
+export type PinterestSyncTrigger = "manual" | "auto_feed_load" | "auto_new_pins" | "nightly_full" | "force";
 
 type PinterestSyncRunContext = {
   syncRunId: string;
@@ -91,7 +91,15 @@ export function getPinterestAutoSyncCooldownMs(_tier: SubscriptionTier) {
 }
 
 export function formatPinterestAutoSyncFrequency(_tier: SubscriptionTier) {
-  return "every 1h";
+  return "at most every 1h when you open the feed";
+}
+
+export function formatPinterestSyncTrigger(trigger: string) {
+  if (trigger === "auto_new_pins") return "New pin sync";
+  if (trigger === "nightly_full") return "Nightly full sync";
+  if (trigger === "auto_feed_load") return "Automatic (legacy)";
+  if (trigger === "force") return "Force resync";
+  return "Manual";
 }
 
 function getPinterestSectionName(pin: Awaited<ReturnType<typeof fetchAllPins>>[number]) {
@@ -185,10 +193,74 @@ export async function planPinterestAutoSync(args: {
 }): Promise<SyncClaimResult> {
   return claimPinterestSyncRun({
     householdId: args.householdId,
-    trigger: "auto_feed_load",
+    trigger: "auto_new_pins",
     cooldownMs: getPinterestAutoSyncCooldownMs(args.subscriptionTier),
     requireEnabledBoards: true,
   });
+}
+
+export function getLocalDateTimeParts(now: Date, timeZone: string | null | undefined) {
+  const resolvedTimeZone = timeZone || "UTC";
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: resolvedTimeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(now);
+    const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+    return { date: `${value("year")}-${value("month")}-${value("day")}`, hour: value("hour"), minute: value("minute") };
+  } catch {
+    return getLocalDateTimeParts(now, "UTC");
+  }
+}
+
+async function markNightlyFullSyncCompleted(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  householdId: string,
+) {
+  const account = await db.query.pinterestAccounts.findFirst({
+    where: (table, { and: whereAnd, eq: whereEq }) => whereAnd(
+      whereEq(table.householdId, householdId),
+      whereEq(table.provider, "pinterest"),
+    ),
+    with: { household: { columns: { timeZone: true } } },
+  });
+  if (!account) return;
+  await db.update(pinterestAccounts).set({
+    lastNightlyFullSyncLocalDate: getLocalDateTimeParts(new Date(), account.household.timeZone).date,
+    updatedAt: new Date().toISOString(),
+  }).where(eq(pinterestAccounts.pinterestAccountId, account.pinterestAccountId)).run();
+}
+
+/** Called by the global cron. Each eligible household claims its own lease before a job is queued. */
+export async function queueDueNightlyPinterestSyncs(now = new Date()) {
+  const { db, sqlite } = await openDatabase();
+  try {
+    const accounts = await db.query.pinterestAccounts.findMany({
+      where: (table, { eq: whereEq }) => whereEq(table.autoSyncEnabled, true),
+      with: { household: { columns: { timeZone: true } } },
+    });
+    const queued: string[] = [];
+    for (const account of accounts) {
+      const local = getLocalDateTimeParts(now, account.household.timeZone);
+      if (local.hour !== "00" || local.minute !== "00" || account.lastNightlyFullSyncLocalDate === local.date) continue;
+      const claim = await claimPinterestSyncRun({
+        householdId: account.householdId,
+        trigger: "nightly_full",
+        requireEnabledBoards: true,
+      });
+      if (claim.status !== "claimed") continue;
+      const job = await requestPinterestSync({ householdId: account.householdId, trigger: "nightly_full", alreadyClaimed: true });
+      queued.push(job.syncRunId);
+    }
+    return { queued };
+  } finally {
+    await sqlite.close();
+  }
 }
 
 export async function runClaimedPinterestAutoSync(args: {
@@ -202,7 +274,7 @@ export async function runClaimedPinterestAutoSync(args: {
   const selectedBoardIds = await getSelectedBoardIds(args.householdId);
   const syncRun = await startPinterestSyncRun({
     householdId: args.householdId,
-    trigger: "auto_feed_load",
+    trigger: "auto_new_pins",
     syncScopeKey: createPinterestSyncScopeKey(selectedBoardIds),
   });
   try {
@@ -911,7 +983,7 @@ async function claimPinterestSyncRun(
     }
 
     if (options.requireEnabledBoards) {
-      if (options.trigger === "auto_feed_load" && !connection.autoSyncEnabled) {
+      if ((options.trigger === "auto_feed_load" || options.trigger === "auto_new_pins" || options.trigger === "nightly_full") && !connection.autoSyncEnabled) {
         logWarn("pinterest.sync.claim_skipped", {
           target: {
             householdId: options.householdId,
@@ -959,7 +1031,10 @@ async function claimPinterestSyncRun(
       return { status: "skipped_locked" };
     }
 
-    if (options.cooldownMs && isWithinCooldown(connection.lastSyncAttemptAt, options.cooldownMs, now.getTime())) {
+    const cooldownStart = options.trigger === "auto_new_pins"
+      ? connection.lastNewPinSyncAttemptAt ?? connection.lastSyncAttemptAt
+      : connection.lastSyncAttemptAt;
+    if (options.cooldownMs && isWithinCooldown(cooldownStart, options.cooldownMs, now.getTime())) {
       logWarn("pinterest.sync.claim_skipped", {
         target: {
           householdId: options.householdId,
@@ -978,6 +1053,7 @@ async function claimPinterestSyncRun(
     const result = await db.update(pinterestAccounts)
       .set({
         lastSyncAttemptAt: nowIso,
+        ...(options.trigger === "auto_new_pins" ? { lastNewPinSyncAttemptAt: nowIso } : {}),
         lastSyncTrigger: options.trigger,
         syncInProgressAt: nowIso,
         updatedAt: nowIso,
@@ -1185,12 +1261,15 @@ export async function processPinterestSyncJobPage(jobId: string) {
     if (job.status === "error" || job.status === "cancelled") return { status: "finished" as const };
     const boards = JSON.parse(job.selectedBoardIdsJson) as Array<{ id: string; name: string | null }>;
     const board = job.currentBoardId ? boards.find((item) => item.id === job.currentBoardId) : boards[0];
+    const isIncremental = job.trigger === "auto_new_pins";
     if (!board) {
       const seen = await db.query.pinterestSyncJobSeenRecipes.findMany({ where: (table, { eq: whereEq }) => whereEq(table.jobId, jobId), columns: { recipeId: true } });
       const run = await db.query.pinterestSyncRuns.findFirst({ where: (table, { eq: whereEq }) => whereEq(table.syncRunId, job.syncRunId), columns: { syncScopeKey: true, processedPinCount: true } });
       const scopeBoardIds = new Set((run?.syncScopeKey ?? "").split(",").filter(Boolean));
       const completionContext: PinterestSyncRunContext = { syncRunId: job.syncRunId, trigger: job.trigger as PinterestSyncTrigger, changes: { created: 0, removed: 0, restored: 0 }, processedPinCount: run?.processedPinCount ?? 0, persistedPinCount: run?.processedPinCount ?? 0, lastProgressPersistedAt: Date.now() };
-      await reconcileRemovedRecipes({ db, householdId: job.householdId, boardIds: scopeBoardIds, seenRecipeIds: new Set(seen.map((item) => item.recipeId)), syncNow: new Date().toISOString(), syncRun: completionContext });
+      if (!isIncremental) {
+        await reconcileRemovedRecipes({ db, householdId: job.householdId, boardIds: scopeBoardIds, seenRecipeIds: new Set(seen.map((item) => item.recipeId)), syncNow: new Date().toISOString(), syncRun: completionContext });
+      }
       const latestJob = await db.query.pinterestSyncJobs.findFirst({ where: (table, { eq: whereEq }) => whereEq(table.jobId, jobId), columns: { status: true } });
       if (latestJob?.status === "cancelled") return { status: "finished" as const };
       const changes = await db.query.pinterestSyncRecipeChanges.findMany({ where: (table, { eq: whereEq }) => whereEq(table.syncRunId, job.syncRunId), columns: { changeType: true, recipeId: true } });
@@ -1199,6 +1278,7 @@ export async function processPinterestSyncJobPage(jobId: string) {
       await db.update(pinterestSyncRuns).set({ status: "success", completedAt: now, boardCount: scopeBoardIds.size, pinCount: run?.processedPinCount ?? 0, createdRecipeCount: counts.created, removedRecipeCount: counts.removed, restoredRecipeCount: counts.restored }).where(eq(pinterestSyncRuns.syncRunId, job.syncRunId)).run();
       await db.update(pinterestSyncJobs).set({ status: "success", completedAt: now, lastHeartbeatAt: now, updatedAt: now }).where(eq(pinterestSyncJobs.jobId, jobId)).run();
       await updatePinterestConnectionSyncStatus({ householdId: job.householdId, status: "success" });
+      if (job.trigger === "nightly_full") await markNightlyFullSyncCompleted(db, job.householdId);
       await queuePinterestSyncRecipeParseJob(db, job);
       return { status: "completed" as const, syncRunId: job.syncRunId };
     }
@@ -1207,12 +1287,28 @@ export async function processPinterestSyncJobPage(jobId: string) {
     const progressRun = await db.query.pinterestSyncRuns.findFirst({ where: (table, { eq: whereEq }) => whereEq(table.syncRunId, job.syncRunId), columns: { processedPinCount: true } });
     const priorProcessed = progressRun?.processedPinCount ?? 0;
     const context: PinterestSyncRunContext = { syncRunId: job.syncRunId, trigger: job.trigger as PinterestSyncTrigger, changes: { created: 0, removed: 0, restored: 0 }, processedPinCount: priorProcessed, persistedPinCount: priorProcessed, lastProgressPersistedAt: Date.now() };
-    const result = await syncBoard(board.id, { householdId: job.householdId, boardName: board.name, syncEnabled: true, reconcile: false, syncRun: context, pinRecords: page.items ?? [] });
+    const pageItems = page.items ?? [];
+    let pinRecords = pageItems;
+    let shouldContinueBoard = Boolean(page.bookmark);
+    if (isIncremental) {
+      const existingPins = await db.query.householdPins.findMany({
+        where: (table, { eq: whereEq }) => whereEq(table.householdId, job.householdId),
+        columns: { pinterestPinId: true },
+      });
+      const knownPinIds = new Set(existingPins.map((pin) => pin.pinterestPinId));
+      pinRecords = pageItems.filter((pin) => !knownPinIds.has(pin.id));
+      // Pinterest currently returns newest first. A complete known page is our
+      // conservative boundary; do not mutate existing pins in this fast path.
+      shouldContinueBoard = pinRecords.length > 0 && Boolean(page.bookmark);
+    }
+    const result = pinRecords.length > 0
+      ? await syncBoard(board.id, { householdId: job.householdId, boardName: board.name, syncEnabled: true, reconcile: false, syncRun: context, pinRecords })
+      : { boardId: board.id, syncedPins: 0, newRecipeIds: [], seenRecipeIds: [], sqlitePath: "" } satisfies SyncBoardResult;
     const now = new Date().toISOString();
     for (const recipeId of result.seenRecipeIds) await db.insert(pinterestSyncJobSeenRecipes).values({ jobId, recipeId, boardId: board.id, createdAt: now }).onConflictDoNothing().run();
-    const nextBoardId = page.bookmark ? board.id : null;
-    const remaining = page.bookmark ? boards : boards.filter((item) => item.id !== board.id);
-    await db.update(pinterestSyncJobs).set({ status: "running", selectedBoardIdsJson: JSON.stringify(remaining), currentBoardId: nextBoardId, nextBookmark: page.bookmark ?? null, lastHeartbeatAt: now, updatedAt: now }).where(and(
+    const nextBoardId = shouldContinueBoard ? board.id : null;
+    const remaining = shouldContinueBoard ? boards : boards.filter((item) => item.id !== board.id);
+    await db.update(pinterestSyncJobs).set({ status: "running", selectedBoardIdsJson: JSON.stringify(remaining), currentBoardId: nextBoardId, nextBookmark: shouldContinueBoard ? page.bookmark ?? null : null, lastHeartbeatAt: now, updatedAt: now }).where(and(
       eq(pinterestSyncJobs.jobId, jobId),
       inArray(pinterestSyncJobs.status, ["queued", "running"]),
     )).run();

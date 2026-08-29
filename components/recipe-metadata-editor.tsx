@@ -9,11 +9,13 @@ import {
   useState,
   useTransition,
 } from "react";
-import { Check, Pencil, Plus, X } from "lucide-react";
+import { Bookmark, Check, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
+import { RecipeDescription } from "@/components/recipe-description";
 import {
   Dialog,
   DialogContent,
@@ -29,11 +31,14 @@ import {
 } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
 import { cn } from "@/lib/utils";
+import { SAVE_FOR_LATER_TAG_NORMALIZED_NAME } from "@/lib/recipe-tags";
 
 const initialActionState: ActionState = {
   status: "idle",
   message: "",
 };
+
+const TAG_SUGGESTION_LIMIT = 12;
 
 export const RecipeEditingContext = createContext({
   isEditing: false,
@@ -256,9 +261,7 @@ export function RecipeMetadataEditor({
                 className="min-h-[7.5rem] resize-none overflow-hidden rounded-none border-0 bg-secondary/30 px-0 py-0 text-sm text-muted-foreground shadow-none focus-visible:ring-0 sm:text-base"
               />
             ) : displayDescription.trim() ? (
-              <p className="whitespace-pre-wrap text-sm text-muted-foreground sm:text-base">
-                {displayDescription}
-              </p>
+              <RecipeDescription description={displayDescription} />
             ) : null}
           </section>
 
@@ -296,7 +299,7 @@ function RecipeTags({
         !normalizedTags.has(tag.name.toLocaleLowerCase()) &&
         tag.name.toLocaleLowerCase().includes(input.trim().toLocaleLowerCase()),
     )
-    .slice(0, 6);
+    .slice(0, TAG_SUGGESTION_LIMIT);
 
   useEffect(() => {
     setTags(uniqueTagNames(initialTags));
@@ -337,7 +340,6 @@ function RecipeTags({
 
   return (
     <section aria-label="Recipe tags" className="space-y-2">
-      <p className="text-sm font-medium text-muted-foreground">Tags</p>
       <div className="flex flex-wrap items-center gap-2">
         {tags.map((tag) => (
           <button
@@ -354,6 +356,9 @@ function RecipeTags({
               selectedTag === tag ? `Remove ${tag} tag` : `Select ${tag} tag`
             }
           >
+            {tag.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME ? (
+              <Bookmark className="size-3 fill-current" aria-hidden="true" />
+            ) : null}
             {tag}
             {selectedTag === tag ? <X className="size-3" /> : null}
           </button>
@@ -362,10 +367,11 @@ function RecipeTags({
           type="button"
           disabled={pending}
           onClick={() => setIsAdding((open) => !open)}
-          className="inline-flex size-7 items-center justify-center rounded-full border border-dashed border-border text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+          className="inline-flex items-center justify-center gap-1 rounded-full border border-dashed border-border px-3 py-1 text-xs font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground"
           aria-label="Add tag"
         >
-          <Plus className="size-4" />
+          <Icon icon={Plus} size="sm" />
+          Tags
         </button>
       </div>
       <Dialog
@@ -402,19 +408,27 @@ function RecipeTags({
               placeholder="Add a tag"
               aria-label="Tag name"
             />
-            {input.trim() && suggestions.length > 0 ? (
-              <div className="overflow-hidden rounded-xl border border-border p-1">
+            {suggestions.length > 0 ? (
+              <div className="flex flex-wrap gap-2" aria-label="Existing tags">
                 {suggestions.map((tag) => (
                   <button
                     key={tag.tagId}
                     type="button"
-                    className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-secondary"
+                    disabled={pending}
+                    className="inline-flex rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium transition hover:bg-secondary disabled:pointer-events-none disabled:opacity-50"
                     onClick={() => addTag(tag.name)}
                   >
+                    {tag.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME ? (
+                      <Bookmark className="mr-1 inline size-3 fill-current" aria-hidden="true" />
+                    ) : null}
                     {tag.name}
                   </button>
                 ))}
               </div>
+            ) : input.trim() ? (
+              <p className="text-sm text-muted-foreground">
+                No existing tags match this search.
+              </p>
             ) : null}
             <div className="flex justify-end">
               <Button type="submit" disabled={pending || !input.trim()}>

@@ -60,9 +60,9 @@ import { getIngredientAiParses } from "@/lib/server/ingredient-ai";
 import { logAudit, logError, withActionLogging } from "@/lib/server/logger";
 import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
 import {
-  SAVE_FOR_LATER_TAG_NAME,
   SAVE_FOR_LATER_TAG_NORMALIZED_NAME,
 } from "@/lib/recipe-tags";
+import { ensureSavedForLaterTag } from "@/lib/server/save-for-later";
 import { formatIngredientOriginalText, parseAmountText } from "@/lib/ingredient-parsing";
 import {
   disconnectPinterestConnection,
@@ -216,10 +216,7 @@ export const toggleSaveForLaterAction = withActionLogging(
         if (!recipe) return { status: "error", message: "Recipe not found." };
 
         const now = new Date().toISOString();
-        await db.insert(recipeTags)
-          .values({ householdId: context.householdId, name: SAVE_FOR_LATER_TAG_NAME, normalizedName: SAVE_FOR_LATER_TAG_NORMALIZED_NAME, createdAt: now, updatedAt: now })
-          .onConflictDoNothing()
-          .run();
+        await ensureSavedForLaterTag(db, context.householdId);
         const tag = await db.query.recipeTags.findFirst({
           where: (table, { and, eq }) => and(
             eq(table.householdId, context.householdId),
@@ -227,7 +224,7 @@ export const toggleSaveForLaterAction = withActionLogging(
           ),
           columns: { tagId: true },
         });
-        if (!tag) throw new Error("Save for later collection is unavailable.");
+        if (!tag) throw new Error("Saved for later collection is unavailable.");
         const membership = await db.query.recipeTagMemberships.findFirst({
           where: (table, { and, eq }) => and(
             eq(table.householdId, context.householdId),
@@ -248,12 +245,12 @@ export const toggleSaveForLaterAction = withActionLogging(
             .run();
         }
         revalidateAll(recipeScopedPaths(undefined, recipeId).concat("/tags"));
-        return { status: "success", message: saved ? "Saved for later." : "Removed from Save for later." };
+        return { status: "success", message: saved ? "Saved for later." : "Removed from Saved for later." };
       } finally {
         await sqlite.close();
       }
     } catch (error) {
-      return toErrorState(error, "Unable to update Save for later.");
+      return toErrorState(error, "Unable to update Saved for later.");
     }
   },
 );
@@ -738,6 +735,34 @@ export const updateKitchenNameAction = withActionLogging(
       return { status: "success", message: "Kitchen name updated." };
     } catch (error) {
       return toErrorState(error, "Unable to update the kitchen name.");
+    }
+  },
+);
+
+export const updateKitchenTimeZoneAction = withActionLogging(
+  "action.update_kitchen_time_zone",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const timeZone = String(formData.get("timeZone") ?? "").trim();
+    try {
+      // Intl validates IANA names without accepting arbitrary display text.
+      new Intl.DateTimeFormat("en-US", { timeZone });
+    } catch {
+      return { status: "error", message: "Choose a valid time zone." };
+    }
+    try {
+      const context = await requireHouseholdRole("owner");
+      const { db, sqlite } = await openDatabase();
+      try {
+        await db.update(households).set({ timeZone, updatedAt: new Date().toISOString() })
+          .where(eq(households.householdId, context.householdId)).run();
+      } finally {
+        await sqlite.close();
+      }
+      logAudit("kitchen.time_zone_updated", { target: { householdId: context.householdId }, result: { timeZone } });
+      revalidateAll(recipeScopedPaths());
+      return { status: "success", message: "Kitchen time zone updated." };
+    } catch (error) {
+      return toErrorState(error, "Unable to update the kitchen time zone.");
     }
   },
 );

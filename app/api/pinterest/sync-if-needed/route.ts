@@ -26,7 +26,7 @@ export const POST = withRouteLogging(
     });
 
     if (plan.status === "claimed") {
-      const job = await requestPinterestSync({ householdId: household.householdId, trigger: "auto_feed_load", alreadyClaimed: true });
+      const job = await requestPinterestSync({ householdId: household.householdId, trigger: "auto_new_pins", alreadyClaimed: true });
 
       logInfo("pinterest.sync.claimed", {
         target: {

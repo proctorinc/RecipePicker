@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useOptimistic, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Tag } from "lucide-react";
+import { Bookmark } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -18,38 +18,48 @@ export function SaveForLaterButton({
   recipeId: string;
   initiallySaved: boolean;
 }) {
-  const [isSaved, setIsSaved] = useState(initiallySaved);
-  const [state, formAction, pending] = useActionState(toggleSaveForLaterAction, initialState);
+  const [state, toggleSaveForLater] = useActionState(toggleSaveForLaterAction, initialState);
+  const [isSaved, setOptimisticSaved] = useOptimistic(initiallySaved);
+  const [, startTransition] = useTransition();
+  const isTogglingRef = useRef(false);
   const router = useRouter();
 
   useEffect(() => {
-    setIsSaved(initiallySaved);
-  }, [initiallySaved]);
-
-  useEffect(() => {
     if (state.status === "success") {
-      setIsSaved((saved) => !saved);
+      isTogglingRef.current = false;
       toast.success(state.message);
       router.refresh();
     } else if (state.status === "error") {
+      isTogglingRef.current = false;
       toast.error(state.message);
+      router.refresh();
     }
   }, [router, state]);
 
+  function toggle() {
+    if (isTogglingRef.current) return;
+
+    isTogglingRef.current = true;
+    const formData = new FormData();
+    formData.set("recipeId", recipeId);
+    startTransition(() => {
+      setOptimisticSaved(!isSaved);
+      toggleSaveForLater(formData);
+    });
+  }
+
   return (
-    <form action={formAction}>
-      <input type="hidden" name="recipeId" value={recipeId} />
-      <Button
-        type="submit"
-        variant="secondary"
-        size="icon"
-        className="size-10 rounded-full"
-        aria-label={isSaved ? "Remove from Save for later" : "Save for later"}
-        title={isSaved ? "Remove from Save for later" : "Save for later"}
-        disabled={pending}
-      >
-        {pending ? <Loader2 className="size-4 animate-spin" /> : <Tag className={isSaved ? "size-4 fill-current" : "size-4"} />}
-      </Button>
-    </form>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="size-10 rounded-full p-0 hover:bg-transparent"
+      aria-label={isSaved ? "Remove from Saved for later" : "Save recipe for later"}
+      aria-pressed={isSaved}
+      title={isSaved ? "Remove from Saved for later" : "Save recipe for later"}
+      onClick={toggle}
+    >
+      <Bookmark className={isSaved ? "size-5 fill-current" : "size-5"} />
+    </Button>
   );
 }

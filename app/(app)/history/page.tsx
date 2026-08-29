@@ -1,3 +1,5 @@
+import { Calendar } from "lucide-react";
+
 import { PageIntro, PageShell } from "@/components/page-shell";
 import { RecipeHeaderBackButtonEnabled } from "@/components/recipe-header-back-button";
 import { RecipeHistoryCalendar } from "@/components/recipe-history-calendar";
@@ -20,7 +22,7 @@ export default async function HistoryPage({
           backHref={`/recipe/${encodeURIComponent(recipeId)}`}
         />
       ) : null}
-      <PageIntro title="Recipe history" />
+      <PageIntro title="Recipe history" icon={Calendar} />
       <RecipeHistoryCalendar history={history} fromRecipe={from === "recipe"} initialCartSelection={cart === "select"} />
     </PageShell>
   );

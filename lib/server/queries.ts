@@ -43,7 +43,8 @@ import { buildShoppingCartItems } from "@/lib/shopping-cart";
 import { summarizeRecipeOps } from "@/lib/server/recipe-ops-summary";
 import { derivePinStatus } from "@/lib/server/status";
 import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
-import { SAVE_FOR_LATER_TAG_NAME, SAVE_FOR_LATER_TAG_NORMALIZED_NAME } from "@/lib/recipe-tags";
+import { ensureSavedForLaterTag } from "@/lib/server/save-for-later";
+import { defaultFeedFilters, hasActiveFeedFilters, type FeedFilters } from "@/lib/feed-filters";
 import {
   buildCalendarDays,
   expandDayRange,
@@ -94,23 +95,21 @@ type RecipeGraph = Awaited<ReturnType<typeof getFeedRecipeRows>>[number];
 type FeedCardRow = FeedPinCard & {
   searchMatchTier: number;
   pin: RecipeGraph["pin"];
+  hasCalendarEntry: boolean;
   updatedAt: string;
+};
+
+type FeedCursor = {
+  searchMatchTier: number;
+  averageRating: number | null;
+  updatedAt: string;
+  recipeId: string;
+  randomSeed: string | null;
 };
 
 const DEFAULT_FEED_PAGE_SIZE = 50;
 const MAX_FEED_PAGE_SIZE = 100;
 const PINTEREST_FOLDER_SOURCE = "pinterest";
-
-async function ensureSaveForLaterTag(
-  db: DatabaseHandle,
-  householdId: string,
-) {
-  const now = new Date().toISOString();
-  await db.insert(recipeTags)
-    .values({ householdId, name: SAVE_FOR_LATER_TAG_NAME, normalizedName: SAVE_FOR_LATER_TAG_NORMALIZED_NAME, createdAt: now, updatedAt: now })
-    .onConflictDoNothing()
-    .run();
-}
 
 export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
   const [context, appAccess] = await Promise.all([
@@ -126,6 +125,7 @@ export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
       householdId: context.householdId,
       db,
       searchText,
+      filters: defaultFeedFilters,
       subscriptionTier: appAccess.subscriptionTier,
     });
 
@@ -175,11 +175,16 @@ export async function getFeedPinsPage({
   cursor,
   pageSize = DEFAULT_FEED_PAGE_SIZE,
   tagId,
+  filters = defaultFeedFilters,
+  randomSeed,
 }: {
   searchText?: string;
   cursor?: string | null;
   pageSize?: number;
   tagId?: string;
+  filters?: FeedFilters;
+  /** Used by tests and callers continuing an existing randomized feed. */
+  randomSeed?: string;
 }): Promise<FeedPinsPage> {
   const [context, appAccess] = await Promise.all([
     requireHouseholdContext(),
@@ -194,32 +199,44 @@ export async function getFeedPinsPage({
       householdId: context.householdId,
       db,
       searchText,
+      filters,
       subscriptionTier: appAccess.subscriptionTier,
     });
     const normalizedPageSize = Number.isInteger(pageSize)
       ? Math.min(Math.max(pageSize, 1), MAX_FEED_PAGE_SIZE)
       : DEFAULT_FEED_PAGE_SIZE;
     const decodedCursor = decodeFeedCursor(cursor);
+    const shouldRandomize = !searchText?.trim() && !tagId && !hasActiveFeedFilters(filters);
+    const activeRandomSeed = shouldRandomize
+      ? decodedCursor?.randomSeed ?? randomSeed ?? crypto.randomUUID()
+      : null;
+    const orderedCards = activeRandomSeed
+      ? sortFeedCardsRandomly(cards, activeRandomSeed)
+      : cards;
     const exactCursorIndex = decodedCursor
-      ? cards.findIndex((card) => matchesCursor(card, decodedCursor))
+      ? orderedCards.findIndex((card) => matchesCursor(card, decodedCursor))
       : -1;
     const startIndex = decodedCursor
       ? exactCursorIndex >= 0
         ? exactCursorIndex + 1
-        : cards.findIndex((card) => isAfterCursor(card, decodedCursor))
+        : activeRandomSeed
+          ? 0
+          : orderedCards.findIndex((card) => isAfterCursor(card, decodedCursor))
       : 0;
     const safeStartIndex = startIndex > 0 ? startIndex : 0;
-    const items = cards
+    const items = orderedCards
       .slice(safeStartIndex, safeStartIndex + normalizedPageSize)
       .map(({ updatedAt, ...card }) => card);
-    const nextItem = cards[safeStartIndex + normalizedPageSize];
+    const nextItem = orderedCards[safeStartIndex + normalizedPageSize];
     const lastVisibleItem =
-      items.length > 0 ? cards[safeStartIndex + items.length - 1] : null;
+      items.length > 0 ? orderedCards[safeStartIndex + items.length - 1] : null;
 
     return {
       items,
       nextCursor:
-        nextItem && lastVisibleItem ? encodeFeedCursor(lastVisibleItem) : null,
+        nextItem && lastVisibleItem
+          ? encodeFeedCursor(lastVisibleItem, activeRandomSeed)
+          : null,
       hasMore: Boolean(nextItem),
     };
   } finally {
@@ -234,6 +251,7 @@ export async function getRecipeDetail(
   const { db, sqlite } = await openDatabase();
 
   try {
+    await ensureSavedForLaterTag(db, context.householdId);
     const row = await db.query.householdRecipes
       .findFirst({
         where: (table, { and, eq, isNull }) =>
@@ -2055,12 +2073,14 @@ async function prepareFeedCards({
   householdId,
   db,
   searchText,
+  filters,
   subscriptionTier,
 }: {
   rows: RecipeGraph[];
   householdId: string;
   db: DatabaseHandle;
   searchText?: string;
+  filters: FeedFilters;
   subscriptionTier: "free" | "premium";
 }) {
   const normalizedQuery = searchText
@@ -2083,6 +2103,7 @@ async function prepareFeedCards({
         ...card,
         searchMatches,
         searchMatchTier: getBestSearchMatchTier(searchMatches),
+        hasCalendarEntry: row.events.length > 0,
         updatedAt: row.pin.updatedAt ?? "",
       };
     })
@@ -2091,7 +2112,22 @@ async function prepareFeedCards({
         !normalizedQuery ||
         row.searchMatches.length > 0,
     )
+    .filter((row) => matchesFeedFilters(row, filters))
     .sort(compareFeedRows);
+}
+
+function matchesFeedFilters(row: FeedCardRow, filters: FeedFilters) {
+  const isRated = row.averageRating !== null;
+  const averageRating = row.averageRating;
+  if (filters.rating === "rated" && !isRated) return false;
+  if (filters.rating === "unrated" && isRated) return false;
+  if (filters.minRating !== null && (averageRating === null || averageRating < filters.minRating)) return false;
+  if (filters.maxRating !== null && (averageRating === null || averageRating > filters.maxRating)) return false;
+  if (filters.calendar === "eaten" && !row.hasCalendarEntry) return false;
+  if (filters.calendar === "not_eaten" && row.hasCalendarEntry) return false;
+  if (filters.readyOnly && row.status !== "recipe_ready") return false;
+
+  return true;
 }
 
 function compareFeedRows(left: FeedCardRow, right: FeedCardRow) {
@@ -2117,13 +2153,35 @@ function compareFeedRows(left: FeedCardRow, right: FeedCardRow) {
   return right.recipeId.localeCompare(left.recipeId);
 }
 
-function encodeFeedCursor(row: FeedCardRow) {
+function sortFeedCardsRandomly(cards: FeedCardRow[], seed: string) {
+  return [...cards].sort((left, right) => {
+    const scoreDifference = getSeededFeedScore(seed, left.recipeId)
+      - getSeededFeedScore(seed, right.recipeId);
+
+    return scoreDifference || left.recipeId.localeCompare(right.recipeId);
+  });
+}
+
+function getSeededFeedScore(seed: string, recipeId: string) {
+  let hash = 2166136261;
+  const value = `${seed}:${recipeId}`;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function encodeFeedCursor(row: FeedCardRow, randomSeed: string | null) {
   return Buffer.from(
     JSON.stringify({
       searchMatchTier: row.searchMatchTier,
       averageRating: row.averageRating,
       updatedAt: row.updatedAt,
       recipeId: row.recipeId,
+      randomSeed,
     }),
   ).toString("base64url");
 }
@@ -2253,7 +2311,7 @@ function isRecipeParseJobHeartbeatStale(input: {
   return Date.now() - heartbeatMs >= 2 * 60 * 1000;
 }
 
-function decodeFeedCursor(cursor: string | null | undefined) {
+function decodeFeedCursor(cursor: string | null | undefined): FeedCursor | null {
   if (!cursor) {
     return null;
   }
@@ -2266,6 +2324,7 @@ function decodeFeedCursor(cursor: string | null | undefined) {
       averageRating?: unknown;
       updatedAt?: unknown;
       recipeId?: unknown;
+      randomSeed?: unknown;
     };
 
     if (
@@ -2273,6 +2332,9 @@ function decodeFeedCursor(cursor: string | null | undefined) {
       || (parsed.averageRating !== null && typeof parsed.averageRating !== "number")
       || typeof parsed.updatedAt !== "string"
       || typeof parsed.recipeId !== "string"
+      || (parsed.randomSeed !== undefined
+        && parsed.randomSeed !== null
+        && typeof parsed.randomSeed !== "string")
     ) {
       return null;
     }
@@ -2282,6 +2344,7 @@ function decodeFeedCursor(cursor: string | null | undefined) {
       averageRating: parsed.averageRating,
       updatedAt: parsed.updatedAt,
       recipeId: parsed.recipeId,
+      randomSeed: parsed.randomSeed ?? null,
     };
   } catch {
     return null;
@@ -2290,12 +2353,7 @@ function decodeFeedCursor(cursor: string | null | undefined) {
 
 function isAfterCursor(
   row: FeedCardRow,
-  cursor: {
-    searchMatchTier: number;
-    averageRating: number | null;
-    updatedAt: string;
-    recipeId: string;
-  },
+  cursor: FeedCursor,
 ) {
   if (row.searchMatchTier !== cursor.searchMatchTier) {
     return row.searchMatchTier > cursor.searchMatchTier;
@@ -2320,12 +2378,7 @@ function isAfterCursor(
 
 function matchesCursor(
   row: FeedCardRow,
-  cursor: {
-    searchMatchTier: number;
-    averageRating: number | null;
-    updatedAt: string;
-    recipeId: string;
-  },
+  cursor: FeedCursor,
 ) {
   return (
     row.searchMatchTier === cursor.searchMatchTier
@@ -2340,7 +2393,7 @@ export async function getRecipeTags(): Promise<RecipeTagView[]> {
   const { db, sqlite } = await openDatabase();
 
   try {
-    await ensureSaveForLaterTag(db, context.householdId);
+    await ensureSavedForLaterTag(db, context.householdId);
     const rows = await db.query.recipeTags.findMany({
       where: (table, { eq }) => eq(table.householdId, context.householdId),
       orderBy: (table, { asc }) => [asc(table.name)],
@@ -2356,7 +2409,7 @@ export async function getRecipeTagCollections(): Promise<RecipeTagCollectionView
   const { db, sqlite } = await openDatabase();
 
   try {
-    await ensureSaveForLaterTag(db, context.householdId);
+    await ensureSavedForLaterTag(db, context.householdId);
     const tags = await db.query.recipeTags.findMany({
       where: (table, { eq }) => eq(table.householdId, context.householdId),
       orderBy: (table, { asc }) => [asc(table.name)],
@@ -2391,6 +2444,7 @@ export async function getRecipeTag(tagId: string): Promise<RecipeTagView | null>
   const context = await requireHouseholdContext();
   const { db, sqlite } = await openDatabase();
   try {
+    await ensureSavedForLaterTag(db, context.householdId);
     const tag = await db.query.recipeTags.findFirst({
       where: (table, { and, eq }) => and(eq(table.tagId, tagId), eq(table.householdId, context.householdId)),
     });
@@ -2439,6 +2493,11 @@ async function getFeedRecipeRows(db: DatabaseHandle, householdId: string, tagId?
           columns: {
             reviewId: true,
             ratingValue: true,
+          },
+        },
+        events: {
+          columns: {
+            eventId: true,
           },
         },
       },

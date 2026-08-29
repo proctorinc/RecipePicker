@@ -13,6 +13,7 @@ import {
   householdBoards,
   householdRecipeIngredients,
   householdRecipeInstructions,
+  householdRecipeEvents,
   householdPins,
   householdRecipes,
   householdRecipeReviews,
@@ -155,14 +156,15 @@ afterEach(() => {
 });
 
 describe("getFeedPinsPage", () => {
-  it("returns the newest matching cards on the first page", async () => {
+  it("shuffles an unfiltered feed using its random seed", async () => {
     const page = await getFeedPinsPage({
       pageSize: 2,
+      randomSeed: "home-feed-test",
     });
 
     expect(page.items.map((item) => item.recipeId)).toEqual([
-      "recipe_b",
       "recipe_a",
+      "recipe_c",
     ]);
     expect(page.hasMore).toBe(true);
     expect(page.nextCursor).toBeTruthy();
@@ -197,16 +199,59 @@ describe("getFeedPinsPage", () => {
     expect(page.items.map((item) => item.recipeId)).toEqual(["recipe_a"]);
   });
 
+  it("filters by rating state and inclusive average-rating bounds", async () => {
+    await seedRecipeReviews([
+      createReview({ reviewId: "review_a", recipeId: "recipe_a", ratingValue: 4, createdAt: "2026-06-12T10:00:00.000Z" }),
+      createReview({ reviewId: "review_b", recipeId: "recipe_b", ratingValue: 5, createdAt: "2026-06-12T11:00:00.000Z" }),
+    ]);
+
+    const rated = await getFeedPinsPage({ filters: { rating: "rated", minRating: null, maxRating: null, calendar: "all", readyOnly: false } });
+    const unrated = await getFeedPinsPage({ filters: { rating: "unrated", minRating: null, maxRating: null, calendar: "all", readyOnly: false } });
+    const fourStars = await getFeedPinsPage({ filters: { rating: "rated", minRating: 4, maxRating: 4, calendar: "all", readyOnly: false } });
+
+    expect(rated.items.map((item) => item.recipeId)).toEqual(["recipe_b", "recipe_a"]);
+    expect(unrated.items.map((item) => item.recipeId)).toEqual(["recipe_c"]);
+    expect(fourStars.items.map((item) => item.recipeId)).toEqual(["recipe_a"]);
+  });
+
+  it("filters calendar entries, ready recipes, and paginates filtered searches", async () => {
+    const { db, sqlite } = await createTestDatabaseHandle(sqlitePath);
+    const timestamp = "2026-06-12T10:00:00.000Z";
+    try {
+      await db.insert(householdRecipeEvents).values({
+        eventId: "event_a", householdId: "household_1", recipeId: "recipe_a", date: "2026-07-01", createdAt: timestamp, updatedAt: timestamp,
+      }).run();
+      await db.insert(householdRecipeInstructions).values({
+        recipeId: "recipe_b", householdId: "household_1", rawRecipeJson: "{}", createdAt: timestamp, updatedAt: timestamp,
+      }).run();
+    } finally {
+      await sqlite.close();
+    }
+
+    const eaten = await getFeedPinsPage({ filters: { rating: "all", minRating: null, maxRating: null, calendar: "eaten", readyOnly: false } });
+    const notEaten = await getFeedPinsPage({ filters: { rating: "all", minRating: null, maxRating: null, calendar: "not_eaten", readyOnly: false } });
+    const ready = await getFeedPinsPage({ filters: { rating: "all", minRating: null, maxRating: null, calendar: "all", readyOnly: true } });
+    const firstPage = await getFeedPinsPage({ searchText: "pasta", pageSize: 1, filters: { rating: "all", minRating: null, maxRating: null, calendar: "not_eaten", readyOnly: false } });
+    const secondPage = await getFeedPinsPage({ searchText: "pasta", cursor: firstPage.nextCursor, pageSize: 1, filters: { rating: "all", minRating: null, maxRating: null, calendar: "not_eaten", readyOnly: false } });
+
+    expect(eaten.items.map((item) => item.recipeId)).toEqual(["recipe_a"]);
+    expect(notEaten.items.map((item) => item.recipeId)).toEqual(["recipe_b", "recipe_c"]);
+    expect(ready.items.map((item) => item.recipeId)).toEqual(["recipe_b"]);
+    expect(firstPage.items.map((item) => item.recipeId)).toEqual(["recipe_b"]);
+    expect(secondPage.items).toEqual([]);
+  });
+
   it("resumes from the cursor without duplicates or gaps", async () => {
     const firstPage = await getFeedPinsPage({
       pageSize: 2,
+      randomSeed: "home-feed-test",
     });
     const secondPage = await getFeedPinsPage({
       cursor: firstPage.nextCursor,
       pageSize: 2,
     });
 
-    expect(secondPage.items.map((item) => item.recipeId)).toEqual(["recipe_c"]);
+    expect(secondPage.items.map((item) => item.recipeId)).toEqual(["recipe_b"]);
     expect(secondPage.hasMore).toBe(false);
     expect(secondPage.nextCursor).toBeNull();
   });
@@ -214,6 +259,7 @@ describe("getFeedPinsPage", () => {
   it("returns hasMore false at the end of the feed", async () => {
     const page = await getFeedPinsPage({
       pageSize: 5,
+      randomSeed: "home-feed-test",
     });
 
     expect(page.items).toHaveLength(3);
@@ -344,7 +390,7 @@ describe("getFeedPinsPage", () => {
     expect(page.items[1]?.searchMatches[0]?.field).toBe("description");
   });
 
-  it("prefers rated recipes first, then higher average ratings, then unrated recipes", async () => {
+  it("shuffles unfiltered recipes even when some have ratings", async () => {
     await seedRecipeReviews([
       createReview({
         reviewId: "review_1",
@@ -360,16 +406,19 @@ describe("getFeedPinsPage", () => {
       }),
     ]);
 
-    const page = await getFeedPinsPage({ pageSize: 3 });
+    const page = await getFeedPinsPage({
+      pageSize: 3,
+      randomSeed: "home-feed-test",
+    });
 
     expect(page.items.map((item) => item.recipeId)).toEqual([
-      "recipe_b",
       "recipe_a",
       "recipe_c",
+      "recipe_b",
     ]);
   });
 
-  it("keeps pagination stable when rating-based ordering is applied", async () => {
+  it("keeps randomized pagination stable without duplicates or gaps", async () => {
     await seedRecipeReviews([
       createReview({
         reviewId: "review_1",
@@ -385,18 +434,43 @@ describe("getFeedPinsPage", () => {
       }),
     ]);
 
-    const firstPage = await getFeedPinsPage({ pageSize: 1 });
+    const firstPage = await getFeedPinsPage({
+      pageSize: 1,
+      randomSeed: "home-feed-test",
+    });
     const secondPage = await getFeedPinsPage({
       cursor: firstPage.nextCursor,
       pageSize: 2,
     });
 
-    expect(firstPage.items.map((item) => item.recipeId)).toEqual(["recipe_b"]);
+    expect(firstPage.items.map((item) => item.recipeId)).toEqual(["recipe_a"]);
     expect(secondPage.items.map((item) => item.recipeId)).toEqual([
-      "recipe_a",
       "recipe_c",
+      "recipe_b",
     ]);
     expect(secondPage.hasMore).toBe(false);
+  });
+
+  it("uses a different ordering for a different unfiltered-feed seed", async () => {
+    const firstFeed = await getFeedPinsPage({
+      pageSize: 3,
+      randomSeed: "home-feed-test",
+    });
+    const refreshedFeed = await getFeedPinsPage({
+      pageSize: 3,
+      randomSeed: "another-feed-test",
+    });
+
+    expect(firstFeed.items.map((item) => item.recipeId)).toEqual([
+      "recipe_a",
+      "recipe_c",
+      "recipe_b",
+    ]);
+    expect(refreshedFeed.items.map((item) => item.recipeId)).toEqual([
+      "recipe_c",
+      "recipe_b",
+      "recipe_a",
+    ]);
   });
 });
 

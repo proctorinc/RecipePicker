@@ -19,6 +19,7 @@ export type HouseholdContext = {
   householdId: string;
   householdName: string;
   householdLogoUrl: string | null;
+  householdTimeZone: string;
   role: HouseholdRole;
   clerkUserId: string;
 };
@@ -67,6 +68,7 @@ export const requireHouseholdContext = cache(async function requireHouseholdCont
         householdId: membership.householdId,
         householdName: membership.household.name,
         householdLogoUrl: membership.household.logoUrl,
+        householdTimeZone: membership.household.timeZone,
         role: membership.role as HouseholdRole,
         clerkUserId: userId,
       };
@@ -112,6 +114,7 @@ export const requireHouseholdContext = cache(async function requireHouseholdCont
       householdId,
       householdName,
       householdLogoUrl: null,
+      householdTimeZone: "UTC",
       role: "owner",
       clerkUserId: userId,
     };

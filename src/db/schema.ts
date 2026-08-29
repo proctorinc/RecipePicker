@@ -10,6 +10,7 @@ export const households = sqliteTable("households", {
   householdId: text("household_id").primaryKey(),
   name: text("name").notNull(),
   logoUrl: text("logo_url"),
+  timeZone: text("time_zone").notNull().default("UTC"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -93,6 +94,8 @@ export const pinterestAccounts = sqliteTable(
     lastRefreshAttemptAt: text("last_refresh_attempt_at"),
     lastRefreshSucceededAt: text("last_refresh_succeeded_at"),
     lastSyncAttemptAt: text("last_sync_attempt_at"),
+    lastNewPinSyncAttemptAt: text("last_new_pin_sync_attempt_at"),
+    lastNightlyFullSyncLocalDate: text("last_nightly_full_sync_local_date"),
     lastSyncTrigger: text("last_sync_trigger"),
     lastSyncAt: text("last_sync_at"),
     lastSyncStatus: text("last_sync_status"),
