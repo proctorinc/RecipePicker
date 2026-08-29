@@ -1,4 +1,5 @@
 import { PageIntro, PageShell } from "@/components/page-shell";
+import { RecipeHeaderBackButtonEnabled } from "@/components/recipe-header-back-button";
 import { RecipeHistoryCalendar } from "@/components/recipe-history-calendar";
 import { getRecipeHistoryPage } from "@/lib/server/queries";
 
@@ -14,6 +15,11 @@ export default async function HistoryPage({
 
   return (
     <PageShell>
+      {from === "recipe" && recipeId ? (
+        <RecipeHeaderBackButtonEnabled
+          backHref={`/recipe/${encodeURIComponent(recipeId)}`}
+        />
+      ) : null}
       <PageIntro title="Recipe history" />
       <RecipeHistoryCalendar history={history} fromRecipe={from === "recipe"} initialCartSelection={cart === "select"} />
     </PageShell>

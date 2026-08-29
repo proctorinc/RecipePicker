@@ -362,6 +362,12 @@ export function RecipeHistoryCalendar({
     return `/history?month=${encodeURIComponent(history.month)}&recipeId=${encodeURIComponent(recipeId)}${fromRecipe ? "&from=recipe" : ""}`;
   }
 
+  function cancelRecipeSelection() {
+    const href = `/history?month=${encodeURIComponent(history.month)}`;
+    startNavigation(href);
+    router.replace(href);
+  }
+
   function selectRecipe(recipe: RecipeHistoryRecipeOption) {
     setSelectedDates([]);
     setSearchValue("");
@@ -374,15 +380,73 @@ export function RecipeHistoryCalendar({
 
   return (
     <>
+      {isSelectionMode && selectedRecipe ? (
+        <aside className="fixed inset-x-0 bottom-0 z-50 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] sm:hidden">
+          <div
+            className={cn(
+              "relative mx-auto flex max-w-sm items-center gap-3 rounded-[24px] border border-white/80 bg-background/95 p-3 shadow-[0_-12px_32px_rgba(73,49,31,0.16)] backdrop-blur",
+              "pb-[4.25rem]",
+            )}
+          >
+            <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-[14px] bg-secondary/40">
+              {selectedRecipe.recipeImageUrl ? (
+                <AppTransitionLink href={buildRecipeHref(selectedRecipe.recipeId)}>
+                  <RecipeImage
+                    src={selectedRecipe.recipeImageUrl}
+                    previewSrc={selectedRecipe.recipePreviewImageUrl}
+                    alt={selectedRecipe.recipeTitle}
+                    fill
+                    className="object-cover"
+                    sizes="48px"
+                  />
+                </AppTransitionLink>
+              ) : null}
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                Adding to calendar
+              </p>
+              <p className="truncate font-[family-name:var(--font-serif)] text-base font-semibold">
+                {selectedRecipe.recipeTitle}
+              </p>
+              <p className="text-xs text-muted-foreground">Choose one or more days</p>
+            </div>
+            <div className="absolute inset-x-3 bottom-3 flex items-center gap-2 border-t border-border/70 pt-3">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="shrink-0"
+                onClick={cancelRecipeSelection}
+                disabled={isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="flex-1"
+                disabled={isPending || selectedDatesSorted.length === 0}
+                onClick={() => createEventsForSelectedDates(selectedRecipe)}
+              >
+                <Plus className="h-4 w-4" />
+                {selectedDatesSorted.length > 0
+                  ? `Add recipe to ${selectedDatesSorted.length} ${selectedDatesSorted.length === 1 ? "day" : "days"}`
+                  : "Select days to add recipe"}
+              </Button>
+            </div>
+          </div>
+        </aside>
+      ) : null}
       {isSelectionMode && selectedDatesSorted.length > 0 ? (
-        <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur">
+        <div className="sticky top-[5.25rem] z-30 hidden rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur sm:block">
           <div className="flex items-center gap-3">
             <Button
               type="button"
               variant="ghost"
               size="sm"
               className="shrink-0"
-              onClick={() => setSelectedDates([])}
+              onClick={cancelRecipeSelection}
               disabled={isPending}
             >
               Cancel
@@ -411,15 +475,6 @@ export function RecipeHistoryCalendar({
           <Button type="button" variant={cartSelectionMode ? "outline" : "default"} size="sm" onClick={() => { if (cartSelectionMode) router.push("/shopping-cart"); else router.push(`/history?month=${encodeURIComponent(history.month)}&cart=select`); }} disabled={isSelectionMode}>
             <ShoppingCart className="h-4 w-4" />{cartSelectionMode ? "Cancel cart" : "Build cart"}
           </Button>
-          {selectedRecipe && (
-            <Button asChild type="button" variant="ghost" size="sm">
-              <AppTransitionLink
-                href={`/history?month=${encodeURIComponent(history.month)}`}
-              >
-                Clear
-              </AppTransitionLink>
-            </Button>
-          )}
           <Button
             type="button"
             variant={isSelectionMode ? "outline" : "default"}
@@ -433,7 +488,7 @@ export function RecipeHistoryCalendar({
         </div>
 
         {isSelectionMode && selectedRecipe ? (
-          <div className="mb-4 rounded-[28px] border border-border/70 bg-secondary/20 p-4 sm:mb-6 sm:p-5">
+          <div className="mb-4 hidden rounded-[28px] border border-border/70 bg-secondary/20 p-4 sm:mb-6 sm:block sm:p-5">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex gap-2">
                 <div className="relative h-32 w-20 shrink-0 overflow-hidden rounded-[20px] bg-secondary/40 sm:h-20 sm:w-20">
@@ -592,9 +647,9 @@ export function RecipeHistoryCalendar({
                 <span
                   className={cn(
                     "absolute left-1 top-1 z-10 inline-flex h-auto min-w-0 items-start justify-start bg-transparent p-0 text-[9px] font-semibold text-foreground sm:relative sm:left-auto sm:top-auto sm:h-8 sm:min-w-8 sm:w-auto sm:items-center sm:justify-center sm:rounded-full sm:px-1 sm:pt-0 sm:text-sm",
-                    day.events.length > 0 &&
+                    day.events.length > 0 && !isToday &&
                       "left-0 top-0 h-6 w-7 rounded-br-[2rem] bg-white/90 px-1 pt-0.5 sm:bg-white/90",
-                    isToday && "rounded-full bg-primary px-1.5 py-0.5 text-primary-foreground shadow-sm sm:bg-primary",
+                    isToday && "h-7 min-w-7 w-7 items-center justify-center rounded-full bg-primary p-0 text-[10px] text-primary-foreground shadow-sm sm:bg-primary",
                   )}
                 >
                   {day.dayNumber}
@@ -602,11 +657,6 @@ export function RecipeHistoryCalendar({
                 {day.events.length > 1 ? (
                   <span className="absolute bottom-1 right-1 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/90 px-1 text-[10px] font-semibold text-foreground sm:h-6 sm:min-w-6 sm:px-1.5 sm:text-[11px]">
                     {day.events.length}
-                  </span>
-                ) : null}
-                {isToday ? (
-                  <span className="absolute bottom-1 left-1 z-10 rounded-full bg-primary px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] text-primary-foreground shadow-sm sm:hidden">
-                    Today
                   </span>
                 ) : null}
                 {(isSelectionMode && selectedDateSet.has(day.date)) || (cartSelectionMode && cartSelectedDateSet.has(day.date)) ? (
@@ -630,16 +680,6 @@ export function RecipeHistoryCalendar({
             <Button type="button" variant={cartSelectionMode ? "outline" : "default"} size="sm" onClick={() => { if (cartSelectionMode) router.push("/shopping-cart"); else router.push(`/history?month=${encodeURIComponent(history.month)}&cart=select`); }} disabled={isSelectionMode}>
               <ShoppingCart className="h-4 w-4" />{cartSelectionMode ? "Cancel cart" : "Build cart"}
             </Button>
-            {selectedRecipe && (
-              <Button asChild type="button" variant="ghost" size="sm">
-                <AppTransitionLink href={`/history?month=${encodeURIComponent(history.month)}`}>Clear</AppTransitionLink>
-              </Button>
-            )}
-            {isSelectionMode ? (
-              <Button type="button" variant="outline" size="sm" onClick={openRecipePicker} disabled={cartSelectionMode}>
-                <CookingPot className="h-4 w-4" />Change recipe
-              </Button>
-            ) : null}
         </div>
       </section>
 

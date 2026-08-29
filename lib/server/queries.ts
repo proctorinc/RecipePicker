@@ -43,6 +43,7 @@ import { buildShoppingCartItems } from "@/lib/shopping-cart";
 import { summarizeRecipeOps } from "@/lib/server/recipe-ops-summary";
 import { derivePinStatus } from "@/lib/server/status";
 import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
+import { SAVE_FOR_LATER_TAG_NAME, SAVE_FOR_LATER_TAG_NORMALIZED_NAME } from "@/lib/recipe-tags";
 import {
   buildCalendarDays,
   expandDayRange,
@@ -99,6 +100,17 @@ type FeedCardRow = FeedPinCard & {
 const DEFAULT_FEED_PAGE_SIZE = 50;
 const MAX_FEED_PAGE_SIZE = 100;
 const PINTEREST_FOLDER_SOURCE = "pinterest";
+
+async function ensureSaveForLaterTag(
+  db: DatabaseHandle,
+  householdId: string,
+) {
+  const now = new Date().toISOString();
+  await db.insert(recipeTags)
+    .values({ householdId, name: SAVE_FOR_LATER_TAG_NAME, normalizedName: SAVE_FOR_LATER_TAG_NORMALIZED_NAME, createdAt: now, updatedAt: now })
+    .onConflictDoNothing()
+    .run();
+}
 
 export async function getFeedPins(searchText?: string): Promise<FeedPinCard[]> {
   const [context, appAccess] = await Promise.all([
@@ -2328,6 +2340,7 @@ export async function getRecipeTags(): Promise<RecipeTagView[]> {
   const { db, sqlite } = await openDatabase();
 
   try {
+    await ensureSaveForLaterTag(db, context.householdId);
     const rows = await db.query.recipeTags.findMany({
       where: (table, { eq }) => eq(table.householdId, context.householdId),
       orderBy: (table, { asc }) => [asc(table.name)],
@@ -2343,6 +2356,7 @@ export async function getRecipeTagCollections(): Promise<RecipeTagCollectionView
   const { db, sqlite } = await openDatabase();
 
   try {
+    await ensureSaveForLaterTag(db, context.householdId);
     const tags = await db.query.recipeTags.findMany({
       where: (table, { eq }) => eq(table.householdId, context.householdId),
       orderBy: (table, { asc }) => [asc(table.name)],

@@ -13,7 +13,7 @@ import { AppShellProgress } from "@/components/app-route-transition";
 import { AppShellUserButton } from "@/components/app-shell-user-button";
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { MobileAwareAppHeader } from "@/components/mobile-aware-app-header";
-import { RecipeHeaderBackButton } from "@/components/recipe-header-back-button";
+import { RecipeHeaderBackButton, RecipeHeaderBackButtonProvider } from "@/components/recipe-header-back-button";
 import { Button } from "@/components/ui/button";
 import { MobileNav } from "@/components/mobile-nav";
 import { KitchenSummaryMenu } from "@/components/kitchen-summary-menu";
@@ -88,17 +88,18 @@ export async function AppShell({
     : visibleBaseLinks;
 
   return (
-    <div className="min-h-screen bg-grain pb-16">
-      <MobileAwareAppHeader
-        mobileLogo={
-          <KitchenSummaryMenu
-            householdName={householdName}
-            householdLogoUrl={householdLogoUrl}
-            cooks={cooks}
-            size="small"
-          />
-        }
-      >
+    <RecipeHeaderBackButtonProvider>
+      <div className="min-h-screen bg-grain pb-16">
+        <MobileAwareAppHeader
+          mobileLogo={
+            <KitchenSummaryMenu
+              householdName={householdName}
+              householdLogoUrl={householdLogoUrl}
+              cooks={cooks}
+              size="small"
+            />
+          }
+        >
         <AppShellProgress />
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-1">
@@ -146,18 +147,19 @@ export async function AppShell({
 
           <AppShellUserButton />
         </div>
-      </MobileAwareAppHeader>
+        </MobileAwareAppHeader>
 
-      <main className="mx-auto flex w-full max-w-7xl flex-col px-2 pb-24 pt-12 sm:px-6 md:pb-4 md:pt-[5.75rem] lg:px-8">
+        <main className="mx-auto flex w-full max-w-7xl flex-col px-2 pb-24 pt-12 sm:px-6 md:pb-4 md:pt-[5.75rem] lg:px-8">
         {topContent ? (
           <div className="w-screen self-center">{topContent}</div>
         ) : null}
         <div className="flex flex-col gap-8">{children}</div>
-      </main>
-      <MobileNav
-        showAiPicker={showAiPicker}
-        profileLinksToSettings={mobileProfileLinksToSettings}
-      />
-    </div>
+        </main>
+        <MobileNav
+          showAiPicker={showAiPicker}
+          profileLinksToSettings={mobileProfileLinksToSettings}
+        />
+      </div>
+    </RecipeHeaderBackButtonProvider>
   );
 }

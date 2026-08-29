@@ -59,6 +59,10 @@ import {
 import { getIngredientAiParses } from "@/lib/server/ingredient-ai";
 import { logAudit, logError, withActionLogging } from "@/lib/server/logger";
 import { resolveRecipeImageSources } from "@/lib/recipe-image-sources";
+import {
+  SAVE_FOR_LATER_TAG_NAME,
+  SAVE_FOR_LATER_TAG_NORMALIZED_NAME,
+} from "@/lib/recipe-tags";
 import { formatIngredientOriginalText, parseAmountText } from "@/lib/ingredient-parsing";
 import {
   disconnectPinterestConnection,
@@ -139,7 +143,7 @@ async function replaceRecipeTags(
         .values(tagIds.map((tagId) => ({ householdId: input.householdId, recipeId: input.recipeId, tagId, createdAt: input.now, updatedAt: input.now })))
         .run();
     }
-    await tx.run(sql`DELETE FROM recipe_tags WHERE household_id = ${input.householdId} AND NOT EXISTS (SELECT 1 FROM recipe_tag_memberships WHERE recipe_tag_memberships.tag_id = recipe_tags.tag_id)`);
+    await tx.run(sql`DELETE FROM recipe_tags WHERE household_id = ${input.householdId} AND normalized_name != ${SAVE_FOR_LATER_TAG_NORMALIZED_NAME} AND NOT EXISTS (SELECT 1 FROM recipe_tag_memberships WHERE recipe_tag_memberships.tag_id = recipe_tags.tag_id)`);
   });
 }
 
@@ -189,6 +193,52 @@ export const saveRecipeTagsAction = withActionLogging(
       result: { submittedTagCount: getSubmittedTagCount(formData.get("tagsJson")) },
     }),
     getFailureLevel: (result) => result.message?.startsWith("Unable") ? "error" : "warn",
+  },
+);
+
+export const toggleSaveForLaterAction = withActionLogging(
+  "action.toggle_save_for_later",
+  async (_: ActionState, formData: FormData): Promise<ActionState> => {
+    const recipeId = String(formData.get("recipeId") ?? "").trim();
+    if (!recipeId) return { status: "error", message: "Recipe ID is required." };
+
+    try {
+      const context = await requireHouseholdContext();
+      const { db, sqlite } = await openDatabase();
+      try {
+        const recipe = await db.query.householdRecipes.findFirst({
+          where: (table, { and, eq }) => and(
+            eq(table.recipeId, recipeId),
+            eq(table.householdId, context.householdId),
+          ),
+          columns: { recipeId: true },
+        });
+        if (!recipe) return { status: "error", message: "Recipe not found." };
+
+        const saved = await sqlite.transaction(async (tx) => {
+          const now = new Date().toISOString();
+          await tx.insert(recipeTags)
+            .values({ householdId: context.householdId, name: SAVE_FOR_LATER_TAG_NAME, normalizedName: SAVE_FOR_LATER_TAG_NORMALIZED_NAME, createdAt: now, updatedAt: now })
+            .onConflictDoNothing()
+            .run();
+          const [tag] = await tx.all<{ tag_id: string }>(sql`SELECT tag_id FROM recipe_tags WHERE household_id = ${context.householdId} AND normalized_name = ${SAVE_FOR_LATER_TAG_NORMALIZED_NAME} LIMIT 1`);
+          if (!tag) throw new Error("Save for later collection is unavailable.");
+          const [membership] = await tx.all<{ membership_id: string }>(sql`SELECT membership_id FROM recipe_tag_memberships WHERE household_id = ${context.householdId} AND recipe_id = ${recipeId} AND tag_id = ${tag.tag_id} LIMIT 1`);
+          if (membership) {
+            await tx.delete(recipeTagMemberships).where(eq(recipeTagMemberships.membershipId, membership.membership_id)).run();
+            return false;
+          }
+          await tx.insert(recipeTagMemberships).values({ householdId: context.householdId, recipeId, tagId: tag.tag_id, createdAt: now, updatedAt: now }).run();
+          return true;
+        });
+        revalidateAll(recipeScopedPaths(undefined, recipeId).concat("/tags"));
+        return { status: "success", message: saved ? "Saved for later." : "Removed from Save for later." };
+      } finally {
+        await sqlite.close();
+      }
+    } catch (error) {
+      return toErrorState(error, "Unable to update Save for later.");
+    }
   },
 );
 
