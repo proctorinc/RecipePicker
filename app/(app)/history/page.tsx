@@ -14,6 +14,7 @@ export default async function HistoryPage({
 
   return (
     <PageShell>
+      <PageIntro title="Recipe history" />
       <RecipeHistoryCalendar history={history} fromRecipe={from === "recipe"} initialCartSelection={cart === "select"} />
     </PageShell>
   );

@@ -280,7 +280,7 @@ function RecipeTags({
   availableTags: Array<{ tagId: string; name: string }>;
 }) {
   const router = useRouter();
-  const [tags, setTags] = useState(initialTags.map((tag) => tag.name));
+  const [tags, setTags] = useState(() => uniqueTagNames(initialTags));
   const [input, setInput] = useState("");
   const [isAdding, setIsAdding] = useState(false);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
@@ -299,7 +299,7 @@ function RecipeTags({
     .slice(0, 6);
 
   useEffect(() => {
-    setTags(initialTags.map((tag) => tag.name));
+    setTags(uniqueTagNames(initialTags));
   }, [initialTags]);
 
   useEffect(() => {
@@ -427,6 +427,19 @@ function RecipeTags({
       </Dialog>
     </section>
   );
+}
+
+function uniqueTagNames(tags: Array<{ name: string }>) {
+  const names = new Set<string>();
+
+  return tags.reduce<string[]>((uniqueNames, tag) => {
+    const normalizedName = tag.name.toLocaleLowerCase();
+    if (names.has(normalizedName)) return uniqueNames;
+
+    names.add(normalizedName);
+    uniqueNames.push(tag.name);
+    return uniqueNames;
+  }, []);
 }
 
 function EditSubmitButton({

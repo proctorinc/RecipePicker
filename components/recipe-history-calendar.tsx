@@ -90,10 +90,14 @@ export function RecipeHistoryCalendar({
   const [cartRangeStart, setCartRangeStart] = useState<string | null>(null);
   const [cartRangeEnd, setCartRangeEnd] = useState<string | null>(null);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
+  const [userTimeZone, setUserTimeZone] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
   const { startNavigation } = useAppRouteTransition();
-  const today = getTodayDayString();
+  const localToday = getTodayDayString();
+  const today = userTimeZone
+    ? getTodayDayString(new Date(), userTimeZone)
+    : null;
   const isSelectionMode = Boolean(history.selectedRecipe);
   const postCreateHistoryHref = history.selectedRecipe
     ? `/history?month=${encodeURIComponent(history.month)}&recipeId=${encodeURIComponent(history.selectedRecipe.recipeId)}${fromRecipe ? "&from=recipe" : ""}`
@@ -107,10 +111,19 @@ export function RecipeHistoryCalendar({
       ),
     [history.recipeOptions],
   );
-  const selectedDay = useMemo(
-    () => history.days.find((day) => day.date === dayDialogDate) ?? null,
-    [dayDialogDate, history.days],
-  );
+  const selectedDay = useMemo(() => {
+    const day = history.days.find((entry) => entry.date === dayDialogDate);
+
+    if (!day || !today) {
+      return day ?? null;
+    }
+
+    return {
+      ...day,
+      isToday: day.date === today,
+      isFuture: day.date > today,
+    };
+  }, [dayDialogDate, history.days, today]);
   const selectedDatesSorted = useMemo(
     () => [...selectedDates].sort((left, right) => left.localeCompare(right)),
     [selectedDates],
@@ -137,6 +150,10 @@ export function RecipeHistoryCalendar({
   useEffect(() => {
     setSelectedDates([]);
   }, [history.month, history.selectedRecipe?.recipeId]);
+
+  useEffect(() => {
+    setUserTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, []);
 
   useEffect(() => { setCartSelectionMode(initialCartSelection); setCartRangeStart(null); setCartRangeEnd(null); }, [initialCartSelection]);
 
@@ -321,7 +338,7 @@ export function RecipeHistoryCalendar({
             ? result.data.firstEventDate
             : null;
 
-        if (firstEventId && firstEventDate && firstEventDate <= today) {
+        if (firstEventId && firstEventDate && firstEventDate <= localToday) {
           setDayDialogDate(null);
           setReviewTarget({
             eventId: firstEventId,
@@ -389,7 +406,7 @@ export function RecipeHistoryCalendar({
       ) : null}
       {cartSelectionMode ? <div className="sticky top-[5.25rem] z-30 rounded-full border border-white/80 bg-background/90 px-1 py-1 shadow-soft backdrop-blur"><div className="flex items-center gap-3"><Button type="button" variant="ghost" size="sm" onClick={() => { setCartRangeStart(null); setCartRangeEnd(null); }}>{cartRangeStart ? "Restart" : "Cancel"}</Button><p className="flex-1 text-sm text-muted-foreground">{cartRangeStart ? "Choose an end date" : "Choose a start date"}</p><Button asChild variant="ghost" size="sm"><AppTransitionLink href="/shopping-cart">Back</AppTransitionLink></Button></div></div> : null}
 
-      <section className="rounded-[24px] border border-white/70 bg-white/90 p-2 shadow-soft sm:rounded-[32px] sm:p-6">
+      <section className="rounded-[28px] border border-white/80 bg-white/90 p-3 shadow-soft sm:rounded-[32px] sm:p-6">
         <div className="mb-6 hidden items-center justify-end gap-2 sm:flex">
           <Button type="button" variant={cartSelectionMode ? "outline" : "default"} size="sm" onClick={() => { if (cartSelectionMode) router.push("/shopping-cart"); else router.push(`/history?month=${encodeURIComponent(history.month)}&cart=select`); }} disabled={isSelectionMode}>
             <ShoppingCart className="h-4 w-4" />{cartSelectionMode ? "Cancel cart" : "Build cart"}
@@ -460,6 +477,47 @@ export function RecipeHistoryCalendar({
           </div>
         ) : null}
 
+        <div className="mb-5 sm:hidden">
+          <div className="rounded-[22px] border border-border/70 bg-secondary/25 p-2">
+            <div className="grid grid-cols-[3rem_minmax(0,1fr)_3rem] items-center gap-2">
+              <Button
+                asChild
+                variant="outline"
+                className="h-12 w-12 justify-center border-white/80 bg-white/90 px-0 shadow-sm"
+                size="sm"
+              >
+                <AppTransitionLink
+                  href={buildHistoryHref(history.previousMonth)}
+                  aria-label={`Previous month, ${history.monthLabel}`}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </AppTransitionLink>
+              </Button>
+              <div className="min-w-0 text-center">
+                <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Calendar
+                </p>
+                <h2 className="truncate font-[family-name:var(--font-serif)] text-2xl font-semibold leading-tight">
+                  {history.monthLabel}
+                </h2>
+              </div>
+              <Button
+                asChild
+                variant="outline"
+                className="h-12 w-12 justify-center border-white/80 bg-white/90 px-0 shadow-sm"
+                size="sm"
+              >
+                <AppTransitionLink
+                  href={buildHistoryHref(history.nextMonth)}
+                  aria-label={`Next month, ${history.monthLabel}`}
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </AppTransitionLink>
+              </Button>
+            </div>
+          </div>
+        </div>
+
         <div className="mb-6 hidden sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <div className="text-center sm:order-2">
             {/*<p className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground sm:hidden">
@@ -497,7 +555,7 @@ export function RecipeHistoryCalendar({
           </div>
         </div>
 
-        <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase tracking-[0.18em] text-muted-foreground sm:gap-2 sm:text-xs sm:tracking-[0.24em]">
+        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground sm:gap-2 sm:text-xs sm:tracking-[0.24em]">
           {WEEKDAY_LABELS.map((label) => (
             <div key={label} className="py-1 sm:py-2">
               {label}
@@ -505,14 +563,17 @@ export function RecipeHistoryCalendar({
           ))}
         </div>
 
-        <div className="grid grid-cols-7 bg-border sm:bg-transparent rounded-xl sm:gap-2 border sm:border-none gap-px overflow-hidden">
-          {history.days.map((day) => (
+        <div className="grid grid-cols-7 gap-px overflow-hidden rounded-2xl border bg-border shadow-sm sm:rounded-none sm:border-none sm:bg-transparent sm:shadow-none sm:gap-2">
+          {history.days.map((day) => {
+            const isToday = today ? day.date === today : false;
+
+            return (
             <button
               key={day.date}
               type="button"
               onClick={() => openDay(day)}
               className={cn(
-                "group relative flex flex-start h-full w-full shrink-0 aspect-[2/3] overflow-hidden p-1 text-left transition hover:border-primary/40 hover:bg-secondary/15 sm:aspect-square sm:rounded-[24px] sm:border sm:p-2",
+                "group relative flex h-full w-full shrink-0 aspect-[2/3] overflow-hidden p-1 text-left transition hover:border-primary/40 hover:bg-secondary/15 sm:aspect-square sm:rounded-[24px] sm:border sm:p-2",
                 day.inCurrentMonth
                   ? "sm:border-border/70 bg-white/75"
                   : "sm:border-border/35 bg-muted/95 text-muted-foreground",
@@ -521,7 +582,7 @@ export function RecipeHistoryCalendar({
                   "border-primary bg-primary/10 ring-2 ring-primary/35 sm:border-primary/70",
                 cartSelectionMode && cartSelectedDateSet.has(day.date) &&
                   "border-primary bg-primary/10 ring-2 ring-primary/35 sm:border-primary/70",
-                day.isToday && "border-primary/40 ring-1 ring-primary/25",
+                isToday && "border-primary ring-2 ring-inset ring-primary/80 bg-primary/10",
               )}
             >
               {day.events.length > 0 ? (
@@ -533,8 +594,7 @@ export function RecipeHistoryCalendar({
                     "absolute left-1 top-1 z-10 inline-flex h-auto min-w-0 items-start justify-start bg-transparent p-0 text-[9px] font-semibold text-foreground sm:relative sm:left-auto sm:top-auto sm:h-8 sm:min-w-8 sm:w-auto sm:items-center sm:justify-center sm:rounded-full sm:px-1 sm:pt-0 sm:text-sm",
                     day.events.length > 0 &&
                       "left-0 top-0 h-6 w-7 rounded-br-[2rem] bg-white/90 px-1 pt-0.5 sm:bg-white/90",
-                    day.isToday && "sm:bg-primary sm:text-primary-foreground",
-                    day.isToday && day.events.length > 0 && "bg-primary text-primary-foreground",
+                    isToday && "rounded-full bg-primary px-1.5 py-0.5 text-primary-foreground shadow-sm sm:bg-primary",
                   )}
                 >
                   {day.dayNumber}
@@ -542,6 +602,11 @@ export function RecipeHistoryCalendar({
                 {day.events.length > 1 ? (
                   <span className="absolute bottom-1 right-1 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/90 px-1 text-[10px] font-semibold text-foreground sm:h-6 sm:min-w-6 sm:px-1.5 sm:text-[11px]">
                     {day.events.length}
+                  </span>
+                ) : null}
+                {isToday ? (
+                  <span className="absolute bottom-1 left-1 z-10 rounded-full bg-primary px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] text-primary-foreground shadow-sm sm:hidden">
+                    Today
                   </span>
                 ) : null}
                 {(isSelectionMode && selectedDateSet.has(day.date)) || (cartSelectionMode && cartSelectedDateSet.has(day.date)) ? (
@@ -557,27 +622,11 @@ export function RecipeHistoryCalendar({
                 </div>
               ) : null}
             </button>
-          ))}
+            );
+          })}
         </div>
 
-        <div className="mt-4 space-y-3 sm:hidden">
-          <div className="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-2">
-            <Button asChild variant="outline" className="h-11 w-11 justify-center px-3" size="sm">
-              <AppTransitionLink href={buildHistoryHref(history.previousMonth)} aria-label={`Previous month, ${history.monthLabel}`}>
-                <ChevronLeft className="h-4 w-4" />
-              </AppTransitionLink>
-            </Button>
-            <h2 className="text-center font-[family-name:var(--font-serif)] text-xl font-semibold">
-              {history.monthLabel}
-            </h2>
-            <Button asChild variant="outline" className="h-11 w-11 justify-center px-3" size="sm">
-              <AppTransitionLink href={buildHistoryHref(history.nextMonth)} aria-label={`Next month, ${history.monthLabel}`}>
-                <ChevronRight className="h-4 w-4" />
-              </AppTransitionLink>
-            </Button>
-          </div>
-
-          <div className="flex items-center justify-end gap-2">
+        <div className="mt-4 flex items-center justify-end gap-2 sm:hidden">
             <Button type="button" variant={cartSelectionMode ? "outline" : "default"} size="sm" onClick={() => { if (cartSelectionMode) router.push("/shopping-cart"); else router.push(`/history?month=${encodeURIComponent(history.month)}&cart=select`); }} disabled={isSelectionMode}>
               <ShoppingCart className="h-4 w-4" />{cartSelectionMode ? "Cancel cart" : "Build cart"}
             </Button>
@@ -586,10 +635,11 @@ export function RecipeHistoryCalendar({
                 <AppTransitionLink href={`/history?month=${encodeURIComponent(history.month)}`}>Clear</AppTransitionLink>
               </Button>
             )}
-            <Button type="button" variant={isSelectionMode ? "outline" : "default"} size="sm" onClick={openRecipePicker} disabled={cartSelectionMode}>
-              <CookingPot className="h-4 w-4" />{isSelectionMode ? "Change recipe" : "Find recipe"}
-            </Button>
-          </div>
+            {isSelectionMode ? (
+              <Button type="button" variant="outline" size="sm" onClick={openRecipePicker} disabled={cartSelectionMode}>
+                <CookingPot className="h-4 w-4" />Change recipe
+              </Button>
+            ) : null}
         </div>
       </section>
 

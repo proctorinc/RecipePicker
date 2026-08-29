@@ -62,8 +62,9 @@ export function RecipeImageCard({
       </p>
       <div className="absolute inset-0 bg-gradient-to-t from-primary/80 via-primary/10 to-transparent" />
       {reviewCount > 0 && averageRating !== null ? (
-        <div className="absolute right-3 top-3 flex items-center justify-end gap-1 rounded-full bg-primary/90 px-2 py-1 text-sm text-primary-foreground">
-          {averageRating} <Star className="size-3" />
+        <div className="absolute right-0 top-3 flex items-center gap-1 bg-primary/90 py-1 pl-5 pr-3 text-sm text-amber-100/90 [clip-path:polygon(0_0,100%_0,100%_100%,0_100%,10px_50%)]">
+          <span className="font-bold">{averageRating}</span>
+          <Star className="size-3 fill-current" aria-hidden="true" />
         </div>
       ) : null}
     </div>

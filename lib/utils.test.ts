@@ -76,6 +76,13 @@ describe("calendar helpers", () => {
     expect(getTodayMonthString(now)).toBe("2026-06");
   });
 
+  it("derives today strings in a supplied timezone", () => {
+    const now = new Date("2026-06-11T01:30:00.000Z");
+
+    expect(getTodayDayString(now, "America/Los_Angeles")).toBe("2026-06-10");
+    expect(getTodayDayString(now, "Asia/Tokyo")).toBe("2026-06-11");
+  });
+
   it("shifts months across year boundaries", () => {
     expect(shiftMonth("2026-01", -1)).toBe("2025-12");
     expect(shiftMonth("2026-12", 1)).toBe("2027-01");
