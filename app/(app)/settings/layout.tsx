@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { Settings2 } from "lucide-react";
-import { redirect } from "next/navigation";
 
-import { PageIntro, PageShell } from "@/components/page-shell";
+import { PageShell } from "@/components/page-shell";
 import { SettingsBreadcrumbs } from "@/components/settings-breadcrumbs";
 import { SettingsNav } from "@/components/settings-nav";
+import { Icon } from "@/components/ui/icon";
 import { getCurrentUserAccess } from "@/lib/server/access";
 import { requireHouseholdContext } from "@/lib/server/auth";
 
@@ -20,17 +20,12 @@ export default async function SettingsLayout({
     getCurrentUserAccess(),
   ]);
 
-  if (household.role !== "owner" && !access.isActualAdmin) {
-    redirect("/");
-  }
-
   return (
     <PageShell>
-      <PageIntro
-        title="Settings"
-        icon={Settings2}
-        description="Manage your kitchen, recipes, ingredients, and integrations"
-      />
+      <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <Icon icon={Settings2} size="sm" />
+        <span>Settings</span>
+      </div>
       <SettingsNav
         canManageSettings={household.role === "owner" || access.isActualAdmin}
         isAdmin={access.isActualAdmin}

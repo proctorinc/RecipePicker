@@ -74,6 +74,7 @@ export type RecipeReviewView = {
   ratingValue: number;
   eatenOn: string | null;
   note: string | null;
+  imageUrl: string | null;
   reviewerName: string;
   reviewerClerkUserId: string | null;
   canEdit: boolean;

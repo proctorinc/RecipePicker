@@ -3,6 +3,9 @@ import { IngredientReviewTable } from "@/components/ingredient-review-table";
 import { IngredientCatalog } from "@/components/ingredient-catalog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireHouseholdContext } from "@/lib/server/auth";
+import { requireOwnerOrAdminSettingsAccess } from "@/lib/server/access";
+import { isAuthorizationError } from "@/lib/server/errors";
+import { notFound } from "next/navigation";
 import { getHouseholdAiConnectionStatus } from "@/lib/server/ai-provider";
 import { getIngredientCatalog, getIngredientReviewQueue } from "@/lib/server/queries";
 
@@ -16,6 +19,13 @@ export default async function IngredientSettingsPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  try {
+    await requireOwnerOrAdminSettingsAccess();
+  } catch (error) {
+    if (isAuthorizationError(error)) notFound();
+    throw error;
+  }
+
   const params = (await searchParams) ?? {};
   const rawPage = typeof params.page === "string" ? Number.parseInt(params.page, 10) : 1;
   const requestedPage = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;

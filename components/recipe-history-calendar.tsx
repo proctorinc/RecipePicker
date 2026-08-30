@@ -755,6 +755,11 @@ export function RecipeHistoryCalendar({
                             {event.review.note}
                           </p>
                         ) : null}
+                        {event.review.imageUrl ? (
+                          // Review photos are trusted public Blob URLs.
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={event.review.imageUrl} alt={`Photo from ${event.review.reviewerName}'s review`} className="max-h-56 w-full rounded-[16px] object-cover" />
+                        ) : null}
                         <div className="flex flex-wrap gap-2">
                           {event.review.canEdit ? (
                             <Button

@@ -38,16 +38,14 @@ export function FeedFilters({
 
   return (
     <>
-      <Button
+      <button
         type="button"
-        variant={summary.length > 0 ? "secondary" : "outline"}
-        size="icon"
-        className="h-14 w-14 shrink-0"
+        className="shrink-0 rounded-full p-2 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         aria-label="Open feed filters"
         onClick={() => setOpen(true)}
       >
-        <Icon icon={Filter} size="md" />
-      </Button>
+        <Icon icon={Filter} size="sm" />
+      </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:w-[min(92vw,32rem)]">
           <DialogHeader>

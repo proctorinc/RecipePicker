@@ -163,7 +163,14 @@ export function RecipeContent({
                   Add ingredient
                 </Button>
               </section>
-            ) : ingredients.length > 0 ? <RecipeIngredientList ingredients={ingredients} /> : emptyIngredients}
+            ) : ingredients.length > 0 ? (
+              <RecipeIngredientList
+                ingredients={ingredients}
+                recipeId={recipe.recipeId}
+                recipeTitle={recipe.title}
+                sourceUrl={recipe.sourceUrl}
+              />
+            ) : emptyIngredients}
           </CardContent>
         </Card>
       </div>

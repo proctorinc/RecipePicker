@@ -7,6 +7,7 @@ import { LocalDateTime } from "@/components/local-date-time";
 import { PinterestAutoSyncToggle } from "@/components/pinterest-auto-sync-toggle";
 import { PinterestConnectionSettings } from "@/components/pinterest-connection-settings";
 import { PinterestSyncProgress } from "@/components/pinterest-sync-progress";
+import { PinterestSyncTimeZoneSettings } from "@/components/pinterest-sync-time-zone-settings";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -207,6 +208,9 @@ export default async function PinterestSettingsPage({
           ) : null}
           {canManageAutoSync && connection.status !== "not_connected" ? (
             <PinterestAutoSyncToggle enabled={connection.autoSyncEnabled} />
+          ) : null}
+          {canManagePinterest && connection.status !== "not_connected" ? (
+            <PinterestSyncTimeZoneSettings timeZone={household.householdTimeZone} />
           ) : null}
           {canForcePinterestResync ? (
             <ActionForm action={forcePinterestResyncAction} buttonVariant="secondary">

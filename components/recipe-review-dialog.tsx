@@ -72,7 +72,10 @@ export function RecipeReviewDialog({
   const [eatenOn, setEatenOn] = useState(defaultEatenOn);
   const dateIncluded = Boolean(eatenOn) || Boolean(eventId);
   const [note, setNote] = useState(review?.note ?? "");
+  const [removeImage, setRemoveImage] = useState(false);
+  const [selectedImageName, setSelectedImageName] = useState("");
   const dateInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) {
@@ -82,6 +85,9 @@ export function RecipeReviewDialog({
     setRatingValue(defaultRating);
     setEatenOn(defaultEatenOn);
     setNote(review?.note ?? "");
+    setRemoveImage(false);
+    setSelectedImageName("");
+    if (imageInputRef.current) imageInputRef.current.value = "";
   }, [defaultEatenOn, defaultRating, open, review?.note]);
 
   useEffect(() => {
@@ -141,6 +147,7 @@ export function RecipeReviewDialog({
             <input type="hidden" name="reviewId" value={review.reviewId} />
           ) : null}
           <input type="hidden" name="ratingValue" value={ratingValue} />
+          {removeImage ? <input type="hidden" name="removeImage" value="true" /> : null}
 
           <div className="space-y-2">
             <p className="text-sm font-medium text-foreground">Rating</p>
@@ -214,6 +221,51 @@ export function RecipeReviewDialog({
               insights later!
             </p>
           </label>
+
+          <div className="space-y-2">
+            <div>
+              <p className="text-sm font-medium text-foreground">Photo</p>
+              <p className="text-xs text-muted-foreground">Optional — take one now or choose one from your library.</p>
+            </div>
+            {review?.imageUrl && !removeImage && !selectedImageName ? (
+              <div className="overflow-hidden rounded-[20px] border border-border/60 bg-secondary/20">
+                {/* Review photos are trusted public Blob URLs. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={review.imageUrl} alt="Current review photo" className="max-h-56 w-full object-cover" />
+              </div>
+            ) : null}
+            <Input
+              ref={imageInputRef}
+              type="file"
+              name="image"
+              accept="image/jpeg,image/png,image/webp"
+              capture="environment"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                setSelectedImageName(file?.name ?? "");
+                if (file) setRemoveImage(false);
+              }}
+            />
+            {selectedImageName ? <p className="text-xs text-muted-foreground">Selected: {selectedImageName}</p> : null}
+            {review?.imageUrl && !selectedImageName && !removeImage ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setRemoveImage(true);
+                  if (imageInputRef.current) imageInputRef.current.value = "";
+                }}
+              >
+                Remove photo
+              </Button>
+            ) : null}
+            {removeImage ? (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setRemoveImage(false)}>
+                Keep current photo
+              </Button>
+            ) : null}
+          </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex gap-3">

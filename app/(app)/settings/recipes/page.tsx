@@ -1,6 +1,9 @@
 import { RecipeOpsTable } from "@/components/recipe-ops-table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireOwnerOrAdminSettingsAccess } from "@/lib/server/access";
 import { getBoardSyncOptions, getRecipeOpsList, getRecipeParseJobSummaries } from "@/lib/server/queries";
+import { isAuthorizationError } from "@/lib/server/errors";
+import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +12,13 @@ export default async function RecipeSettingsPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  try {
+    await requireOwnerOrAdminSettingsAccess();
+  } catch (error) {
+    if (isAuthorizationError(error)) notFound();
+    throw error;
+  }
+
   const params = (await searchParams) ?? {};
   const query = typeof params.q === "string" ? params.q : "";
   const [items, boards, jobs] = await Promise.all([

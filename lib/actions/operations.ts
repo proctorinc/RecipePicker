@@ -710,6 +710,8 @@ export async function revokeKitchenInviteAction(inviteToken: string): Promise<Ac
 
 const KITCHEN_LOGO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_KITCHEN_LOGO_BYTES = 5 * 1024 * 1024;
+const REVIEW_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_REVIEW_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export const updateKitchenNameAction = withActionLogging(
   "action.update_kitchen_name",
@@ -798,6 +800,24 @@ export async function uploadKitchenLogoAction(formData: FormData): Promise<Actio
   } catch (error) {
     return toErrorState(error, "Unable to upload the kitchen logo.");
   }
+}
+
+async function uploadReviewImage(
+  image: File,
+  householdId: string,
+) {
+  const extension = image.type === "image/png" ? "png" : image.type === "image/webp" ? "webp" : "jpg";
+  return put(
+    `reviews/${householdId}/review-${crypto.randomUUID()}.${extension}`,
+    Buffer.from(await image.arrayBuffer()),
+    {
+      access: "public",
+      contentType: image.type,
+      addRandomSuffix: false,
+      token: process.env.BLOB_READ_WRITE_TOKEN ?? process.env.RECIPES_BLOB_READ_WRITE_TOKEN,
+      storeId: process.env.BLOB_STORE_ID ?? process.env.RECIPES_BLOB_STORE_ID,
+    },
+  );
 }
 
 export const disconnectPinterestAction = withActionLogging(
@@ -2462,6 +2482,8 @@ export const createRecipeReviewAction = withActionLogging(
   const ratingValue = parseRatingValue(formData.get("ratingValue"));
   const eatenOn = toOptionalString(formData.get("eatenOn"));
   const note = toOptionalString(formData.get("note"));
+  const submittedImage = formData.get("image");
+  const image = submittedImage instanceof File && submittedImage.size > 0 ? submittedImage : null;
 
   if (!recipeId) {
     return { status: "error", message: "Recipe ID is required." };
@@ -2473,6 +2495,10 @@ export const createRecipeReviewAction = withActionLogging(
 
   if (eatenOn && !isValidDayString(eatenOn)) {
     return { status: "error", message: "Choose the date you ate this meal." };
+  }
+
+  if (image && (!REVIEW_IMAGE_TYPES.has(image.type) || image.size > MAX_REVIEW_IMAGE_BYTES)) {
+    return { status: "error", message: "Use a JPG, PNG, or WebP photo no larger than 10 MB." };
   }
 
   try {
@@ -2532,6 +2558,10 @@ export const createRecipeReviewAction = withActionLogging(
         return { status: "error", message: "Planned recipes cannot be reviewed yet." };
       }
 
+      const imageUrl = image
+        ? (await uploadReviewImage(image, context.householdId)).url
+        : null;
+
       let resolvedEventId = linkedEvent?.eventId ?? null;
 
       if (!resolvedEventId && eatenOn) {
@@ -2554,6 +2584,7 @@ export const createRecipeReviewAction = withActionLogging(
           ratingValue,
           eatenOn: resolvedEventId ? null : eatenOn,
           note,
+          imageUrl,
           createdAt: now,
           updatedAt: now,
         })
@@ -2593,6 +2624,9 @@ export const updateRecipeReviewAction = withActionLogging(
   const ratingValue = parseRatingValue(formData.get("ratingValue"));
   const eatenOn = toOptionalString(formData.get("eatenOn"));
   const note = toOptionalString(formData.get("note"));
+  const submittedImage = formData.get("image");
+  const image = submittedImage instanceof File && submittedImage.size > 0 ? submittedImage : null;
+  const removeImage = formData.get("removeImage") === "true";
 
   if (!reviewId) {
     return { status: "error", message: "Review ID is required." };
@@ -2604,6 +2638,10 @@ export const updateRecipeReviewAction = withActionLogging(
 
   if (eatenOn && !isValidDayString(eatenOn)) {
     return { status: "error", message: "Choose the date you ate this meal." };
+  }
+
+  if (image && (!REVIEW_IMAGE_TYPES.has(image.type) || image.size > MAX_REVIEW_IMAGE_BYTES)) {
+    return { status: "error", message: "Use a JPG, PNG, or WebP photo no larger than 10 MB." };
   }
 
   try {
@@ -2643,6 +2681,12 @@ export const updateRecipeReviewAction = withActionLogging(
         return { status: "error", message: "Planned recipes cannot be reviewed yet." };
       }
 
+      const imageUrl = image
+        ? (await uploadReviewImage(image, context.householdId)).url
+        : removeImage
+          ? null
+          : review.imageUrl;
+
       let nextEventId = linkedEvent?.eventId ?? review.eventId ?? null;
 
       if (!nextEventId && eatenOn) {
@@ -2661,6 +2705,7 @@ export const updateRecipeReviewAction = withActionLogging(
           ratingValue,
           eatenOn: nextEventId ? null : eatenOn,
           note,
+          imageUrl,
           updatedAt: new Date().toISOString(),
         })
         .where(eq(householdRecipeReviews.reviewId, reviewId))

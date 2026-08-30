@@ -42,6 +42,13 @@ export default async function SettingsPage() {
   const ingredientAttentionCount = ingredientQueue.totalCount;
   const syncedBoardCount = boards.filter((board) => board.syncEnabled).length;
   const overviewItems = [
+    {
+      title: "My profile",
+      description: "Update your photo, name, email address, and account security.",
+      href: "/settings/profile",
+      ctaLabel: "Edit profile",
+      emphasized: true,
+    },
     ...(canManageIntegrations
       ? [
           {
@@ -121,13 +128,15 @@ export default async function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
-          <OverviewItem
-            title="My Kitchen"
-            description="Update kitchen details and invite cooks"
-            href="/settings/members"
-            ctaLabel="View"
-            emphasized={true}
-          />
+          {canManageIntegrations ? (
+            <OverviewItem
+              title="My Kitchen"
+              description="Update kitchen details and invite cooks"
+              href="/settings/members"
+              ctaLabel="View"
+              emphasized={true}
+            />
+          ) : null}
           {overviewItems.length > 0 &&
             overviewItems.map((item) => (
               <OverviewItem

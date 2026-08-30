@@ -63,19 +63,45 @@ export function IngredientReviewTable({
         {!aiEnabled ? <p className="mt-3 text-sm text-muted-foreground">AI parsing needs an active shared connection. <Link className="underline underline-offset-4" href="/settings/ai">Set up AI</Link></p> : null}
         {isRefreshing ? <p className="mt-3 text-sm text-muted-foreground">Loading more ingredients…</p> : null}
       </div>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-[min(94vw,44rem)] max-h-[88vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Review ingredient {index + 1} of {items.length}</DialogTitle>
-            <DialogDescription>{item.recipeTitle}</DialogDescription>
-          </DialogHeader>
-          <IngredientReviewForm item={item} onDone={() => {
-            if (index + 1 < items.length) setIndex(index + 1);
-            else { setOpen(false); startTransition(() => router.refresh()); }
-          }} />
-        </DialogContent>
-      </Dialog>
+      <IngredientReviewDialog
+        item={item}
+        open={open}
+        onOpenChange={setOpen}
+        title={`Review ingredient ${index + 1} of ${items.length}`}
+        onDone={() => {
+          if (index + 1 < items.length) setIndex(index + 1);
+          else { setOpen(false); startTransition(() => router.refresh()); }
+        }}
+      />
     </>
+  );
+}
+
+export function IngredientReviewDialog({
+  item,
+  open,
+  onOpenChange,
+  title = "Review ingredient",
+  onDone,
+}: {
+  item: IngredientReviewItemView | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title?: string;
+  onDone: () => void;
+}) {
+  if (!item) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[min(94vw,44rem)] max-h-[88vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{item.recipeTitle}</DialogDescription>
+        </DialogHeader>
+        <IngredientReviewForm item={item} onDone={onDone} />
+      </DialogContent>
+    </Dialog>
   );
 }
 

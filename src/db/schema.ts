@@ -318,6 +318,7 @@ export const householdRecipeReviews = sqliteTable(
     ratingValue: real("rating_value").notNull(),
     eatenOn: text("eaten_on"),
     note: text("note"),
+    imageUrl: text("image_url"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

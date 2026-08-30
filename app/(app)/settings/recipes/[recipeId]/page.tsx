@@ -10,11 +10,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { extractRecipeAction, rerunRecipeAction } from "@/lib/actions/operations";
 import { getRecipeOpsDetail } from "@/lib/server/queries";
+import { requireOwnerOrAdminSettingsAccess } from "@/lib/server/access";
+import { isAuthorizationError } from "@/lib/server/errors";
 import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function RecipeOpsDetailPage({ params }: { params: Promise<{ recipeId: string }> }) {
+  try {
+    await requireOwnerOrAdminSettingsAccess();
+  } catch (error) {
+    if (isAuthorizationError(error)) notFound();
+    throw error;
+  }
+
   const { recipeId } = await params;
   const detail = await getRecipeOpsDetail(recipeId);
 

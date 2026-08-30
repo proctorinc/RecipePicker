@@ -121,6 +121,11 @@ export function RecipeReviewLauncher({
                                   {review.note}
                                 </p>
                               ) : null}
+                              {review.imageUrl ? (
+                                // Review photos are trusted public Blob URLs.
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={review.imageUrl} alt={`Photo from ${review.reviewerName}'s review`} className="max-h-72 w-full rounded-[18px] object-cover" />
+                              ) : null}
                             </div>
                             {review.canEdit || review.canDelete ? (
                               <div className="flex gap-2">

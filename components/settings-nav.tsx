@@ -5,11 +5,11 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const items = [
-  { href: "/settings", label: "Overview" },
-  { href: "/settings/members", label: "Kitchen" },
+  { href: "/settings/profile", label: "My profile" },
 ];
 
 const elevatedItems = [
+  { href: "/settings/members", label: "Kitchen" },
   { href: "/settings/recipes", label: "Recipes" },
   { href: "/settings/ingredients", label: "Ingredients" },
   { href: "/settings/ai", label: "AI" },

@@ -23,7 +23,6 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   updateKitchenNameAction,
-  updateKitchenTimeZoneAction,
   uploadKitchenLogoAction,
 } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
@@ -33,19 +32,15 @@ const initialState: ActionState = { status: "idle", message: "" };
 export function KitchenSettingsForm({
   name,
   logoUrl,
-  timeZone,
 }: {
   name: string;
   logoUrl: string | null;
-  timeZone: string;
 }) {
   const [state, nameAction] = useActionState(
     updateKitchenNameAction,
     initialState,
   );
   const [isNameDialogOpen, setIsNameDialogOpen] = useState(false);
-  const [timeZoneState, timeZoneAction] = useActionState(updateKitchenTimeZoneAction, initialState);
-  const [selectedTimeZone, setSelectedTimeZone] = useState(timeZone);
   const [isUploading, startUpload] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -59,23 +54,6 @@ export function KitchenSettingsForm({
       toast.error(state.message);
     }
   }, [router, state]);
-
-  useEffect(() => {
-    if (timeZoneState.status === "success") {
-      toast.success(timeZoneState.message);
-      router.refresh();
-    } else if (timeZoneState.status === "error") {
-      toast.error(timeZoneState.message);
-    }
-  }, [router, timeZoneState]);
-
-  useEffect(() => {
-    if (timeZone === "UTC") {
-      setSelectedTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
-    } else {
-      setSelectedTimeZone(timeZone);
-    }
-  }, [timeZone]);
 
   function uploadLogo(file: File | null) {
     if (!file) return;
@@ -168,28 +146,6 @@ export function KitchenSettingsForm({
           </form>
         </DialogContent>
       </Dialog>
-      <form action={timeZoneAction} className="mt-5 flex w-full max-w-sm items-end gap-2 text-left">
-        <label className="flex min-w-0 flex-1 text-sm font-medium">
-          <span className="sr-only">Kitchen time zone</span>
-          <select
-            name="timeZone"
-            value={selectedTimeZone}
-            onChange={(event) => setSelectedTimeZone(event.target.value)}
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-          >
-            {getTimeZones().map((zone) => <option key={zone} value={zone}>{zone}</option>)}
-          </select>
-        </label>
-        <Button type="submit" size="sm">Save time zone</Button>
-      </form>
-      <p className="mt-2 text-xs text-muted-foreground">Nightly Pinterest syncs start at midnight in this time zone.</p>
     </div>
   );
-}
-
-function getTimeZones() {
-  const supported = typeof Intl.supportedValuesOf === "function"
-    ? Intl.supportedValuesOf("timeZone")
-    : [];
-  return ["UTC", ...supported.filter((zone) => zone !== "UTC")];
 }

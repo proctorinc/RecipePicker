@@ -18,18 +18,29 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getHouseholdInviteUrl } from "@/lib/household-invite-url";
-import { requireHouseholdContext } from "@/lib/server/auth";
+import { requireOwnerOrAdminSettingsAccess } from "@/lib/server/access";
+import { isAuthorizationError } from "@/lib/server/errors";
 import { getHouseholdMembersView, getLatestInvite } from "@/lib/server/queries";
 import { formatDate } from "@/lib/utils";
+import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default async function MembersPage() {
-  const [context, members, latestInvite] = await Promise.all([
-    requireHouseholdContext(),
+  let settingsAccess: Awaited<ReturnType<typeof requireOwnerOrAdminSettingsAccess>>;
+
+  try {
+    settingsAccess = await requireOwnerOrAdminSettingsAccess();
+  } catch (error) {
+    if (isAuthorizationError(error)) notFound();
+    throw error;
+  }
+
+  const [members, latestInvite] = await Promise.all([
     getHouseholdMembersView(),
     getLatestInvite(),
   ]);
+  const context = settingsAccess.household;
   const inviteUrl = latestInvite
     ? getHouseholdInviteUrl(latestInvite.inviteToken)
     : null;
@@ -41,7 +52,6 @@ export default async function MembersPage() {
           <KitchenSettingsForm
             name={context.householdName}
             logoUrl={context.householdLogoUrl}
-            timeZone={context.householdTimeZone}
           />
         </CardContent>
       </Card>

@@ -162,6 +162,29 @@ export async function requireOwnerOrAdminIntegrationAccess() {
   };
 }
 
+/** Restricts kitchen-wide operational settings while allowing personal settings for every cook. */
+export async function requireOwnerOrAdminSettingsAccess() {
+  const [household, access] = await Promise.all([
+    requireHouseholdContext(),
+    getCurrentUserAccess(),
+  ]);
+
+  if (household.role !== "owner" && !access.isActualAdmin) {
+    logWarn("auth.settings_view_denied", {
+      target: { householdId: household.householdId },
+      result: {
+        householdRole: household.role,
+        actualAppRole: access.actualAppRole,
+      },
+    });
+    throw new AuthorizationError(
+      "You do not have permission to view these kitchen settings.",
+    );
+  }
+
+  return { household, access };
+}
+
 export function canConfigureAi(args: {
   subscriptionTier: SubscriptionTier;
   householdRole: "owner" | "member";

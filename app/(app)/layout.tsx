@@ -29,8 +29,8 @@ export default async function AuthenticatedAppLayout({
       householdLogoUrl={household.householdLogoUrl}
       cooks={cooks}
       showAiPicker={access.isPremium}
-      showSettings={household.role === "owner" || access.isActualAdmin}
-      mobileProfileLinksToSettings={household.role === "owner"}
+      showSettings
+      mobileProfileLinksToSettings
       topContent={<PinterestSyncIndicator initialRun={activePinterestSync ?? null} />}
     >
       {children}

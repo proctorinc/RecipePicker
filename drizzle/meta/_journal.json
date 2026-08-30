@@ -162,6 +162,13 @@
       "when": 1788043592793,
       "tag": "0023_steep_ben_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1788049897676,
+      "tag": "0024_hot_silver_samurai",
+      "breakpoints": true
     }
   ]
 }

@@ -150,7 +150,7 @@ export async function AppShell({
         </div>
         </MobileAwareAppHeader>
 
-        <main className="mx-auto flex w-full max-w-7xl flex-col px-2 pb-24 pt-12 sm:px-6 md:pb-4 md:pt-[5.75rem] lg:px-8">
+        <main className="mx-auto flex w-full max-w-7xl flex-col px-2 pb-24 pt-16 sm:px-6 md:pb-4 md:pt-24 lg:px-8">
         {topContent ? (
           <div className="w-screen self-center">{topContent}</div>
         ) : null}

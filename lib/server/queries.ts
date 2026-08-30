@@ -2707,6 +2707,7 @@ function toRecipeReviewView(
     ratingValue: number;
     eatenOn: string | null;
     note: string | null;
+    imageUrl: string | null;
     event?: {
       eventId: string;
       date: string;
@@ -2753,6 +2754,7 @@ function toRecipeReviewView(
     recipePreviewImageUrl: recipeImageSources.previewImageUrl,
     ratingValue: review.ratingValue,
     eatenOn: review.event?.date ?? review.eatenOn,
+    imageUrl: review.imageUrl,
     note: review.note,
     reviewerName: getReviewerName(review.reviewedByClerkUserId, reviewerNames),
     reviewerClerkUserId: review.reviewedByClerkUserId,
@@ -2834,6 +2836,7 @@ function toRecipeHistoryEventView(
       ratingValue: number;
       eatenOn: string | null;
       note: string | null;
+      imageUrl: string | null;
     } | null;
   },
   reviewerNames: Map<string, string>,
