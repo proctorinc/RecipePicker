@@ -27,10 +27,10 @@ export function MobileProfileButton({
 
   return (
     <AppTransitionLink
-      href="/settings"
+      href="/settings/profile"
       prefetch
-      aria-label="Settings"
-      title="Settings"
+      aria-label="My profile"
+      title="My profile"
       className="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full bg-white/55 transition hover:bg-secondary/80"
     >
       {isLoaded && user ? (

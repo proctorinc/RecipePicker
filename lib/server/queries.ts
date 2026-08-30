@@ -382,6 +382,7 @@ export async function getRecipeDetail(
         row.pin.description ??
         row.recipeInstructions?.description ??
         null,
+      author: row.recipeInstructions?.author ?? null,
       siteName: row.recipeInstructions?.siteName ?? null,
       sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link,
       status,
@@ -1041,6 +1042,7 @@ export async function getPinterestSyncRunProgress(syncRunId: string) {
       columns: {
         syncRunId: true,
         status: true,
+        trigger: true,
         startedAt: true,
         completedAt: true,
         expectedPinCount: true,
@@ -1068,6 +1070,7 @@ export async function getActivePinterestSyncRunProgress() {
       columns: {
         syncRunId: true,
         status: true,
+        trigger: true,
         startedAt: true,
         completedAt: true,
         expectedPinCount: true,

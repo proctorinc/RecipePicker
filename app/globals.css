@@ -78,6 +78,16 @@ a {
   }
 }
 
+@keyframes pinterest-sync-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(300%);
+  }
+}
+
 .status-activity-spinner {
   animation: spin 0.9s linear infinite;
 }
@@ -96,7 +106,9 @@ a {
 
 @media (prefers-reduced-motion: reduce) {
   .status-activity-spinner,
-  .status-activity-dots > span {
+  .status-activity-dots > span,
+  [class*="pinterest-sync-progress"],
+  [class*="pinterest-sync-indicator"] {
     animation: none;
   }
 }

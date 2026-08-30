@@ -314,6 +314,7 @@ async function extractRecipeRow(
         extractionResult,
       );
       throwIfAborted(signal);
+      await applyParsedTitleFallback(db, row, extractionResult.recipe.title);
       await touchRecipeUpdatedAt(db, row.recipeId);
       if (reviewCount === 0 && !extractionResult.lowConfidence) {
         await clearRecipeFlag(db, row.recipeId);
@@ -345,6 +346,36 @@ async function extractRecipeRow(
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${stage}: ${message}`, { cause: error });
   }
+}
+
+/**
+ * Pinterest frequently omits a pin title. In that case the title extracted
+ * from the recipe page is the best automatic title available. Never replace a
+ * Pinterest title or a title someone explicitly edited in the app.
+ */
+async function applyParsedTitleFallback(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  row: RecipeExtractionRow,
+  parsedTitle: string | null,
+) {
+  const normalizedParsedTitle = parsedTitle?.trim();
+  if (
+    !normalizedParsedTitle ||
+    hasText(row.pin.title) ||
+    row.titleOverridden ||
+    hasText(row.title)
+  ) {
+    return;
+  }
+
+  await db.update(householdRecipes)
+    .set({ title: normalizedParsedTitle })
+    .where(eq(householdRecipes.recipeId, row.recipeId))
+    .run();
+}
+
+function hasText(value: string | null | undefined) {
+  return Boolean(value?.trim());
 }
 
 function logRecipeAttempt(target: Record<string, string>, attempt: ExtractionAttempt) {

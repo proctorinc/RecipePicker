@@ -158,6 +158,7 @@ export type RecipeDetailView = {
   imageUrl: string | null;
   previewImageUrl: string | null;
   description: string | null;
+  author: string | null;
   siteName: string | null;
   sourceUrl: string | null;
   status: PinStatus;

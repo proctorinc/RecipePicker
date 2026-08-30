@@ -56,6 +56,7 @@ export default async function RecipePage({
         description={recipe.description}
         tags={recipe.tags}
         availableTags={availableTags}
+        byline={<RecipeByline author={recipe.author} siteName={recipe.siteName} />}
         content={
           <RecipeContent
             recipe={recipe}
@@ -207,6 +208,37 @@ export default async function RecipePage({
         </Card>
       )}
     </PageShell>
+  );
+}
+
+function RecipeByline({
+  author,
+  siteName,
+}: {
+  author: string | null;
+  siteName: string | null;
+}) {
+  if (!author && !siteName) {
+    return null;
+  }
+
+  const showsDistinctSiteName = Boolean(
+    siteName && author && siteName.localeCompare(author, undefined, { sensitivity: "accent" }) !== 0,
+  );
+
+  return (
+    <p className="px-4 pt-4 text-sm text-muted-foreground sm:px-0">
+      {author ? (
+        <>
+          By <strong><em>{author}</em></strong>
+        </>
+      ) : (
+        <>From <strong><em>{siteName}</em></strong></>
+      )}
+      {showsDistinctSiteName ? (
+        <> · From <strong><em>{siteName}</em></strong></>
+      ) : null}
+    </p>
   );
 }
 

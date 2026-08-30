@@ -2,7 +2,7 @@ import { loadAppEnvironment } from "@/src/env";
 
 loadAppEnvironment();
 
-const DEFAULT_PAGE_SIZE = 250;
+export const PINTEREST_PINS_PAGE_SIZE = 250;
 
 export type PinterestBoard = {
   id: string;
@@ -69,7 +69,7 @@ export function getApiBaseUrl(): string {
 
 export async function fetchPinterestPage<T>(pathname: string, accessToken: string, bookmark?: string): Promise<PinterestPage<T>> {
   const url = new URL(`${getApiBaseUrl().replace(/\/$/, "")}${pathname}`);
-  url.searchParams.set("page_size", String(DEFAULT_PAGE_SIZE));
+  url.searchParams.set("page_size", String(PINTEREST_PINS_PAGE_SIZE));
 
   if (bookmark) {
     url.searchParams.set("bookmark", bookmark);

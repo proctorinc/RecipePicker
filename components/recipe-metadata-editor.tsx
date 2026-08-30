@@ -54,6 +54,7 @@ type RecipeMetadataEditorProps = {
   tags: Array<{ tagId: string; name: string }>;
   availableTags: Array<{ tagId: string; name: string }>;
   children: React.ReactNode;
+  byline?: React.ReactNode;
   topContent?: React.ReactNode;
   content?: React.ReactNode;
   editBanner?: React.ReactNode;
@@ -66,6 +67,7 @@ export function RecipeMetadataEditor({
   tags,
   availableTags,
   children,
+  byline,
   topContent,
   content,
   editBanner,
@@ -242,6 +244,7 @@ export function RecipeMetadataEditor({
         {editBanner}
 
         <div className="mx-auto w-full max-w-4xl space-y-2">
+          {byline}
           <RecipeTags
             recipeId={recipeId}
             initialTags={tags}

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { ActivityIndicator } from "@/components/activity-indicator";
+import { Icon } from "@/components/ui/icon";
 import {
   formatPinterestSyncTimeRemaining,
   getPinterestSyncProgressDisplay,
@@ -73,6 +74,15 @@ export function PinterestSyncProgress({ run }: { run: SyncProgressRun }) {
         <p className="mt-2 text-muted-foreground">{display.processedPinCount} pins processed</p>
       ) : null}
 
+      {display.state === "indeterminate" ? (
+        <div className="mt-2 space-y-2">
+          <div aria-label="Pinterest sync progress" aria-valuetext="In progress" className="h-2 overflow-hidden rounded-full bg-secondary" role="progressbar">
+            <div className="h-full w-1/3 rounded-full bg-primary animate-[pinterest-sync-progress_1.5s_ease-in-out_infinite]" />
+          </div>
+          <p className="text-muted-foreground">{display.timeRemainingMs === null ? "Estimating time remaining…" : `Estimated time remaining: ${formatPinterestSyncTimeRemaining(display.timeRemainingMs)}`}</p>
+        </div>
+      ) : null}
+
       {display.state === "normal" ? (
         <div className="mt-2 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
@@ -108,10 +118,10 @@ function ProgressInfo() {
   return (
     <span className="group relative inline-flex">
       <button aria-label="About Pinterest sync progress" className="rounded-full text-muted-foreground outline-offset-2 hover:text-foreground focus-visible:outline" type="button">
-        <Info aria-hidden="true" className="h-3.5 w-3.5" />
+        <Icon aria-hidden="true" icon={Info} size="xs" />
       </button>
       <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-64 -translate-x-1/2 rounded-lg bg-foreground px-3 py-2 text-xs text-background opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" role="tooltip">
-        Pin totals and time remaining are approximate and are based on the most recent successful sync of these boards.
+        Pin totals and time remaining are approximate and are based on the most recent successful sync of this type.
       </span>
     </span>
   );

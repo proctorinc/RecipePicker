@@ -1,11 +1,13 @@
 export type PinterestSyncProgressRun = {
   status: string;
+  trigger: string;
   startedAt: string;
   expectedPinCount: number | null;
   processedPinCount: number;
 };
 
 export type PinterestSyncProgressDisplay =
+  | { state: "indeterminate"; timeRemainingMs: number | null }
   | { state: "count_only"; processedPinCount: number }
   | { state: "normal"; processedPinCount: number; expectedPinCount: number; percentComplete: number; timeRemainingMs: number | null }
   | { state: "overtime"; processedPinCount: number };
@@ -15,6 +17,14 @@ export function getPinterestSyncProgressDisplay(
   now = Date.now(),
 ): PinterestSyncProgressDisplay {
   const expectedPinCount = run.expectedPinCount;
+  const elapsedMs = Math.max(0, now - new Date(run.startedAt).getTime());
+  if (run.trigger === "auto_new_pins") {
+    const timeRemainingMs = run.processedPinCount === 0 || expectedPinCount == null || expectedPinCount <= 0
+      ? null
+      : Math.max(0, Math.ceil((elapsedMs / run.processedPinCount) * (expectedPinCount - run.processedPinCount)));
+    return { state: "indeterminate", timeRemainingMs };
+  }
+
   if (expectedPinCount == null || expectedPinCount <= 0) {
     return { state: "count_only", processedPinCount: run.processedPinCount };
   }
@@ -23,7 +33,6 @@ export function getPinterestSyncProgressDisplay(
     return { state: "overtime", processedPinCount: run.processedPinCount };
   }
 
-  const elapsedMs = Math.max(0, now - new Date(run.startedAt).getTime());
   const remainingPinCount = expectedPinCount - run.processedPinCount;
   const timeRemainingMs = run.processedPinCount === 0
     ? null

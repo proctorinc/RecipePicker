@@ -44,20 +44,18 @@ export function HomeFeedShell({
   header,
 }: HomeFeedShellProps) {
   const normalizedInitialQuery = initialQuery.trim();
-  const initialCachedFeed = getCachedFeed(
-    getFeedCacheKey(normalizedInitialQuery, tagId, initialFilters),
-  );
   const [inputValue, setInputValue] = useState(normalizedInitialQuery);
   const [activeQuery, setActiveQuery] = useState(normalizedInitialQuery);
   const [activeFilters, setActiveFilters] = useState(initialFilters);
-  const [page, setPage] = useState(() => initialCachedFeed?.page ?? initialPage);
+  const [page, setPage] = useState(initialPage);
   const [isSearching, setIsSearching] = useState(false);
   const searchAbortRef = useRef<AbortController | null>(null);
+  const restoredPageRef = useRef<FeedPinsPage | null>(null);
   const cacheKey = getFeedCacheKey(activeQuery, tagId, activeFilters);
   const cachedFeed = getCachedFeed(cacheKey);
   const filterSummary = getFeedFilterSummary(activeFilters);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const nextCachedFeed = getCachedFeed(
       getFeedCacheKey(normalizedInitialQuery, tagId, initialFilters),
     );
@@ -67,6 +65,7 @@ export function HomeFeedShell({
     setInputValue(normalizedInitialQuery);
     setActiveQuery(normalizedInitialQuery);
     setActiveFilters(initialFilters);
+    restoredPageRef.current = nextCachedFeed?.page ?? null;
     setPage(nextCachedFeed?.page ?? initialPage);
     setIsSearching(false);
   }, [initialFilters, initialPage, normalizedInitialQuery, tagId]);
@@ -140,6 +139,14 @@ export function HomeFeedShell({
   }, [initialFilters, normalizedInitialQuery, tagId]);
 
   useEffect(() => {
+    if (restoredPageRef.current) {
+      if (page !== restoredPageRef.current) {
+        return;
+      }
+
+      restoredPageRef.current = null;
+    }
+
     cacheFeedPage(getFeedCacheKey(activeQuery, tagId, activeFilters), page);
   }, [activeFilters, activeQuery, page, tagId]);
 

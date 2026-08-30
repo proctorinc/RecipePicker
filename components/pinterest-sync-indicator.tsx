@@ -60,10 +60,16 @@ export function PinterestSyncIndicator({ initialRun }: { initialRun: SyncRun | n
   const display = getPinterestSyncProgressDisplay(run);
   const expectedPinCount = display.state === "normal" ? display.expectedPinCount : null;
   const percentComplete = display.state === "normal" ? display.percentComplete : 0;
-  const timeRemaining = display.state === "normal" && display.timeRemainingMs !== null
-    ? formatCompactTimeRemaining(display.timeRemainingMs)
+  const timeRemainingMs = display.state === "normal" || display.state === "indeterminate"
+    ? display.timeRemainingMs
     : null;
-  const progressLabel = expectedPinCount === null
+  const timeRemaining = timeRemainingMs !== null
+    ? formatCompactTimeRemaining(timeRemainingMs)
+    : null;
+  const isIndeterminate = display.state === "indeterminate";
+  const progressLabel = isIndeterminate
+    ? "New pins are syncing"
+    : expectedPinCount === null
     ? `${display.processedPinCount} pins synced`
     : `${display.processedPinCount} / ${expectedPinCount} pins synced (${percentComplete}%)`;
 
@@ -80,10 +86,10 @@ export function PinterestSyncIndicator({ initialRun }: { initialRun: SyncRun | n
           onMouseLeave={() => setTooltipOpen(false)}
           type="button"
         >
-          <span className="absolute inset-y-0 left-0 bg-primary-foreground/20 transition-[width] duration-300" style={{ width: `${percentComplete}%` }} />
+          {isIndeterminate ? <span className="absolute inset-y-0 left-0 w-1/3 bg-primary-foreground/20 animate-[pinterest-sync-indicator_1.5s_ease-in-out_infinite]" /> : <span className="absolute inset-y-0 left-0 bg-primary-foreground/20 transition-[width] duration-300" style={{ width: `${percentComplete}%` }} />}
           <span className="relative flex items-center gap-1 drop-shadow-sm">
             <span aria-hidden="true" className="flex h-3 w-3 items-center justify-center rounded-full bg-primary-foreground text-[9px] font-bold leading-none text-primary">P</span>
-            <span>{expectedPinCount === null ? `${display.processedPinCount} pins` : `${percentComplete}% · ${display.processedPinCount}/${expectedPinCount}`}</span>
+            <span>{isIndeterminate ? "Syncing new pins" : expectedPinCount === null ? `${display.processedPinCount} pins` : `${percentComplete}% · ${display.processedPinCount}/${expectedPinCount}`}</span>
           </span>
           {timeRemaining ? <span className="absolute right-2 text-primary-foreground/60">{timeRemaining}</span> : null}
           <span

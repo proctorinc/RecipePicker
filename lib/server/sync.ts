@@ -29,6 +29,7 @@ import {
   listRemotePinterestBoards,
   updatePinterestConnectionSyncStatus,
 } from "@/lib/server/pinterest";
+import { PINTEREST_PINS_PAGE_SIZE } from "@/src/pinterest-api";
 
 export const PINTEREST_SYNC_LEASE_MS = 10 * 60 * 1000;
 const PINTEREST_SYNC_PROGRESS_BATCH_SIZE = 25;
@@ -46,6 +47,7 @@ type SyncBoardOptions = {
 };
 
 export type PinterestSyncTrigger = "manual" | "auto_feed_load" | "auto_new_pins" | "nightly_full" | "force";
+type PinterestSyncType = "new_pins" | "full";
 
 type PinterestSyncRunContext = {
   syncRunId: string;
@@ -100,6 +102,16 @@ export function formatPinterestSyncTrigger(trigger: string) {
   if (trigger === "auto_feed_load") return "Automatic (legacy)";
   if (trigger === "force") return "Force resync";
   return "Manual";
+}
+
+function getPinterestSyncType(trigger: PinterestSyncTrigger): PinterestSyncType {
+  return trigger === "auto_new_pins" ? "new_pins" : "full";
+}
+
+function getPinterestSyncTriggersForType(type: PinterestSyncType): PinterestSyncTrigger[] {
+  return type === "new_pins"
+    ? ["auto_new_pins"]
+    : ["manual", "auto_feed_load", "nightly_full", "force"];
 }
 
 function getPinterestSectionName(pin: Awaited<ReturnType<typeof fetchAllPins>>[number]) {
@@ -284,10 +296,16 @@ export async function runClaimedPinterestAutoSync(args: {
       selectedBoardIds,
     });
 
-    if (syncResult.newRecipeIds.length > 0) {
+    const titleFallbackRecipeIds = await findRecipesNeedingParsedTitle(args.householdId);
+    const recipeIdsToParse = uniqueRecipeIds([
+      ...syncResult.newRecipeIds,
+      ...titleFallbackRecipeIds,
+    ]);
+    if (recipeIdsToParse.length > 0) {
       await extractRecipes({
         householdId: args.householdId,
-        recipeIds: syncResult.newRecipeIds,
+        recipeIds: recipeIdsToParse,
+        rerun: titleFallbackRecipeIds.length > 0,
       });
     }
 
@@ -483,10 +501,16 @@ export async function runManualSyncAllBoards(args: {
 
 export async function runForcePinterestResync(args: { householdId: string }) {
   const result = await runManualSyncAllBoards({ ...args, trigger: "force" });
-  if (result.newRecipeIds.length > 0) {
+  const titleFallbackRecipeIds = await findRecipesNeedingParsedTitle(args.householdId);
+  const recipeIdsToParse = uniqueRecipeIds([
+    ...result.newRecipeIds,
+    ...titleFallbackRecipeIds,
+  ]);
+  if (recipeIdsToParse.length > 0) {
     await extractRecipes({
       householdId: args.householdId,
-      recipeIds: result.newRecipeIds,
+      recipeIds: recipeIdsToParse,
+      rerun: titleFallbackRecipeIds.length > 0,
     });
   }
   return result;
@@ -840,11 +864,12 @@ async function startPinterestSyncRun(args: {
   const { db, sqlite } = await openDatabase();
   try {
     const startedAt = new Date().toISOString();
+    const syncType = getPinterestSyncType(args.trigger);
     const previousRun = await db.query.pinterestSyncRuns.findFirst({
       where: (table, { and: whereAnd, eq: whereEq }) => whereAnd(
         whereEq(table.householdId, args.householdId),
-        whereEq(table.syncScopeKey, args.syncScopeKey),
         whereEq(table.status, "success"),
+        inArray(table.trigger, getPinterestSyncTriggersForType(syncType)),
       ),
       orderBy: (table) => [desc(table.completedAt), desc(table.startedAt)],
       columns: { pinCount: true },
@@ -856,7 +881,11 @@ async function startPinterestSyncRun(args: {
       startedAt,
       completedAt: null,
       syncScopeKey: args.syncScopeKey,
-      expectedPinCount: previousRun?.pinCount ?? null,
+      // New-pin syncs only need a bounded estimate. Full syncs learn from the
+      // last successful full sync, never from an incremental sync.
+      expectedPinCount: syncType === "new_pins"
+        ? PINTEREST_PINS_PAGE_SIZE
+        : previousRun?.pinCount ?? null,
       processedPinCount: 0,
       boardCount: 0,
       pinCount: 0,
@@ -932,6 +961,20 @@ async function completePinterestSyncRun(args: {
 async function advancePinterestSyncRunProgress(syncRun: PinterestSyncRunContext | undefined) {
   if (!syncRun) return;
   syncRun.processedPinCount += 1;
+  if (
+    syncRun.trigger === "auto_new_pins"
+    && syncRun.processedPinCount > PINTEREST_PINS_PAGE_SIZE
+    && syncRun.processedPinCount % PINTEREST_PINS_PAGE_SIZE === 1
+  ) {
+    const { db, sqlite } = await openDatabase();
+    try {
+      await db.update(pinterestSyncRuns).set({
+        expectedPinCount: Math.ceil(syncRun.processedPinCount / PINTEREST_PINS_PAGE_SIZE) * PINTEREST_PINS_PAGE_SIZE,
+      }).where(eq(pinterestSyncRuns.syncRunId, syncRun.syncRunId)).run();
+    } finally {
+      await sqlite.close();
+    }
+  }
   const now = Date.now();
   if (
     syncRun.processedPinCount - syncRun.persistedPinCount < PINTEREST_SYNC_PROGRESS_BATCH_SIZE
@@ -1215,9 +1258,11 @@ async function queuePinterestSyncRecipeParseJob(
       where: (table, { eq: whereEq }) => whereEq(table.syncRunId, job.syncRunId),
       columns: { changeType: true, recipeId: true },
     });
-    const recipeIds = changes
+    const createdRecipeIds = changes
       .filter((change) => change.changeType === "created")
       .map((change) => change.recipeId);
+    const titleFallbackRecipeIds = await findRecipesNeedingParsedTitle(job.householdId, db);
+    const recipeIds = uniqueRecipeIds([...createdRecipeIds, ...titleFallbackRecipeIds]);
 
     if (recipeIds.length === 0) return;
     if (!requester) throw new Error("Pinterest sync completed without a user available to request recipe parsing.");
@@ -1226,7 +1271,7 @@ async function queuePinterestSyncRecipeParseJob(
       householdId: job.householdId,
       requestedByClerkUserId: requester,
       recipeIds,
-      rerun: false,
+      rerun: titleFallbackRecipeIds.length > 0,
       mode: "pinterest_sync",
     });
     if (!parseJob.ok) throw new Error(`Unable to create the Pinterest recipe parse job: ${parseJob.message}`);
@@ -1247,6 +1292,35 @@ async function queuePinterestSyncRecipeParseJob(
     .set({ recipeParseJobQueuedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
     .where(eq(pinterestSyncJobs.jobId, job.jobId))
     .run();
+}
+
+async function findRecipesNeedingParsedTitle(
+  householdId: string,
+  existingDb?: Awaited<ReturnType<typeof openDatabase>>["db"],
+) {
+  const handle = existingDb ? null : await openDatabase();
+  const db = existingDb ?? handle!.db;
+
+  try {
+    const recipes = await db.query.householdRecipes.findMany({
+      where: (table, { and: whereAnd, eq: whereEq, isNull: whereIsNull }) => whereAnd(
+        whereEq(table.householdId, householdId),
+        whereIsNull(table.removedAt),
+        whereEq(table.titleOverridden, false),
+      ),
+      columns: { recipeId: true, title: true },
+      with: { pin: { columns: { title: true, link: true } } },
+    });
+    return recipes
+      .filter((recipe) => Boolean(recipe.pin.link) && !recipe.title?.trim() && !recipe.pin.title?.trim())
+      .map((recipe) => recipe.recipeId);
+  } finally {
+    await handle?.sqlite.close();
+  }
+}
+
+function uniqueRecipeIds(recipeIds: string[]) {
+  return [...new Set(recipeIds)];
 }
 
 export async function processPinterestSyncJobPage(jobId: string) {
