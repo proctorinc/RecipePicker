@@ -1,5 +1,8 @@
+import { normalizeIngredientUnit as normalizeKnownIngredientUnit } from "@/lib/ingredient-units";
+
 export type ParsedIngredientLine = {
   originalText: string;
+  measurements: IngredientMeasurement[];
   amountText: string | null;
   amountValue: number | null;
   amountMaxValue: number | null;
@@ -9,6 +12,13 @@ export type ParsedIngredientLine = {
   alternativeIngredientTexts: string[] | null;
 };
 
+export type IngredientMeasurement = {
+  amountText: string;
+  amountValue: number | null;
+  amountMaxValue: number | null;
+  unit: string;
+};
+
 const UNICODE_FRACTIONS: Record<string, string> = {
   "¼": "1/4", "½": "1/2", "¾": "3/4", "⅓": "1/3", "⅔": "2/3",
   "⅛": "1/8", "⅜": "3/8", "⅝": "5/8", "⅞": "7/8",
@@ -16,26 +26,35 @@ const UNICODE_FRACTIONS: Record<string, string> = {
 
 export function parseIngredientLine(rawLine: string): ParsedIngredientLine {
   const normalized = rawLine.replace(/\s+/g, " ").trim();
-  const match = normalized.match(
-    /^((?:\d+\s+\d\/\d|\d+\/\d|\d+(?:\.\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞]+)(?:\s*-\s*(?:\d+\s+\d\/\d|\d+\/\d|\d+(?:\.\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞]+))?(?:\s*\([^)]+\))?)\s+(.+)$/u,
-  );
-  if (!match) {
+  const first = parseMeasurementPrefix(normalized);
+  if (!first) {
     return emptyParsedIngredient(normalized);
   }
 
-  const amountText = match[1].trim();
-  const { amountValue, amountMaxValue } = parseAmountText(amountText);
-  const parts = match[2].trim().split(/\s*,\s*/);
+  const measurements = [first.measurement];
+  let remainder = first.remainder;
+  while (true) {
+    const parenthetical = remainder.match(/^\s*\(\s*([^)]+?)\s*\)\s*/);
+    const slash = remainder.match(/^\s*\/\s*/);
+    const candidate = parenthetical?.[1] ?? (slash ? remainder.slice(slash[0].length) : null);
+    if (!candidate) break;
+    const parsed = parseMeasurementPrefix(candidate);
+    if (!parsed) break;
+    measurements.push(parsed.measurement);
+    remainder = parenthetical ? remainder.slice(parenthetical[0].length) : parsed.remainder;
+  }
+
+  const parts = remainder.trim().split(/\s*,\s*/);
   const mainPart = parts.shift() ?? "";
-  const tokens = mainPart.split(/\s+/);
-  const unit = normalizeIngredientUnit(tokens[0] ?? "");
-  const ingredientText = unit ? tokens.slice(1).join(" ") || null : mainPart || null;
+  const ingredientText = mainPart || null;
+  const primary = measurements[0]!;
   return {
     originalText: normalized,
-    amountText,
-    amountValue,
-    amountMaxValue,
-    unit,
+    measurements,
+    amountText: primary.amountText,
+    amountValue: primary.amountValue,
+    amountMaxValue: primary.amountMaxValue,
+    unit: primary.unit,
     ingredientText,
     notes: parts.length ? parts.join(", ") : null,
     alternativeIngredientTexts: parseIngredientAlternatives(ingredientText),
@@ -47,17 +66,7 @@ export function parseIngredientLines(value: string) {
 }
 
 export function normalizeIngredientUnit(token: string) {
-  const cleaned = token.replace(/[().]/g, "").toLowerCase();
-  const unitMap: Record<string, string> = {
-    c: "cup", cup: "cup", cups: "cup", tbsp: "tablespoon", tablespoon: "tablespoon", tablespoons: "tablespoon",
-    tsp: "teaspoon", teaspoon: "teaspoon", teaspoons: "teaspoon", lb: "pound", lbs: "pound", pound: "pound", pounds: "pound",
-    oz: "ounce", ounce: "ounce", ounces: "ounce", clove: "clove", cloves: "clove", can: "can", cans: "can",
-    g: "gram", gram: "gram", grams: "gram", kg: "kilogram", kilogram: "kilogram", kilograms: "kilogram",
-    ml: "milliliter", milliliter: "milliliter", milliliters: "milliliter", l: "liter", liter: "liter", liters: "liter",
-    qt: "quart", quart: "quart", quarts: "quart", pt: "pint", pint: "pint", pints: "pint",
-    package: "package", packages: "package", pkg: "package", pinch: "pinch", pinches: "pinch",
-  };
-  return unitMap[cleaned] ?? null;
+  return normalizeKnownIngredientUnit(token);
 }
 
 export function parseAmountText(amountText: string) {
@@ -70,8 +79,22 @@ export function formatIngredientOriginalText({ amountText, unit, ingredientText,
   return [amountText?.trim(), unit?.trim(), ingredientText?.trim()].filter(Boolean).join(" ") + (notes?.trim() ? `, ${notes.trim()}` : "");
 }
 
+export function formatIngredientMeasurements(measurements: IngredientMeasurement[]) {
+  return measurements.map((measurement) => [measurement.amountText.trim(), measurement.unit.trim()].filter(Boolean).join(" ")).filter(Boolean).join(" · ");
+}
+
 function emptyParsedIngredient(originalText: string): ParsedIngredientLine {
-  return { originalText, amountText: null, amountValue: null, amountMaxValue: null, unit: null, ingredientText: originalText || null, notes: null, alternativeIngredientTexts: parseIngredientAlternatives(originalText) };
+  return { originalText, measurements: [], amountText: null, amountValue: null, amountMaxValue: null, unit: null, ingredientText: originalText || null, notes: null, alternativeIngredientTexts: parseIngredientAlternatives(originalText) };
+}
+
+function parseMeasurementPrefix(value: string): { measurement: IngredientMeasurement; remainder: string } | null {
+  const match = value.match(/^((?:\d+\s+\d\/\d|\d+\/\d|\d+(?:\.\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞]+)(?:\s*-\s*(?:\d+\s+\d\/\d|\d+\/\d|\d+(?:\.\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞]+))?)\s+([^\s,()/]+)(?:\s+|$)([\s\S]*)$/u);
+  if (!match) return null;
+  const unit = normalizeIngredientUnit(match[2] ?? "");
+  if (!unit) return null;
+  const amountText = match[1].trim();
+  const { amountValue, amountMaxValue } = parseAmountText(amountText);
+  return { measurement: { amountText, amountValue, amountMaxValue, unit }, remainder: match[3] ?? "" };
 }
 
 function parseIngredientAlternatives(ingredientText: string | null) {

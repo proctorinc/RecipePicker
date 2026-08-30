@@ -39,4 +39,13 @@ describe("formatScaledIngredient", () => {
     expect(formatScaledIngredient(ingredient({ originalText: "1 clove garlic, minced", unit: "clove", parsedText: "garlic", notes: "minced" }), 2)).toBe("2 cloves garlic, minced");
     expect(formatScaledIngredient(ingredient({ originalText: "Salt, to taste", amountValue: null, amount: null, unit: null, parsedText: "Salt", notes: "to taste" }), 3)).toBe("Salt, to taste");
   });
+
+  it("scales every explicit equivalent measurement without converting between volume and mass", () => {
+    expect(formatScaledIngredient(ingredient({
+      measurements: [
+        { amountText: "1", amountValue: 1, amountMaxValue: null, unit: "cup" },
+        { amountText: "120", amountValue: 120, amountMaxValue: null, unit: "gram" },
+      ],
+    }), 2)).toBe("2 cups · 240 g vanilla extract");
+  });
 });

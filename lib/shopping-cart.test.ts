@@ -65,4 +65,15 @@ describe("buildShoppingCartItems", () => {
       ],
     })]);
   });
+
+  it("shows equivalent measurements together without converting volume to weight", () => {
+    const items = buildShoppingCartItems([ingredient({
+      measurements: [
+        { amountText: "1", amountValue: 1, amountMaxValue: null, unit: "cup" },
+        { amountText: "120", amountValue: 120, amountMaxValue: null, unit: "gram" },
+      ],
+    })]);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.amountText).toBe("1 c · 120 g");
+  });
 });

@@ -41,6 +41,7 @@ export function RecipeIngredientList({
         recipeId,
         recipeTitle,
         originalText: reviewingIngredient.originalText,
+        measurements: (reviewingIngredient.measurements ?? []).map((measurement, index) => ({ id: `recipe-measurement-${index}`, ...measurement })),
         amountText: reviewingIngredient.amount ?? null,
         unit: reviewingIngredient.unit ?? null,
         notes: reviewingIngredient.notes ?? null,

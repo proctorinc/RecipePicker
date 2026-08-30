@@ -291,6 +291,7 @@ export async function getRecipeDetail(
                 orderBy: (table, { asc }) => [asc(table.position)],
                 with: {
                   canonicalIngredient: true,
+                  measurements: { orderBy: (table, { asc }) => [asc(table.position)] },
                 },
               },
               steps: {
@@ -323,7 +324,7 @@ export async function getRecipeDetail(
         imageUrl: imageSources.imageUrl, sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link,
         dominantColor: row.pin.dominantColor, yieldText: row.recipeInstructions?.yieldText ?? null,
         prepTime: row.recipeInstructions?.prepTime ?? null, cookTime: row.recipeInstructions?.cookTime ?? null, totalTime: row.recipeInstructions?.totalTime ?? null,
-        ingredients: row.recipeInstructions?.ingredients.map((ingredient) => ({ id: ingredient.ingredientId, originalText: ingredient.originalText, displayText: ingredient.originalText, amount: ingredient.amountText, amountValue: ingredient.amountValue, amountMaxValue: ingredient.amountMaxValue, unit: ingredient.unit, parsedText: ingredient.ingredientText, notes: ingredient.notes, canonicalIngredientId: ingredient.canonicalIngredientId, canonicalName: ingredient.canonicalIngredient?.displayName ?? null, attributes: parseJsonArray(ingredient.attributesJson), normalizationStatus: toIngredientStatus(ingredient.normalizationStatus) })) ?? [],
+        ingredients: row.recipeInstructions?.ingredients.map((ingredient) => ({ id: ingredient.ingredientId, originalText: ingredient.originalText, displayText: ingredient.originalText, measurements: ingredient.measurements.map((measurement) => ({ id: measurement.ingredientMeasurementId, amountText: measurement.amountText, amountValue: measurement.amountValue, amountMaxValue: measurement.amountMaxValue, unit: measurement.unit })), amount: ingredient.amountText, amountValue: ingredient.amountValue, amountMaxValue: ingredient.amountMaxValue, unit: ingredient.unit, parsedText: ingredient.ingredientText, notes: ingredient.notes, canonicalIngredientId: ingredient.canonicalIngredientId, canonicalName: ingredient.canonicalIngredient?.displayName ?? null, attributes: parseJsonArray(ingredient.attributesJson), normalizationStatus: toIngredientStatus(ingredient.normalizationStatus) })) ?? [],
         steps: row.recipeInstructions?.steps.map((step) => ({ id: step.stepId, section: step.section, text: step.text })) ?? [],
       };
       await db.insert(householdRecipeVersions).values({ householdId: context.householdId, recipeId: row.recipeId, versionNumber: 1, ingredientsJson: JSON.stringify(snapshot.ingredients.map((item) => item.originalText)), stepsJson: JSON.stringify(snapshot.steps), snapshotJson: JSON.stringify(snapshot), note: "Original recipe", createdAt: row.createdAt }).run();
@@ -402,6 +403,7 @@ export async function getRecipeDetail(
           id: ingredient.ingredientId,
           originalText: primaryIngredients?.[index] ?? ingredient.originalText,
           displayText: primaryIngredients?.[index] ?? ingredient.originalText,
+          measurements: ingredient.measurements.map((measurement) => ({ id: measurement.ingredientMeasurementId, amountText: measurement.amountText, amountValue: measurement.amountValue, amountMaxValue: measurement.amountMaxValue, unit: measurement.unit })),
           amount: ingredient.amountText,
           amountValue: ingredient.amountValue,
           amountMaxValue: ingredient.amountMaxValue,
@@ -458,7 +460,7 @@ export async function getPublicRecipeDetail(
     if (!selected && versions.length === 0 && versionNumber === 1) {
       const row = await db.query.householdRecipes.findFirst({
         where: (table, { and, eq, isNull }) => and(eq(table.recipeId, recipeId), isNull(table.removedAt)),
-        with: { pin: true, recipeInstructions: { with: { ingredients: { orderBy: (table, { asc }) => [asc(table.position)], with: { canonicalIngredient: true } }, steps: { orderBy: (table, { asc }) => [asc(table.position)] } } } },
+        with: { pin: true, recipeInstructions: { with: { ingredients: { orderBy: (table, { asc }) => [asc(table.position)], with: { canonicalIngredient: true, measurements: { orderBy: (table, { asc }) => [asc(table.position)] } } }, steps: { orderBy: (table, { asc }) => [asc(table.position)] } } } },
       });
       if (!row) return null;
       const household = await db.query.households.findFirst({
@@ -471,7 +473,7 @@ export async function getPublicRecipeDetail(
         householdName: household?.name ?? "A Food Picker kitchen",
         description: row.description ?? row.pin.description ?? row.recipeInstructions?.description ?? null, sourceUrl: row.recipeInstructions?.canonicalUrl ?? row.pin.link, dominantColor: row.pin.dominantColor,
         yieldText: row.recipeInstructions?.yieldText ?? null, prepTime: row.recipeInstructions?.prepTime ?? null, cookTime: row.recipeInstructions?.cookTime ?? null, totalTime: row.recipeInstructions?.totalTime ?? null,
-        ingredients: row.recipeInstructions?.ingredients.map((ingredient) => ({ id: ingredient.ingredientId, originalText: ingredient.originalText, displayText: ingredient.originalText, amount: ingredient.amountText, amountValue: ingredient.amountValue, amountMaxValue: ingredient.amountMaxValue, unit: ingredient.unit, parsedText: ingredient.ingredientText, notes: ingredient.notes, canonicalIngredientId: ingredient.canonicalIngredientId, canonicalName: ingredient.canonicalIngredient?.displayName ?? null, attributes: parseJsonArray(ingredient.attributesJson), normalizationStatus: toIngredientStatus(ingredient.normalizationStatus) })) ?? [],
+        ingredients: row.recipeInstructions?.ingredients.map((ingredient) => ({ id: ingredient.ingredientId, originalText: ingredient.originalText, displayText: ingredient.originalText, measurements: ingredient.measurements.map((measurement) => ({ id: measurement.ingredientMeasurementId, amountText: measurement.amountText, amountValue: measurement.amountValue, amountMaxValue: measurement.amountMaxValue, unit: measurement.unit })), amount: ingredient.amountText, amountValue: ingredient.amountValue, amountMaxValue: ingredient.amountMaxValue, unit: ingredient.unit, parsedText: ingredient.ingredientText, notes: ingredient.notes, canonicalIngredientId: ingredient.canonicalIngredientId, canonicalName: ingredient.canonicalIngredient?.displayName ?? null, attributes: parseJsonArray(ingredient.attributesJson), normalizationStatus: toIngredientStatus(ingredient.normalizationStatus) })) ?? [],
         steps: row.recipeInstructions?.steps.map((step) => ({ id: step.stepId, section: step.section, text: step.text })) ?? [], versionNumber: 1, latestVersionNumber: 1,
       };
     }
@@ -799,6 +801,7 @@ export async function getShoppingCartPage(): Promise<ShoppingCartPageView> {
                         orderBy: (table, { asc: orderAsc }) => [orderAsc(table.position)],
                         with: {
                           canonicalIngredient: true,
+                          measurements: { orderBy: (table, { asc: orderAsc }) => [orderAsc(table.position)] },
                           alternatives: {
                             orderBy: (table, { asc: orderAsc }) => [orderAsc(table.position)],
                             with: { canonicalIngredient: true },
@@ -833,6 +836,7 @@ export async function getShoppingCartPage(): Promise<ShoppingCartPageView> {
         amountValue: ingredient.amountValue,
         amountMaxValue: ingredient.amountMaxValue,
         unit: ingredient.unit,
+        measurements: ingredient.measurements.map((measurement) => ({ amountText: measurement.amountText, amountValue: measurement.amountValue, amountMaxValue: measurement.amountMaxValue, unit: measurement.unit })),
         normalizationStatus: ingredient.normalizationStatus,
         alternatives: ingredient.alternatives.map((alternative) => ({
           alternativeId: alternative.alternativeId,
@@ -1221,6 +1225,7 @@ export async function getRecipeOpsDetail(
                       parentCanonicalIngredient: true,
                     },
                   },
+                  measurements: { orderBy: (table, { asc }) => [asc(table.position)] },
                 },
               },
               steps: {
@@ -1900,6 +1905,9 @@ export async function getIngredientReviewQueue(
               parentCanonicalIngredient: true,
             },
           },
+          measurements: {
+            orderBy: (table, { asc }) => [asc(table.position)],
+          },
           recipeInstructions: {
             with: {
               recipe: {
@@ -1938,6 +1946,7 @@ export async function getIngredientReviewQueue(
           ingredient.recipeInstructions.title ??
           "Untitled recipe",
         originalText: ingredient.originalText,
+        measurements: ingredient.measurements.map((measurement) => ({ id: measurement.ingredientMeasurementId, amountText: measurement.amountText, amountValue: measurement.amountValue, amountMaxValue: measurement.amountMaxValue, unit: measurement.unit })),
         amountText: ingredient.amountText,
         unit: ingredient.unit,
         notes: ingredient.notes,
@@ -2488,6 +2497,7 @@ async function getFeedRecipeRows(db: DatabaseHandle, householdId: string, tagId?
               orderBy: (table, { asc }) => [asc(table.position)],
               with: {
                 canonicalIngredient: true,
+                measurements: { orderBy: (table, { asc }) => [asc(table.position)] },
               },
             },
           },

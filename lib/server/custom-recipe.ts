@@ -8,11 +8,13 @@ import {
   householdBoards,
   householdPins,
   householdRecipeIngredients,
+  householdRecipeIngredientMeasurements,
   householdRecipeInstructions,
   householdRecipes,
   householdRecipeSteps,
   pinterestAccounts,
 } from "@/lib/server/db";
+import { parseIngredientLine } from "@/lib/ingredient-parsing";
 import { createPinterestPin, getValidPinterestAccessToken } from "@/lib/server/pinterest";
 import { getPublicRecipeUrl } from "@/lib/public-recipe-url";
 
@@ -169,7 +171,8 @@ export async function createCustomRecipe(input: CustomRecipeInput) {
       }).run();
 
       for (const [position, originalText] of input.ingredients.entries()) {
-        await tx.insert(householdRecipeIngredients).values({
+        const parsed = parseIngredientLine(originalText);
+        const ingredient = await tx.insert(householdRecipeIngredients).values({
           householdId: input.householdId,
           recipeId,
           position,
@@ -178,8 +181,8 @@ export async function createCustomRecipe(input: CustomRecipeInput) {
           amountValue: null,
           amountMaxValue: null,
           unit: null,
-          ingredientText: null,
-          notes: null,
+          ingredientText: parsed.ingredientText,
+          notes: parsed.notes,
           normalizedIngredientPhrase: null,
           canonicalIngredientId: null,
           attributesJson: "[]",
@@ -187,7 +190,16 @@ export async function createCustomRecipe(input: CustomRecipeInput) {
           matchedBy: "manual_entry",
           aiSuggestionsJson: null,
           normalizationStatus: "needs_review",
-        }).run();
+        }).returning().get();
+        if (parsed.measurements.length > 0) {
+          await tx.insert(householdRecipeIngredientMeasurements).values(parsed.measurements.map((measurement, measurementPosition) => ({
+            householdId: input.householdId,
+            recipeId,
+            ingredientId: ingredient.ingredientId,
+            position: measurementPosition + 1,
+            ...measurement,
+          }))).run();
+        }
       }
 
       for (const [position, text] of input.steps.entries()) {

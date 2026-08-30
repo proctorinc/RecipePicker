@@ -5,13 +5,14 @@ import { GripVertical, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { RecipeIngredientList } from "@/components/recipe-ingredient-list";
 import { RecipeEditingContext } from "@/components/recipe-metadata-editor";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatIso8601Duration } from "@/lib/utils";
-import { formatIngredientOriginalText, type ParsedIngredientLine } from "@/lib/ingredient-parsing";
+import { formatIngredientMeasurements, formatIngredientOriginalText, type IngredientMeasurement, type ParsedIngredientLine } from "@/lib/ingredient-parsing";
 import { formatScaledIngredientParts } from "@/lib/ingredient-scaling";
 import type { PublicRecipeDetailView } from "@/types/view-models";
 
@@ -66,7 +67,8 @@ export function RecipeContent({
     setIngredients((current) => current.map((item) => {
       if (item.id !== id) return item;
       const next = { ...item, ...patch };
-      return { ...next, originalText: formatIngredientOriginalText({ amountText: next.amount, unit: next.unit, ingredientText: next.parsedText, notes: next.notes }) };
+      const measurementText = formatIngredientMeasurements(next.measurements ?? []);
+      return { ...next, originalText: [measurementText, next.parsedText?.trim()].filter(Boolean).join(" ") + (next.notes?.trim() ? `, ${next.notes.trim()}` : "") };
     }));
   }
 
@@ -125,7 +127,7 @@ export function RecipeContent({
           <CardContent className="px-10">
             {isEditing ? (
               <section className="space-y-3">
-                <input form={formId} type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.filter((ingredient) => !ingredient.isPendingDeletion && ingredient.parsedText?.trim()).map(({ id, originalText, amount, unit, parsedText, notes }) => ({ id, originalText, amountText: amount, unit, ingredientText: parsedText, notes })))} />
+                <input form={formId} type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.filter((ingredient) => !ingredient.isPendingDeletion && ingredient.parsedText?.trim()).map(({ id, originalText, parsedText, notes, measurements }) => ({ id, originalText, ingredientText: parsedText, notes, measurements })))} />
                 {ingredients.map((ingredient, index) => (
                   <div key={ingredient.id} className={`space-y-2 ${ingredient.isPendingDeletion ? "opacity-50" : ""}`}>
                     {(() => {
@@ -159,7 +161,7 @@ export function RecipeContent({
                   </div>
                 ))}
                 <Button type="button" variant="outline" size="sm" onClick={addIngredient}>
-                  <Plus className="size-4" />
+                  <Icon icon={Plus} size="sm" />
                   Add ingredient
                 </Button>
               </section>
@@ -271,13 +273,14 @@ function createDraftId() {
 }
 
 function createIngredientDraft(parsed?: ParsedIngredientLine, id = createDraftId()): RecipeIngredientDraft {
+  const measurements = (parsed?.measurements ?? []).map((measurement, index) => ({ id: `new-measurement-${index}`, ...measurement }));
   const amount = parsed?.amountText ?? null;
   const unit = parsed?.unit ?? null;
   const parsedText = parsed?.ingredientText ?? null;
   const notes = parsed?.notes ?? null;
   return {
     id, originalText: formatIngredientOriginalText({ amountText: amount, unit, ingredientText: parsedText, notes }), displayText: "",
-    amount, amountValue: parsed?.amountValue ?? null, amountMaxValue: parsed?.amountMaxValue ?? null, unit, parsedText, notes,
+    measurements, amount, amountValue: parsed?.amountValue ?? null, amountMaxValue: parsed?.amountMaxValue ?? null, unit, parsedText, notes,
     canonicalIngredientId: null, canonicalName: null, attributes: [], normalizationStatus: "needs_review",
   };
 }
@@ -286,16 +289,14 @@ function IngredientEditorDialog({ ingredient, open, onOpenChange, onSave }: {
   ingredient: RecipeIngredientDraft | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (patch: Pick<RecipeIngredientDraft, "amount" | "unit" | "parsedText" | "notes">) => void;
+  onSave: (patch: Pick<RecipeIngredientDraft, "measurements" | "parsedText" | "notes">) => void;
 }) {
-  const [amount, setAmount] = useState("");
-  const [unit, setUnit] = useState("");
+  const [measurements, setMeasurements] = useState<Array<IngredientMeasurement & { id: string }>>([]);
   const [parsedText, setParsedText] = useState("");
   const [notes, setNotes] = useState("");
 
   useEffect(() => {
-    setAmount(ingredient?.amount ?? "");
-    setUnit(ingredient?.unit ?? "");
+    setMeasurements((ingredient?.measurements ?? []).map((measurement, index) => ({ ...measurement, id: measurement.id || `measurement-${index}` })));
     setParsedText(ingredient?.parsedText ?? "");
     setNotes(ingredient?.notes ?? "");
   }, [ingredient]);
@@ -308,14 +309,15 @@ function IngredientEditorDialog({ ingredient, open, onOpenChange, onSave }: {
       </DialogHeader>
       <form className="space-y-5" onSubmit={(event) => {
         event.preventDefault();
-        onSave({ amount: amount || null, unit: unit || null, parsedText: parsedText || null, notes: notes || null });
+        onSave({ measurements: measurements.filter((measurement) => measurement.amountText.trim() && measurement.unit.trim()), parsedText: parsedText || null, notes: notes || null });
       }}>
         {ingredient?.originalText ? <div className="rounded-2xl border border-border bg-secondary/20 p-4"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Original recipe text</p><p className="mt-2 font-medium">{ingredient.originalText}</p></div> : null}
         <div className="space-y-3">
           <div><p className="font-medium">Ingredient details</p><p className="text-sm text-muted-foreground">Correct any field that looks wrong.</p></div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <IngredientField label="Amount" value={amount} onChange={setAmount} placeholder="e.g. 2" />
-            <IngredientField label="Unit" value={unit} onChange={setUnit} placeholder="e.g. cups" />
+          <div className="space-y-3">
+            <p className="text-sm font-medium">Measurements</p>
+            {measurements.map((measurement, index) => <div key={measurement.id} className="grid grid-cols-[1fr_1fr_auto] gap-2"><Input value={measurement.amountText} onChange={(event) => setMeasurements((current) => current.map((item) => item.id === measurement.id ? { ...item, amountText: event.target.value } : item))} placeholder="e.g. 1" /><Input value={measurement.unit} onChange={(event) => setMeasurements((current) => current.map((item) => item.id === measurement.id ? { ...item, unit: event.target.value } : item))} placeholder="e.g. cup" /><Button type="button" variant="ghost" size="sm" aria-label={`Remove measurement ${index + 1}`} onClick={() => setMeasurements((current) => current.filter((item) => item.id !== measurement.id))}>Remove</Button></div>)}
+            <Button type="button" variant="outline" size="sm" onClick={() => setMeasurements((current) => [...current, { id: crypto.randomUUID(), amountText: "", amountValue: null, amountMaxValue: null, unit: "" }])}>Add measurement</Button>
           </div>
           <IngredientField label="What is the ingredient?" value={parsedText} onChange={setParsedText} placeholder="e.g. yellow onion" required />
           <IngredientField label="Notes (optional)" value={notes} onChange={setNotes} placeholder="e.g. finely chopped" />

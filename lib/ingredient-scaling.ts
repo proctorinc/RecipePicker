@@ -2,6 +2,12 @@ import { formatIngredientUnit } from "@/lib/ingredient-units";
 
 export type ScalableIngredient = {
   originalText: string;
+  measurements?: Array<{
+    amountText: string;
+    amountValue: number | null;
+    amountMaxValue: number | null;
+    unit: string;
+  }>;
   amount: string | null;
   amountValue: number | null;
   amountMaxValue: number | null;
@@ -46,22 +52,28 @@ export function formatScaledIngredientParts(
   ingredient: ScalableIngredient,
   multiplier: 1 | 2 | 3,
 ) {
-  if (ingredient.amountValue === null || !ingredient.parsedText) {
+  const measurements = ingredient.measurements ?? (ingredient.amount !== null && ingredient.unit !== null ? [{ amountText: ingredient.amount, amountValue: ingredient.amountValue, amountMaxValue: ingredient.amountMaxValue, unit: ingredient.unit }] : []);
+  if (!ingredient.parsedText || measurements.length === 0) {
     return { amount: null, description: ingredient.originalText };
   }
-
-  const minimum = ingredient.amountValue * multiplier;
-  const maximum = ingredient.amountMaxValue === null ? null : ingredient.amountMaxValue * multiplier;
-  const normalized = normalizeVolumeUnit(minimum, maximum, ingredient.unit);
-  const amount = formatAmountRange(normalized.minimum, normalized.maximum);
-  const unit = normalized.unit ? ` ${formatUnit(normalized.unit, normalized.minimum, normalized.maximum)}` : "";
-  const qualifier = getAmountQualifier(ingredient.amount);
+  const amount = measurements.map((measurement) => formatScaledMeasurement(measurement, multiplier)).join(" · ");
   const notes = ingredient.notes ? `, ${ingredient.notes}` : "";
 
   return {
-    amount: `${amount}${qualifier}${unit}`.replace(/\s+/g, " ").trim(),
+    amount,
     description: `${ingredient.parsedText}${notes}`,
   };
+}
+
+function formatScaledMeasurement(measurement: NonNullable<ScalableIngredient["measurements"]>[number], multiplier: 1 | 2 | 3) {
+  if (measurement.amountValue === null) return [measurement.amountText, formatIngredientUnit(measurement.unit)].filter(Boolean).join(" ");
+  const minimum = measurement.amountValue * multiplier;
+  const maximum = measurement.amountMaxValue === null ? null : measurement.amountMaxValue * multiplier;
+  const normalized = normalizeVolumeUnit(minimum, maximum, measurement.unit);
+  const amount = formatAmountRange(normalized.minimum, normalized.maximum);
+  const unit = normalized.unit ? ` ${formatUnit(normalized.unit, normalized.minimum, normalized.maximum)}` : "";
+  const qualifier = getAmountQualifier(measurement.amountText);
+  return `${amount}${qualifier}${unit}`.replace(/\s+/g, " ").trim();
 }
 
 function normalizeVolumeUnit(minimum: number, maximum: number | null, unit: string | null) {

@@ -11,6 +11,7 @@ import {
 import { FeedSearch } from "@/components/feed-search";
 import { FeedFilters } from "@/components/feed-filters";
 import { HomeFeed } from "@/components/home-feed";
+import { FeedPullToRefresh } from "@/components/feed-pull-to-refresh";
 import {
   cacheFeedPage,
   cacheFeedScrollPosition,
@@ -47,6 +48,7 @@ export function HomeFeedShell({
   const [inputValue, setInputValue] = useState(normalizedInitialQuery);
   const [activeQuery, setActiveQuery] = useState(normalizedInitialQuery);
   const [activeFilters, setActiveFilters] = useState(initialFilters);
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [page, setPage] = useState(initialPage);
   const [isSearching, setIsSearching] = useState(false);
   const searchAbortRef = useRef<AbortController | null>(null);
@@ -88,6 +90,12 @@ export function HomeFeedShell({
       return;
     }
 
+    // A cached unfiltered feed belongs to the current URL. Prefer it over a
+    // previous search so browser back restores the exact feed the user left.
+    if (getCachedFeed(getFeedCacheKey("", undefined, initialFilters))) {
+      return;
+    }
+
     const savedQuery = getSavedHomeFeedQuery();
     if (!savedQuery) {
       return;
@@ -99,7 +107,9 @@ export function HomeFeedShell({
     searchAbortRef.current = controller;
     syncUrl(savedQuery, initialFilters);
 
-    const cachedSavedFeed = getCachedFeed(getFeedCacheKey(savedQuery, undefined, initialFilters));
+    const cachedSavedFeed = getCachedFeed(
+      getFeedCacheKey(savedQuery, undefined, initialFilters),
+    );
     if (cachedSavedFeed) {
       setPage(cachedSavedFeed.page);
       setIsSearching(false);
@@ -207,7 +217,12 @@ export function HomeFeedShell({
       setIsSearching(true);
       syncUrl(trimmedValue, activeFilters);
 
-      void fetchSearchPage(trimmedValue, activeFilters, controller.signal, tagId)
+      void fetchSearchPage(
+        trimmedValue,
+        activeFilters,
+        controller.signal,
+        tagId,
+      )
         .then((nextPage) => {
           if (controller.signal.aborted) {
             return;
@@ -240,9 +255,13 @@ export function HomeFeedShell({
 
   return (
     <>
-      <div className={filterSummary.length > 0
-        ? "pt-[calc(env(safe-area-inset-top)+6.875rem+var(--pinterest-sync-indicator-height))] md:pt-0"
-        : "pt-[calc(env(safe-area-inset-top)+5.25rem+var(--pinterest-sync-indicator-height))] md:pt-0"}
+      <FeedPullToRefresh disabled={isSearching} onRefresh={refreshFeed} />
+      <div
+        className={
+          filterSummary.length > 0
+            ? "pt-[calc(env(safe-area-inset-top)+6.875rem+var(--pinterest-sync-indicator-height))] md:pt-0"
+            : "pt-[calc(env(safe-area-inset-top)+5.25rem+var(--pinterest-sync-indicator-height))] md:pt-0"
+        }
       >
         {header ? <div className="mb-6">{header}</div> : null}
         <HomeFeed
@@ -258,15 +277,28 @@ export function HomeFeedShell({
       </div>
       <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3.75rem+var(--pinterest-sync-indicator-height))] z-30 px-3 md:top-auto md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">
-          <div className="flex items-center gap-2">
-            <div className="min-w-0 flex-1">
-              <FeedSearch
-                value={inputValue}
-                onChange={handleSearchChange}
-                isSearching={isSearching}
+          <div
+            className={
+              isFilterPanelOpen
+                ? "rounded-[1.75rem] m-0 p-0 border border-border/80 bg-background/75 shadow-[0_12px_28px_rgba(73,49,31,0.18)] backdrop-blur-md transition-[border-radius,box-shadow] duration-300 ease-out motion-reduce:transition-none"
+                : "block"
+            }
+          >
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0">
+              <div className="min-w-0 flex-1">
+                <FeedSearch
+                  value={inputValue}
+                  onChange={handleSearchChange}
+                  isSearching={isSearching}
+                />
+              </div>
+              <FeedFilters
+                filters={activeFilters}
+                onApply={handleFiltersApply}
+                open={isFilterPanelOpen}
+                onOpenChange={setIsFilterPanelOpen}
               />
             </div>
-            <FeedFilters filters={activeFilters} onApply={handleFiltersApply} />
           </div>
           {filterSummary.length > 0 ? (
             <p className="px-4 pt-2 text-center text-xs font-medium text-muted-foreground">
@@ -283,6 +315,29 @@ export function HomeFeedShell({
     searchAbortRef.current = null;
     setInputValue(nextValue);
     setIsSearching(nextValue.trim() !== activeQuery);
+  }
+
+  async function refreshFeed() {
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+
+    try {
+      const nextPage = await fetchSearchPage(
+        activeQuery,
+        activeFilters,
+        controller.signal,
+        tagId,
+      );
+
+      if (!controller.signal.aborted) {
+        setPage(nextPage);
+      }
+    } finally {
+      if (searchAbortRef.current === controller) {
+        searchAbortRef.current = null;
+      }
+    }
   }
 
   function handleFiltersApply(nextFilters: FeedFiltersValue) {

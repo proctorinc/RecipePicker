@@ -925,6 +925,32 @@ export const householdRecipeIngredients = sqliteTable(
   }),
 );
 
+export const householdRecipeIngredientMeasurements = sqliteTable(
+  "household_recipe_ingredient_measurements",
+  {
+    ingredientMeasurementId: generatedId("ingredient_measurement_id"),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.householdId),
+    recipeId: text("recipe_id")
+      .notNull()
+      .references(() => householdRecipeInstructions.recipeId),
+    ingredientId: text("ingredient_id")
+      .notNull()
+      .references(() => householdRecipeIngredients.ingredientId),
+    position: integer("position").notNull(),
+    amountText: text("amount_text").notNull(),
+    amountValue: real("amount_value"),
+    amountMaxValue: real("amount_max_value"),
+    unit: text("unit").notNull(),
+  },
+  (table) => ({
+    ingredientPositionUniqueIdx: uniqueIndex("idx_recipe_ingredient_measurements_ingredient_position").on(table.ingredientId, table.position),
+    recipeIngredientIdx: index("idx_recipe_ingredient_measurements_recipe_ingredient").on(table.recipeId, table.ingredientId),
+    householdUnitIdx: index("idx_recipe_ingredient_measurements_household_unit").on(table.householdId, table.unit),
+  }),
+);
+
 export const householdRecipeIngredientAlternatives = sqliteTable(
   "household_recipe_ingredient_alternatives",
   {
@@ -1406,6 +1432,14 @@ export const householdRecipeIngredientsRelations = relations(householdRecipeIngr
     references: [householdCanonicalIngredients.canonicalIngredientId],
   }),
   alternatives: many(householdRecipeIngredientAlternatives),
+  measurements: many(householdRecipeIngredientMeasurements),
+}));
+
+export const householdRecipeIngredientMeasurementsRelations = relations(householdRecipeIngredientMeasurements, ({ one }) => ({
+  recipeIngredient: one(householdRecipeIngredients, {
+    fields: [householdRecipeIngredientMeasurements.ingredientId],
+    references: [householdRecipeIngredients.ingredientId],
+  }),
 }));
 
 export const householdRecipeIngredientAlternativesRelations = relations(householdRecipeIngredientAlternatives, ({ one }) => ({

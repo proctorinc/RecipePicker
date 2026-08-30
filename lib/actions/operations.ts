@@ -27,6 +27,7 @@ import {
   householdRecipeFeedback,
   householdRecipeIngredients,
   householdRecipeIngredientAlternatives,
+  householdRecipeIngredientMeasurements,
   householdAlwaysHaveIngredients,
   householdCanonicalIngredients,
   householdIngredientAliases,
@@ -63,7 +64,7 @@ import {
   SAVE_FOR_LATER_TAG_NORMALIZED_NAME,
 } from "@/lib/recipe-tags";
 import { ensureSavedForLaterTag } from "@/lib/server/save-for-later";
-import { formatIngredientOriginalText, parseAmountText } from "@/lib/ingredient-parsing";
+import { formatIngredientMeasurements, formatIngredientOriginalText, parseAmountText } from "@/lib/ingredient-parsing";
 import {
   disconnectPinterestConnection,
   setPinterestConnectionAutoSyncEnabled,
@@ -1311,8 +1312,7 @@ export const reviewIngredientAction = withActionLogging(
   const recipeId = String(formData.get("recipeId") ?? "").trim();
   const action = String(formData.get("action") ?? "accept").trim();
   const ingredientText = String(formData.get("ingredientText") ?? "").trim();
-  const amountText = toOptionalString(formData.get("amountText"));
-  const unit = toOptionalString(formData.get("unit"));
+  const measurements = parseRecipeContentItems(formData.get("measurementsJson"), isRecipeMeasurementInput);
   const notes = toOptionalString(formData.get("notes"));
   const canonicalIngredientId = toOptionalString(formData.get("canonicalIngredientId"));
 
@@ -1375,13 +1375,14 @@ export const reviewIngredientAction = withActionLogging(
       });
       await db.update(householdRecipeIngredients).set({
         originalText: ingredient.originalText,
-        amountText, amountValue: null, amountMaxValue: null, unit,
+        amountText: null, amountValue: null, amountMaxValue: null, unit: null,
         ingredientText, notes, normalizedIngredientPhrase: normalizedPhrase,
         canonicalIngredientId: canonicalIngredient.canonicalIngredientId,
         attributesJson: "[]", matchConfidence: 100, matchedBy: "confirmed_review",
         aiSuggestionsJson: null, aiParseOutcome: null, aiParseReason: null,
         normalizationStatus: "confirmed", reviewDisposition: "accepted",
       }).where(and(eq(householdRecipeIngredients.householdId, context.householdId), eq(householdRecipeIngredients.ingredientId, ingredientId))).run();
+      await replaceIngredientMeasurements(db, context.householdId, recipeId, ingredientId, measurements);
     } finally {
       await sqlite.close();
     }
@@ -1442,6 +1443,7 @@ export const parseIngredientReviewPageWithAiAction = withActionLogging(
           offset: (page - 1) * 20,
           columns: {
             ingredientId: true,
+            recipeId: true,
             originalText: true,
           },
         });
@@ -1484,13 +1486,15 @@ export const parseIngredientReviewPageWithAiAction = withActionLogging(
               amountText: parsed.amountText,
               amountValue: null,
               amountMaxValue: null,
-              unit: parsed.unit,
+              unit: null,
               ingredientText: parsed.ingredientText,
               notes: parsed.notes,
             }).where(and(
               eq(householdRecipeIngredients.householdId, context.householdId),
               eq(householdRecipeIngredients.ingredientId, parsed.ingredientId),
             )).run();
+            const sourceIngredient = ingredients.find((ingredient) => ingredient.ingredientId === parsed.ingredientId);
+            if (sourceIngredient) await replaceIngredientMeasurements(db, context.householdId, sourceIngredient.recipeId, parsed.ingredientId, parsed.amountText && parsed.unit ? [{ amountText: parsed.amountText, unit: parsed.unit }] : []);
             counts.parsed += 1;
           } else {
             await db.update(householdRecipeIngredients).set(sharedValues).where(and(
@@ -1661,7 +1665,7 @@ export const createRecipeVersionAction = withActionLogging(
           where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
           with: {
             pin: true,
-            recipeInstructions: { with: { ingredients: { orderBy: (table, { asc }) => [asc(table.position)] }, steps: { orderBy: (table, { asc }) => [asc(table.position)] } } },
+            recipeInstructions: { with: { ingredients: { orderBy: (table, { asc }) => [asc(table.position)], with: { measurements: { orderBy: (table, { asc }) => [asc(table.position)] } } }, steps: { orderBy: (table, { asc }) => [asc(table.position)] } } },
           },
         });
         if (!recipe?.recipeInstructions) {
@@ -1739,7 +1743,7 @@ export const saveRecipeContentAction = withActionLogging(
             pin: true,
             recipeInstructions: {
             with: {
-              ingredients: true,
+              ingredients: { with: { measurements: { orderBy: (table, { asc }) => [asc(table.position)] } } },
               steps: true,
             },
           },
@@ -1897,7 +1901,7 @@ export const saveRecipeMetadataAction = withActionLogging(
           pin: true,
           recipeInstructions: {
             with: {
-              ingredients: true,
+              ingredients: { with: { measurements: { orderBy: (table, { asc }) => [asc(table.position)] } } },
               steps: true,
             },
           },
@@ -1930,6 +1934,9 @@ export const saveRecipeMetadataAction = withActionLogging(
           await db.delete(householdRecipeIngredientAlternatives)
             .where(and(eq(householdRecipeIngredientAlternatives.recipeId, recipeId), inArray(householdRecipeIngredientAlternatives.ingredientId, deletedIngredientIds)))
             .run();
+          await db.delete(householdRecipeIngredientMeasurements)
+            .where(and(eq(householdRecipeIngredientMeasurements.recipeId, recipeId), inArray(householdRecipeIngredientMeasurements.ingredientId, deletedIngredientIds)))
+            .run();
           await db.delete(householdRecipeIngredients)
             .where(and(eq(householdRecipeIngredients.recipeId, recipeId), eq(householdRecipeIngredients.householdId, context.householdId), inArray(householdRecipeIngredients.ingredientId, deletedIngredientIds)))
             .run();
@@ -1941,20 +1948,24 @@ export const saveRecipeMetadataAction = withActionLogging(
         }
 
         for (const [position, ingredient] of ingredients.entries()) {
+          const structured = toStructuredIngredientValues(ingredient);
           if (isNewRecipeContentItem(ingredient.id)) {
+            const ingredientId = crypto.randomUUID();
             await db.insert(householdRecipeIngredients).values({
-              ingredientId: crypto.randomUUID(), householdId: context.householdId, recipeId, position,
-              ...toStructuredIngredientValues(ingredient),
+              ingredientId, householdId: context.householdId, recipeId, position,
+              ...structured,
               normalizedIngredientPhrase: null, canonicalIngredientId: null, attributesJson: "[]",
               matchConfidence: null, matchedBy: "manual_entry", aiSuggestionsJson: null,
               normalizationStatus: "needs_review",
             }).run();
+            await replaceIngredientMeasurements(db, context.householdId, recipeId, ingredientId, structured.measurements);
             continue;
           }
           await db.update(householdRecipeIngredients)
-            .set({ ...toStructuredIngredientValues(ingredient), position })
+            .set({ ...structured, position })
             .where(and(eq(householdRecipeIngredients.recipeId, recipeId), eq(householdRecipeIngredients.householdId, context.householdId), eq(householdRecipeIngredients.ingredientId, ingredient.id)))
             .run();
+          await replaceIngredientMeasurements(db, context.householdId, recipeId, ingredient.id, structured.measurements);
         }
         for (const [position, step] of steps.entries()) {
           if (isNewRecipeContentItem(step.id)) {
@@ -1978,6 +1989,7 @@ export const saveRecipeMetadataAction = withActionLogging(
           db.query.householdRecipeIngredients.findMany({
             where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
             orderBy: (table, { asc }) => [asc(table.position)],
+            with: { measurements: { orderBy: (table, { asc }) => [asc(table.position)] } },
           }),
           db.query.householdRecipeSteps.findMany({
             where: (table, { and, eq }) => and(eq(table.recipeId, recipeId), eq(table.householdId, context.householdId)),
@@ -2854,7 +2866,8 @@ export const deleteRecipeEventAction = withActionLogging(
 );
 
 type ReviewMode = "match_existing" | "create_new";
-type RecipeIngredientInput = { id: string; originalText: string; amountText?: string | null; unit?: string | null; ingredientText?: string | null; notes: string | null };
+type RecipeMeasurementInput = { amountText: string; unit: string };
+type RecipeIngredientInput = { id: string; originalText: string; amountText?: string | null; unit?: string | null; ingredientText?: string | null; notes: string | null; measurements?: RecipeMeasurementInput[] };
 type RecipeStepInput = { id: string; section: string | null; text: string };
 
 function toReviewMode(value: string): ReviewMode {
@@ -2943,24 +2956,44 @@ function isRecipeIngredientInput(value: unknown): value is RecipeIngredientInput
     (typeof item.notes === "string" || item.notes === null) &&
     (item.amountText === undefined || typeof item.amountText === "string" || item.amountText === null) &&
     (item.unit === undefined || typeof item.unit === "string" || item.unit === null) &&
-    (item.ingredientText === undefined || typeof item.ingredientText === "string" || item.ingredientText === null);
+    (item.ingredientText === undefined || typeof item.ingredientText === "string" || item.ingredientText === null) &&
+    (item.measurements === undefined || (Array.isArray(item.measurements) && item.measurements.every((measurement) => measurement && typeof measurement === "object" && typeof (measurement as Record<string, unknown>).amountText === "string" && typeof (measurement as Record<string, unknown>).unit === "string")));
+}
+
+function isRecipeMeasurementInput(value: unknown): value is RecipeMeasurementInput {
+  if (!value || typeof value !== "object") return false;
+  const measurement = value as Record<string, unknown>;
+  return typeof measurement.amountText === "string" && measurement.amountText.trim().length > 0 && typeof measurement.unit === "string" && measurement.unit.trim().length > 0;
 }
 
 function toStructuredIngredientValues(ingredient: RecipeIngredientInput) {
-  const amountText = ingredient.amountText?.trim() || null;
-  const unit = ingredient.unit?.trim() || null;
+  const measurements = (ingredient.measurements ?? (ingredient.amountText?.trim() && ingredient.unit?.trim() ? [{ amountText: ingredient.amountText, unit: ingredient.unit }] : [])).map((measurement) => ({ amountText: measurement.amountText.trim(), unit: measurement.unit.trim() })).filter((measurement) => measurement.amountText && measurement.unit);
   const ingredientText = ingredient.ingredientText?.trim() || ingredient.originalText.trim();
   const notes = ingredient.notes?.trim() || null;
-  const { amountValue, amountMaxValue } = amountText ? parseAmountText(amountText) : { amountValue: null, amountMaxValue: null };
   return {
-    originalText: formatIngredientOriginalText({ amountText, unit, ingredientText, notes }),
-    amountText,
-    amountValue,
-    amountMaxValue,
-    unit,
+    originalText: [formatIngredientMeasurements(measurements.map((measurement) => ({ ...measurement, ...parseAmountText(measurement.amountText) }))), ingredientText].filter(Boolean).join(" ") + (notes ? `, ${notes}` : ""),
+    amountText: null,
+    amountValue: null,
+    amountMaxValue: null,
+    unit: null,
     ingredientText,
     notes,
+    measurements,
   };
+}
+
+async function replaceIngredientMeasurements(db: any, householdId: string, recipeId: string, ingredientId: string, measurements: RecipeMeasurementInput[]) {
+  await db.delete(householdRecipeIngredientMeasurements).where(and(eq(householdRecipeIngredientMeasurements.ingredientId, ingredientId), eq(householdRecipeIngredientMeasurements.recipeId, recipeId))).run();
+  if (measurements.length === 0) return;
+  await db.insert(householdRecipeIngredientMeasurements).values(measurements.map((measurement, position) => ({
+    householdId,
+    recipeId,
+    ingredientId,
+    position: position + 1,
+    amountText: measurement.amountText,
+    ...parseAmountText(measurement.amountText),
+    unit: measurement.unit,
+  }))).run();
 }
 
 function isRecipeStepInput(value: unknown): value is RecipeStepInput {
@@ -3120,7 +3153,7 @@ function buildRecipeVersionSnapshot(recipe: {
   recipeInstructions: {
     title: string | null; description: string | null; imageUrl: string | null;
     canonicalUrl: string | null; yieldText: string | null; prepTime: string | null; cookTime: string | null; totalTime: string | null;
-    ingredients: Array<{ ingredientId: string; originalText: string; amountText: string | null; amountValue: number | null; amountMaxValue: number | null; unit: string | null; ingredientText: string | null; notes: string | null; canonicalIngredientId: string | null; attributesJson: string | null; normalizationStatus: string }>;
+    ingredients: Array<{ ingredientId: string; originalText: string; amountText: string | null; amountValue: number | null; amountMaxValue: number | null; unit: string | null; ingredientText: string | null; notes: string | null; canonicalIngredientId: string | null; attributesJson: string | null; normalizationStatus: string; measurements?: Array<{ ingredientMeasurementId: string; amountText: string; amountValue: number | null; amountMaxValue: number | null; unit: string }> }>;
     steps: Array<{ stepId: string; section: string | null; text: string }>;
   } | null;
 }) {
@@ -3138,6 +3171,7 @@ function buildRecipeVersionSnapshot(recipe: {
     totalTime: instructions?.totalTime ?? null,
     ingredients: (instructions?.ingredients ?? []).map((ingredient) => ({
       id: ingredient.ingredientId, originalText: ingredient.originalText, displayText: ingredient.originalText,
+      measurements: (ingredient.measurements ?? []).map((measurement) => ({ id: measurement.ingredientMeasurementId, amountText: measurement.amountText, amountValue: measurement.amountValue, amountMaxValue: measurement.amountMaxValue, unit: measurement.unit })),
       amount: ingredient.amountText, amountValue: ingredient.amountValue, amountMaxValue: ingredient.amountMaxValue,
       unit: ingredient.unit, parsedText: ingredient.ingredientText, notes: ingredient.notes,
       canonicalIngredientId: ingredient.canonicalIngredientId, canonicalName: null,

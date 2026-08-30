@@ -169,6 +169,13 @@
       "when": 1788049897676,
       "tag": "0024_hot_silver_samurai",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1788128154308,
+      "tag": "0025_opposite_angel",
+      "breakpoints": true
     }
   ]
 }

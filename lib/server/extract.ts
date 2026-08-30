@@ -7,6 +7,7 @@ import {
   householdRecipeExtractionAttempts,
   householdRecipeExtractions,
   householdRecipeIngredientAlternatives,
+  householdRecipeIngredientMeasurements,
   householdRecipeIngredients,
   householdRecipeInstructions,
   householdRecipeSources,
@@ -563,6 +564,7 @@ async function persistRecipeInstructions(
 
     await tx.delete(householdRecipeSteps).where(eq(householdRecipeSteps.recipeId, recipeId)).run();
     await tx.delete(householdRecipeIngredientAlternatives).where(eq(householdRecipeIngredientAlternatives.recipeId, recipeId)).run();
+    await tx.delete(householdRecipeIngredientMeasurements).where(eq(householdRecipeIngredientMeasurements.recipeId, recipeId)).run();
     await tx.delete(householdRecipeIngredients).where(eq(householdRecipeIngredients.recipeId, recipeId)).run();
 
     if (existingInstructions) {
@@ -640,10 +642,10 @@ async function persistRecipeInstructions(
           recipeId,
           position: index + 1,
           originalText: ingredient.originalText,
-          amountText: ingredient.amountText,
-          amountValue: ingredient.amountValue,
-          amountMaxValue: ingredient.amountMaxValue,
-          unit: ingredient.unit,
+          amountText: null,
+          amountValue: null,
+          amountMaxValue: null,
+          unit: null,
           ingredientText: ingredient.ingredientText,
           notes: ingredient.notes,
           normalizedIngredientPhrase: normalization?.normalizedIngredientPhrase ?? null,
@@ -656,6 +658,18 @@ async function persistRecipeInstructions(
         })
         .returning()
           .get();
+
+        if (ingredient.measurements.length > 0) {
+          await tx.insert(householdRecipeIngredientMeasurements).values(
+            ingredient.measurements.map((measurement, measurementIndex) => ({
+              householdId,
+              recipeId,
+              ingredientId: savedIngredient.ingredientId,
+              position: measurementIndex + 1,
+              ...measurement,
+            })),
+          ).run();
+        }
 
         if (alternatives.length > 0) {
           await tx.insert(householdRecipeIngredientAlternatives)

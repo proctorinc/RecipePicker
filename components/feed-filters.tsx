@@ -1,21 +1,13 @@
 "use client";
 
 import { Filter } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import {
   defaultFeedFilters,
-  getFeedFilterSummary,
   type FeedFilters,
 } from "@/lib/feed-filters";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
 import { Switch } from "@/components/ui/switch";
 
@@ -24,36 +16,41 @@ const ratingOptions = Array.from({ length: 11 }, (_, index) => index / 2);
 export function FeedFilters({
   filters,
   onApply,
+  open,
+  onOpenChange,
 }: {
   filters: FeedFilters;
   onApply: (filters: FeedFilters) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(filters);
-  const summary = getFeedFilterSummary(filters);
+  const filterPanelId = useId();
 
   useEffect(() => {
     if (!open) setDraft(filters);
   }, [filters, open]);
 
   return (
-    <>
+    <div className="contents">
       <button
         type="button"
         className="shrink-0 rounded-full p-2 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        aria-label="Open feed filters"
-        onClick={() => setOpen(true)}
+        aria-label={open ? "Close feed filters" : "Open feed filters"}
+        aria-controls={filterPanelId}
+        aria-expanded={open}
+        onClick={() => onOpenChange(!open)}
       >
         <Icon icon={Filter} size="sm" />
       </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:w-[min(92vw,32rem)]">
-          <DialogHeader>
-            <DialogTitle>Filter recipes</DialogTitle>
-            <DialogDescription>Choose which recipes appear in your feed.</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-6 pt-2">
+      <div
+        id={filterPanelId}
+        aria-hidden={!open}
+        inert={!open}
+        className={`col-span-2 grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="space-y-5 border-t border-border/70 px-1 pb-1 pt-5">
             <fieldset className="space-y-3">
               <legend className="text-sm font-medium">Ratings</legend>
               <div className="grid grid-cols-3 gap-2">
@@ -115,7 +112,7 @@ export function FeedFilters({
               </div>
             </fieldset>
 
-            <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/70 p-4">
+            <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/70 bg-background/40 p-4">
               <div>
                 <p className="text-sm font-medium">Ready to cook</p>
                 <p className="text-sm text-muted-foreground">Only show recipes with ready instructions.</p>
@@ -128,7 +125,7 @@ export function FeedFilters({
             </div>
           </div>
 
-          <div className="flex justify-between gap-3 pt-6">
+          <div className="flex justify-between gap-3 pt-1">
             <Button type="button" variant="ghost" onClick={() => setDraft(defaultFeedFilters)}>
               Reset
             </Button>
@@ -139,7 +136,7 @@ export function FeedFilters({
                   return;
                 }
                 onApply(draft);
-                setOpen(false);
+                onOpenChange(false);
               }}
               disabled={draft.minRating !== null && draft.maxRating !== null && draft.minRating > draft.maxRating}
             >
@@ -149,9 +146,9 @@ export function FeedFilters({
           {draft.minRating !== null && draft.maxRating !== null && draft.minRating > draft.maxRating ? (
             <p className="text-sm text-destructive">Minimum rating cannot exceed the maximum.</p>
           ) : null}
-        </DialogContent>
-      </Dialog>
-    </>
+        </div>
+      </div>
+    </div>
   );
 }
 

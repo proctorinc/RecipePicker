@@ -176,6 +176,13 @@ export type RecipeDetailView = {
     id: string;
     originalText: string;
     displayText: string;
+    measurements: Array<{
+      id: string;
+      amountText: string;
+      amountValue: number | null;
+      amountMaxValue: number | null;
+      unit: string;
+    }>;
     amount: string | null;
     amountValue: number | null;
     amountMaxValue: number | null;
@@ -260,6 +267,7 @@ export type IngredientReviewItemView = {
   recipeId: string;
   recipeTitle: string;
   originalText: string;
+  measurements: Array<{ id: string; amountText: string; amountValue: number | null; amountMaxValue: number | null; unit: string }>;
   amountText: string | null;
   unit: string | null;
   notes: string | null;

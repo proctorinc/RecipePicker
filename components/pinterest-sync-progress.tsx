@@ -74,12 +74,16 @@ export function PinterestSyncProgress({ run }: { run: SyncProgressRun }) {
         <p className="mt-2 text-muted-foreground">{display.processedPinCount} pins processed</p>
       ) : null}
 
-      {display.state === "indeterminate" ? (
-        <div className="mt-2 space-y-2">
-          <div aria-label="Pinterest sync progress" aria-valuetext="In progress" className="h-2 overflow-hidden rounded-full bg-secondary" role="progressbar">
-            <div className="h-full w-1/3 rounded-full bg-primary animate-[pinterest-sync-progress_1.5s_ease-in-out_infinite]" />
-          </div>
-          <p className="text-muted-foreground">{display.timeRemainingMs === null ? "Estimating time remaining…" : `Estimated time remaining: ${formatPinterestSyncTimeRemaining(display.timeRemainingMs)}`}</p>
+      {display.state === "auto" ? (
+        <div
+          aria-label="Pinterest new-pin sync progress"
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={display.percentComplete}
+          className="mt-2 h-2 overflow-hidden rounded-full bg-secondary"
+          role="progressbar"
+        >
+          <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${display.percentComplete}%` }} />
         </div>
       ) : null}
 

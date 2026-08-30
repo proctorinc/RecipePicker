@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { filterIngredientUnitOptions } from "@/lib/ingredient-units";
 import {
   parseIngredientReviewPageWithAiAction,
   reviewIngredientAction,
@@ -109,8 +110,7 @@ function IngredientReviewForm({ item, onDone }: {
   item: IngredientReviewItemView;
   onDone: () => void;
 }) {
-  const [amountText, setAmountText] = useState(item.amountText ?? "");
-  const [unit, setUnit] = useState(item.unit ?? "");
+  const [measurements, setMeasurements] = useState(item.measurements.map((measurement) => ({ ...measurement })));
   const [ingredientText, setIngredientText] = useState(item.parsedIngredientText ?? "");
   const [notes, setNotes] = useState(item.notes ?? "");
   const [canonicalSearch, setCanonicalSearch] = useState("");
@@ -119,7 +119,7 @@ function IngredientReviewForm({ item, onDone }: {
   const [state, formAction] = useActionState(reviewIngredientAction, initialState);
 
   useEffect(() => {
-    setAmountText(item.amountText ?? ""); setUnit(item.unit ?? ""); setIngredientText(item.parsedIngredientText ?? "");
+    setMeasurements(item.measurements.map((measurement) => ({ ...measurement }))); setIngredientText(item.parsedIngredientText ?? "");
     setNotes(item.notes ?? ""); setCanonicalSearch(""); setCanonicalIngredientId(""); setMatchingOptions([]);
   }, [item]);
   useEffect(() => { if (state.status === "success") { toast.success(state.message); onDone(); } else if (state.status === "error") toast.error(state.message); }, [state, onDone]);
@@ -144,6 +144,7 @@ function IngredientReviewForm({ item, onDone }: {
     <input type="hidden" name="ingredientId" value={item.ingredientId} />
     <input type="hidden" name="recipeId" value={item.recipeId} />
     <input type="hidden" name="canonicalIngredientId" value={canonicalIngredientId} />
+    <input type="hidden" name="measurementsJson" value={JSON.stringify(measurements.map(({ amountText, unit }) => ({ amountText, unit })))} />
     <div className="rounded-2xl border border-border bg-secondary/20 p-4">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Original recipe text</p>
       <p className="mt-2 font-medium">{item.originalText}</p>
@@ -152,9 +153,10 @@ function IngredientReviewForm({ item, onDone }: {
     {item.aiParseOutcome === "not_ingredient" || item.aiParseOutcome === "unresolved" ? <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"><p className="font-medium">AI feedback: {item.aiParseOutcome === "not_ingredient" ? "This may not be an ingredient" : "This does not fit the ingredient fields cleanly"}</p><p className="mt-1 text-muted-foreground">{item.aiParseReason ?? "The AI did not provide a reason."}</p><p className="mt-2 text-muted-foreground">You can correct and accept it, or mark it as not an ingredient.</p></div> : null}
     <div className="space-y-3">
       <div><p className="font-medium">What we extracted</p><p className="text-sm text-muted-foreground">Correct any field that looks wrong, then accept it.</p></div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Amount" name="amountText" value={amountText} onChange={setAmountText} placeholder="e.g. 2" />
-        <Field label="Unit" name="unit" value={unit} onChange={setUnit} placeholder="e.g. cups" />
+      <div className="space-y-2">
+        <p className="text-sm font-medium">Measurements</p>
+        {measurements.map((measurement, index) => <div key={measurement.id} className="grid grid-cols-[1fr_1fr_auto] gap-2"><Input value={measurement.amountText} onChange={(event) => setMeasurements((current) => current.map((entry) => entry.id === measurement.id ? { ...entry, amountText: event.target.value } : entry))} placeholder="e.g. 2" /><MeasurementSearch value={measurement.unit} onChange={(unit) => setMeasurements((current) => current.map((entry) => entry.id === measurement.id ? { ...entry, unit } : entry))} /><Button type="button" variant="ghost" size="sm" onClick={() => setMeasurements((current) => current.filter((entry) => entry.id !== measurement.id))}>Remove</Button></div>)}
+        <Button type="button" variant="outline" size="sm" onClick={() => setMeasurements((current) => [...current, { id: crypto.randomUUID(), amountText: "", amountValue: null, amountMaxValue: null, unit: "" }])}>Add measurement</Button>
       </div>
       <Field label="What is the ingredient?" name="ingredientText" value={ingredientText} onChange={setIngredientText} placeholder="e.g. yellow onion" required />
       <Field label="Notes (optional)" name="notes" value={notes} onChange={setNotes} placeholder="e.g. finely chopped" />
@@ -167,7 +169,7 @@ function IngredientReviewForm({ item, onDone }: {
       {canonicalIngredientId ? <p className="mt-2 text-sm text-muted-foreground">This will be saved as a synonym of the selected existing ingredient.</p> : null}
     </details>
     <div className="flex flex-wrap gap-3">
-      <Button type="submit" name="action" value="accept">Accept{item.parsedIngredientText !== ingredientText || (item.amountText ?? "") !== amountText || (item.unit ?? "") !== unit || (item.notes ?? "") !== notes ? " with changes" : ""}</Button>
+      <Button type="submit" name="action" value="accept">Accept{item.parsedIngredientText !== ingredientText || JSON.stringify(item.measurements.map(({ amountText, unit }) => ({ amountText, unit }))) !== JSON.stringify(measurements.map(({ amountText, unit }) => ({ amountText, unit })) || (item.notes ?? "") !== notes) ? " with changes" : ""}</Button>
       <Button type="submit" name="action" value="reject" variant="outline">Not an ingredient</Button>
     </div>
   </form>;
@@ -175,6 +177,34 @@ function IngredientReviewForm({ item, onDone }: {
 
 function Field({ label, name, value, onChange, placeholder, required = false }: { label: string; name: string; value: string; onChange: (value: string) => void; placeholder: string; required?: boolean }) {
   return <label className="space-y-2"><span className="text-sm font-medium">{label}</span><Input name={name} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} required={required} /></label>;
+}
+
+function MeasurementSearch({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const matches = filterIngredientUnitOptions(value);
+  const hasExactMatch = matches.some((option) => option.value === value.trim().toLowerCase() || option.aliases.includes(value.trim().toLowerCase()));
+
+  return <label className="relative space-y-2">
+    <span className="text-sm font-medium">Measurement</span>
+    <Input
+      name="unit"
+      value={value}
+      onChange={(event) => { onChange(event.target.value); setIsOpen(true); }}
+      onFocus={() => setIsOpen(true)}
+      onBlur={() => window.setTimeout(() => setIsOpen(false), 150)}
+      placeholder="Search measurements, e.g. cup"
+      role="combobox"
+      aria-autocomplete="list"
+      aria-expanded={isOpen}
+    />
+    {isOpen ? <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md">
+      {matches.map((option) => <button key={option.value} type="button" className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-secondary" onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(option.value); setIsOpen(false); }}>
+        {option.label}<span className="ml-2 text-muted-foreground">{option.aliases.join(", ")}</span>
+      </button>)}
+      {!matches.length && value.trim() ? <p className="px-3 py-2 text-sm text-muted-foreground">No matching measurement. “{value.trim()}” will be saved as a new measurement.</p> : null}
+    </div> : null}
+    {!hasExactMatch && value.trim() ? <span className="text-xs text-muted-foreground">New measurement</span> : null}
+  </label>;
 }
 
 function ParsePageButton({ aiEnabled, refreshing }: { aiEnabled: boolean; refreshing: boolean }) {

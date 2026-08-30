@@ -10,6 +10,7 @@ export type CartIngredientInput = {
   amountValue: number | null;
   amountMaxValue: number | null;
   unit: string | null;
+  measurements?: Array<{ amountText: string; amountValue: number | null; amountMaxValue: number | null; unit: string }>;
   normalizationStatus: string;
   sourceMeal: { eventId: string; date: string; recipeId: string; recipeTitle: string; recipeImageUrl: string | null };
   alternatives: CartIngredientAlternative[];
@@ -44,18 +45,36 @@ export type BuiltCartItem = {
 };
 
 export function buildShoppingCartItems(inputs: CartIngredientInput[]): BuiltCartItem[] {
-  const alternativeItems = inputs
+  const expandedInputs = inputs.flatMap((input) => {
+    const measurements = input.measurements ?? [];
+    return measurements.length > 0
+      ? measurements.map((measurement) => ({ ...input, amountText: measurement.amountText, amountValue: measurement.amountValue, amountMaxValue: measurement.amountMaxValue, unit: measurement.unit }))
+      : [input];
+  });
+  const alternativeItems = expandedInputs
     .filter((input) => input.alternatives.length > 0)
     .flatMap(buildAlternativeGroup);
   const grouped = new Map<string, CartIngredientInput[]>();
-  for (const input of inputs) {
+  for (const input of expandedInputs) {
     if (input.alternatives.length > 0) continue;
     if (input.normalizationStatus === "not_ingredient") continue;
     const key = input.canonicalIngredientId ? `canonical:${input.canonicalIngredientId}` : `raw:${input.ingredientId}`;
     grouped.set(key, [...(grouped.get(key) ?? []), input]);
   }
 
-  return [...alternativeItems, ...[...grouped.entries()].flatMap(([key, entries]) => buildGroup(key, entries))]
+  const items = [...alternativeItems, ...[...grouped.entries()].flatMap(([key, entries]) => buildGroup(key, entries))];
+  if (!inputs.some((input) => (input.measurements?.length ?? 0) > 1)) {
+    return items.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }
+  const combined = new Map<string, BuiltCartItem>();
+  for (const item of items) {
+    const key = `${item.canonicalIngredientId ?? item.displayName}:${item.displayName}:${item.alternativeOptions ? "alternative" : "standard"}`;
+    const prior = combined.get(key);
+    if (!prior) { combined.set(key, item); continue; }
+    const quantities = [formatCartQuantity(prior.amountText, prior.unit), formatCartQuantity(item.amountText, item.unit)].filter(Boolean).join(" · ");
+    combined.set(key, { ...prior, amountText: quantities || null, unit: null, sourceMeals: uniqueSources([...prior.sourceMeals, ...item.sourceMeals]) });
+  }
+  return [...combined.values()]
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 

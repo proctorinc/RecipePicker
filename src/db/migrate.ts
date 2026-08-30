@@ -3,11 +3,12 @@ import process from "node:process";
 import { migrate as migrateSqlite } from "drizzle-orm/better-sqlite3/migrator";
 import { migrate as migrateLibsql } from "drizzle-orm/libsql/migrator";
 import { readMigrationFiles } from "drizzle-orm/migrator";
-import { sql } from "drizzle-orm";
+import { and, sql } from "drizzle-orm";
 
 import { logInfo, maybeWithSqliteTarget, runScriptWithLogging } from "@/lib/server/logger";
 import type { DatabaseClient } from "./client.js";
 import { createDatabase } from "./client.js";
+import { householdRecipeIngredientMeasurements, householdRecipeIngredients } from "./schema.js";
 
 type AppliedMigration = {
   hash: string;
@@ -75,6 +76,31 @@ async function migrateByHash(
   }
 }
 
+async function backfillIngredientMeasurements(db: DatabaseClient) {
+  const legacyIngredients = await db
+    .select()
+    .from(householdRecipeIngredients)
+    .where(and(sql`${householdRecipeIngredients.amountText} IS NOT NULL`, sql`${householdRecipeIngredients.unit} IS NOT NULL`));
+
+  for (const ingredient of legacyIngredients) {
+    const existing = await db.query.householdRecipeIngredientMeasurements.findFirst({
+      where: (table, { eq: equals }) => equals(table.ingredientId, ingredient.ingredientId),
+      columns: { ingredientMeasurementId: true },
+    });
+    if (existing || !ingredient.amountText || !ingredient.unit) continue;
+    await db.insert(householdRecipeIngredientMeasurements).values({
+      householdId: ingredient.householdId,
+      recipeId: ingredient.recipeId,
+      ingredientId: ingredient.ingredientId,
+      position: 1,
+      amountText: ingredient.amountText,
+      amountValue: ingredient.amountValue,
+      amountMaxValue: ingredient.amountMaxValue,
+      unit: ingredient.unit,
+    }).onConflictDoNothing().run();
+  }
+}
+
 async function main() {
   const { db, driver, sqlite, targetLabel } = createDatabase();
 
@@ -86,6 +112,7 @@ async function main() {
       ...maybeWithSqliteTarget(targetLabel),
     });
     await migrateByHash(db, driver);
+    await backfillIngredientMeasurements(db);
 
     logInfo("db.manual_migration.completed", {
       result: {

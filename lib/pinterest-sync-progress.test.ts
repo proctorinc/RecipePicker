@@ -29,9 +29,9 @@ describe("getPinterestSyncProgressDisplay", () => {
       .toEqual({ state: "overtime", processedPinCount: 101 });
   });
 
-  it("keeps new-pin sync progress indeterminate while calculating its time estimate", () => {
+  it("calculates hidden numeric progress for new-pin syncs", () => {
     expect(getPinterestSyncProgressDisplay({ status: "running", trigger: "auto_new_pins", startedAt, expectedPinCount: 250, processedPinCount: 25 }, now))
-      .toEqual({ state: "indeterminate", timeRemainingMs: 540_000 });
+      .toEqual({ state: "auto", percentComplete: 10 });
   });
 });
 

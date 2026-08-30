@@ -5,6 +5,7 @@ import { z } from "zod";
 import Tesseract from "tesseract.js";
 
 import { parseIngredientLine } from "@/lib/ingredient-parsing";
+import type { IngredientMeasurement } from "@/lib/ingredient-parsing";
 import { generateRecipeExtractionWithHouseholdAi, generateVideoRecipeExtractionWithHouseholdAi } from "@/lib/server/ai-provider";
 import { getPinImageSources, getPinVideoDiscovery } from "@/lib/server/media";
 import type { DatabaseClient } from "@/src/db/client";
@@ -109,6 +110,7 @@ export type FetchResult = {
 
 export type ExtractedIngredientLine = {
   originalText: string;
+  measurements: IngredientMeasurement[];
   amountText: string | null;
   amountValue: number | null;
   amountMaxValue: number | null;
