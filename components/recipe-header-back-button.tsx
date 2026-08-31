@@ -57,7 +57,7 @@ export function RecipeHeaderBackButton() {
       type="button"
       variant="ghost"
       size="icon"
-      className="size-9 shrink-0 gap-1.5 md:w-auto md:px-3"
+      className="size-11 shrink-0 gap-1.5 md:w-auto md:px-3"
       aria-label="Go back"
       onClick={() => {
         if (backHref) {
@@ -73,7 +73,7 @@ export function RecipeHeaderBackButton() {
         router.push("/");
       }}
     >
-      <Icon icon={ArrowLeft} size="sm" />
+      <Icon icon={ArrowLeft} size="md" />
       <span className="hidden md:inline">Back</span>
     </Button>
   );

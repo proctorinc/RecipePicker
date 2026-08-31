@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Soup, Star } from "lucide-react";
 
+import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import type { HouseholdCookRatingView } from "@/types/view-models";
 
@@ -52,15 +53,17 @@ export function KitchenSummaryMenu({
         onClick={() => setIsOpen((open) => !open)}
         className={cn(
           "flex items-center rounded-xl text-left font-[family-name:var(--font-serif)] transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          isSmall ? "gap-1 px-1 py-0.5 text-sm font-semibold" : "gap-3 p-1",
+          isSmall ? "gap-1.5 px-1 py-1 text-base font-semibold" : "gap-3 p-1",
         )}
       >
         <KitchenLogo logoUrl={householdLogoUrl} size={size} />
         <span className={isSmall ? "max-w-44 truncate" : "text-lg font-semibold"}>
           {householdName}
         </span>
-        <ChevronDown
-          className={cn("shrink-0 text-muted-foreground transition-transform", isSmall ? "h-3.5 w-3.5" : "h-4 w-4", isOpen && "rotate-180")}
+        <Icon
+          icon={ChevronDown}
+          size="xs"
+          className={cn("text-muted-foreground transition-transform", isOpen && "rotate-180")}
         />
       </button>
 
@@ -116,8 +119,8 @@ export function KitchenSummaryMenu({
 }
 
 function KitchenLogo({ logoUrl, size }: { logoUrl: string | null; size: "small" | "large" | "feature" }) {
-  const dimensions = size === "small" ? "h-6 w-6" : size === "large" ? "h-11 w-11" : "h-16 w-16";
-  const iconDimensions = size === "small" ? "h-3 w-3" : size === "large" ? "h-5 w-5" : "h-7 w-7";
+  const dimensions = size === "small" ? "h-8 w-8" : size === "large" ? "h-11 w-11" : "h-16 w-16";
+  const iconSize = size === "small" ? "sm" : size === "large" ? "md" : "xl";
 
   if (logoUrl) {
     return (
@@ -129,7 +132,7 @@ function KitchenLogo({ logoUrl, size }: { logoUrl: string | null; size: "small" 
 
   return (
     <div className={`flex ${dimensions} shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm`}>
-      <Soup className={iconDimensions} />
+      <Icon icon={Soup} size={iconSize} />
     </div>
   );
 }

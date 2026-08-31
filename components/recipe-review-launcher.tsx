@@ -64,103 +64,116 @@ export function RecipeReviewLauncher({
         </Button>
       ) : (
         <Card
-          className={reviewCount > 0
-            ? "cursor-pointer bg-white/85 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            : "bg-white/85"}
+          className={
+            reviewCount > 0
+              ? "cursor-pointer bg-white/85 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              : "bg-white/85"
+          }
           role={reviewCount > 0 ? "button" : undefined}
           tabIndex={reviewCount > 0 ? 0 : undefined}
-          aria-label={reviewCount > 0 ? `View ${reviewCount} reviews` : undefined}
+          aria-label={
+            reviewCount > 0 ? `View ${reviewCount} reviews` : undefined
+          }
           onClick={reviewCount > 0 ? () => setReviewsOpen(true) : undefined}
-          onKeyDown={reviewCount > 0 ? (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              setReviewsOpen(true);
-            }
-          } : undefined}
+          onKeyDown={
+            reviewCount > 0
+              ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setReviewsOpen(true);
+                  }
+                }
+              : undefined
+          }
         >
-        <CardHeader>
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <CardTitle>Reviews</CardTitle>
-              {reviewCount > 0 ? (
-                <span className="text-sm font-medium text-muted-foreground underline underline-offset-4">
-                  View reviews
-                </span>
-              ) : null}
+          <CardHeader>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>Reviews</CardTitle>
+                {reviewCount > 0 ? (
+                  <span className="text-sm font-medium text-muted-foreground underline underline-offset-4">
+                    View all
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-3">
+                <StarRating value={averageRating ?? 0} />
+                <p className="text-sm text-muted-foreground">
+                  {reviewCount > 0
+                    ? `${averageLabel} (${reviewCount} review${reviewCount === 1 ? "" : "s"})`
+                    : "No reviews yet"}
+                </p>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <StarRating value={averageRating ?? 0} />
-              <p className="text-sm text-muted-foreground">
-                {reviewCount > 0
-                  ? `${averageLabel} (${reviewCount} review${reviewCount === 1 ? "" : "s"})`
-                  : "No reviews yet"}
-              </p>
-            </div>
-          </div>
-          {reviewCount > 0 ? (
-            <Dialog open={reviewsOpen} onOpenChange={setReviewsOpen}>
-                  <DialogContent className="w-[min(92vw,48rem)] max-h-[85vh] overflow-y-auto">
-                    <DialogHeader>
-                      <DialogTitle>Reviews</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      {reviews.map((review) => (
-                        <article
-                          key={review.reviewId}
-                          className="rounded-[24px] border border-border/60 bg-secondary/20 p-4"
-                        >
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-3">
-                                <StarRating value={review.ratingValue} />
-                                <span className="text-sm text-muted-foreground">
-                                  {formatRatingValue(review.ratingValue)} / 5
-                                </span>
-                              </div>
-                              <p className="text-sm text-muted-foreground">
-                                {review.eatenOn
-                                  ? `${formatDay(review.eatenOn)} by `
-                                  : "No date included by "}
-                                {review.reviewerName} · Version {review.recipeVersionNumber}
-                              </p>
-                              {review.note ? (
-                                <p className="text-sm leading-6 text-foreground">
-                                  {review.note}
-                                </p>
-                              ) : null}
-                              {review.imageUrl ? (
-                                // Review photos are trusted public Blob URLs.
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={review.imageUrl} alt={`Photo from ${review.reviewerName}'s review`} className="max-h-72 w-full rounded-[18px] object-cover" />
-                              ) : null}
+            {reviewCount > 0 ? (
+              <Dialog open={reviewsOpen} onOpenChange={setReviewsOpen}>
+                <DialogContent className="w-[min(92vw,48rem)] max-h-[85vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="pb-4">Reviews</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    {reviews.map((review) => (
+                      <article
+                        key={review.reviewId}
+                        className="rounded-[24px] border border-border/60 bg-secondary/20 p-4"
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-3">
+                              <StarRating value={review.ratingValue} />
+                              <span className="text-sm text-muted-foreground">
+                                {formatRatingValue(review.ratingValue)} / 5
+                              </span>
                             </div>
-                            {review.canEdit || review.canDelete ? (
-                              <div className="flex gap-2">
-                                {review.canEdit ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setEditingReview(review)}
-                                  >
-                                    Edit
-                                  </Button>
-                                ) : null}
-                                {review.canDelete ? (
-                                  <ReviewDeleteButton
-                                    reviewId={review.reviewId}
-                                  />
-                                ) : null}
-                              </div>
+                            <p className="text-sm text-muted-foreground">
+                              {review.eatenOn
+                                ? `${formatDay(review.eatenOn)} by `
+                                : "No date included by "}
+                              {review.reviewerName} · Version{" "}
+                              {review.recipeVersionNumber}
+                            </p>
+                            {review.note ? (
+                              <p className="text-sm leading-6 text-foreground">
+                                {review.note}
+                              </p>
+                            ) : null}
+                            {review.imageUrl ? (
+                              // Review photos are trusted public Blob URLs.
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={review.imageUrl}
+                                alt={`Photo from ${review.reviewerName}'s review`}
+                                className="max-h-72 w-full rounded-[18px] object-cover"
+                              />
                             ) : null}
                           </div>
-                        </article>
-                      ))}
-                    </div>
-                  </DialogContent>
-            </Dialog>
-          ) : null}
-        </CardHeader>
+                          {review.canEdit || review.canDelete ? (
+                            <div className="flex gap-2">
+                              {review.canEdit ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setEditingReview(review)}
+                                >
+                                  Edit
+                                </Button>
+                              ) : null}
+                              {review.canDelete ? (
+                                <ReviewDeleteButton
+                                  reviewId={review.reviewId}
+                                />
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </DialogContent>
+              </Dialog>
+            ) : null}
+          </CardHeader>
         </Card>
       )}
 

@@ -248,14 +248,9 @@ export function RecipeMetadataEditor({
         <div className="-mt-4 mx-auto w-full max-w-4xl space-y-2">
           {byline}
           {topContent}
-          <RecipeTags
-            recipeId={recipeId}
-            initialTags={tags}
-            availableTags={availableTags}
-          />
 
           <div className="space-y-6">
-            <section>
+            <section className="px-2">
               {isEditing ? (
                 <Textarea
                   ref={descriptionRef}
@@ -265,13 +260,18 @@ export function RecipeMetadataEditor({
                   onChange={(event) => setDraftDescription(event.target.value)}
                   placeholder="Add a short description for this recipe."
                   rows={4}
-                  className="min-h-[7.5rem] resize-none overflow-hidden rounded-none border-0 bg-secondary/30 px-0 py-0 text-sm text-muted-foreground shadow-none focus-visible:ring-0 sm:text-base"
+                  className="min-h-[7.5rem] resize-none overflow-hidden rounded-none border-0 bg-secondary/30 py-0 text-sm text-muted-foreground shadow-none focus-visible:ring-0 sm:text-base"
                 />
               ) : displayDescription.trim() ? (
                 <RecipeDescription description={displayDescription} />
               ) : null}
             </section>
 
+            <RecipeTags
+              recipeId={recipeId}
+              initialTags={tags}
+              availableTags={availableTags}
+            />
             {afterDescriptionContent}
             {content}
           </div>
@@ -359,7 +359,11 @@ function RecipeTags({
                 ? save(tags.filter((value) => value !== tag))
                 : setSelectedTag(tag)
             }
-            className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium transition hover:bg-secondary"
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border border-transparent bg-muted-foreground/75 px-2.5 py-1 font-[family-name:var(--font-serif)] text-xs font-medium italic tracking-wide text-background/90 transition hover:bg-muted-foreground/85 hover:text-background",
+              selectedTag === tag &&
+                "bg-foreground text-background",
+            )}
             aria-label={
               selectedTag === tag ? `Remove ${tag} tag` : `Select ${tag} tag`
             }
@@ -433,7 +437,7 @@ function RecipeTags({
                     key={tag.tagId}
                     type="button"
                     disabled={pending}
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium transition hover:bg-secondary disabled:pointer-events-none disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded-full border border-transparent bg-muted-foreground/75 px-2.5 py-1 font-[family-name:var(--font-serif)] text-xs font-medium italic tracking-wide text-background/90 transition hover:bg-muted-foreground/85 hover:text-background disabled:pointer-events-none disabled:opacity-50"
                     onClick={() => addTag(tag.name)}
                   >
                     <Icon

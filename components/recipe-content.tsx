@@ -123,8 +123,8 @@ export function RecipeContent({
         ) : null}
 
         <Card className="bg-white/85">
-          <CardHeader className="px-4"><CardTitle>Ingredients</CardTitle></CardHeader>
-          <CardContent className="px-4">
+          <CardHeader><CardTitle>Ingredients</CardTitle></CardHeader>
+          <CardContent>
             {isEditing ? (
               <section className="space-y-3">
                 <input form={formId} type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.filter((ingredient) => !ingredient.isPendingDeletion && ingredient.parsedText?.trim()).map(({ id, originalText, parsedText, notes, measurements }) => ({ id, originalText, ingredientText: parsedText, notes, measurements })))} />
@@ -235,8 +235,8 @@ export function RecipeContent({
             ) : steps.length > 0 ? (
             <ol className="space-y-4">
               {steps.map((step, index) => (
-                <li key={step.id} className="flex gap-4 rounded-[24px] bg-secondary/40 p-4">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-sm font-semibold shadow-sm">{index + 1}</div>
+                <li key={step.id} className="flow-root rounded-[24px] bg-secondary/40 p-4">
+                  <div className="float-left mr-4 flex h-9 w-9 translate-y-2.5 items-center justify-center rounded-full bg-white text-sm font-semibold shadow-sm">{index + 1}</div>
                   <div>
                     {step.section ? <p className="mb-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">{step.section}</p> : null}
                     <p className="leading-7">{step.text}</p>

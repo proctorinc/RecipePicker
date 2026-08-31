@@ -156,18 +156,26 @@ export function HistoryPageSkeleton() {
 export function RecipePageSkeleton() {
   return (
     <div className="space-y-8">
-      <Skeleton className="h-11 w-36 rounded-full" />
-      <Skeleton className="aspect-[16/10] w-full rounded-[36px] sm:aspect-[16/8]" />
-      <div className="space-y-3 px-4">
-        <Skeleton className="h-12 w-3/4" />
-        <Skeleton className="h-5 w-full max-w-2xl" />
-        <Skeleton className="h-5 w-2/3" />
+      <div className="relative left-1/2 w-screen -translate-x-1/2">
+        <Skeleton className="aspect-[16/10] w-full rounded-t-[36px] border border-primary/20 bg-gradient-to-br from-primary/55 via-primary/40 to-primary/55 shadow-[0_12px_28px_rgba(73,49,31,0.08)] sm:aspect-[16/8]" />
+        <Skeleton className="absolute inset-x-4 bottom-4 h-12 max-w-3xl rounded-[20px] bg-primary/70 sm:inset-x-8 sm:bottom-8 sm:h-16" />
       </div>
-      <div className="flex gap-2">
-        <Skeleton className="h-11 w-44 rounded-full" />
-        <Skeleton className="h-11 w-40 rounded-full" />
+
+      <div className="mx-auto w-full max-w-4xl space-y-6">
+        <div className="space-y-2 px-2">
+          <Skeleton className="h-5 w-full max-w-2xl bg-primary/45" />
+          <Skeleton className="h-5 w-2/3 bg-primary/45" />
+        </div>
+        <div className="flex gap-2">
+          <Skeleton className="h-11 w-28 rounded-full bg-primary/45" />
+          <Skeleton className="h-11 w-36 rounded-full bg-primary/45" />
+          <Skeleton className="h-11 w-24 rounded-full bg-primary/45" />
+        </div>
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-[1.1fr_0.9fr]">
+          <Skeleton className="h-72 rounded-[28px] border border-primary/20 bg-gradient-to-br from-primary/55 via-primary/40 to-primary/55 shadow-[0_12px_28px_rgba(73,49,31,0.08)]" />
+          <Skeleton className="h-80 rounded-[28px] border border-primary/20 bg-gradient-to-br from-primary/55 via-primary/40 to-primary/55 shadow-[0_12px_28px_rgba(73,49,31,0.08)]" />
+        </div>
       </div>
-      <Skeleton className="h-40 w-full rounded-[32px]" />
     </div>
   );
 }

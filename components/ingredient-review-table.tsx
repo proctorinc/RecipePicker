@@ -113,32 +113,14 @@ function IngredientReviewForm({ item, onDone }: {
   const [measurements, setMeasurements] = useState(item.measurements.map((measurement) => ({ ...measurement })));
   const [ingredientText, setIngredientText] = useState(item.parsedIngredientText ?? "");
   const [notes, setNotes] = useState(item.notes ?? "");
-  const [canonicalSearch, setCanonicalSearch] = useState("");
   const [canonicalIngredientId, setCanonicalIngredientId] = useState("");
-  const [matchingOptions, setMatchingOptions] = useState<CanonicalIngredientOption[]>([]);
   const [state, formAction] = useActionState(reviewIngredientAction, initialState);
 
   useEffect(() => {
     setMeasurements(item.measurements.map((measurement) => ({ ...measurement }))); setIngredientText(item.parsedIngredientText ?? "");
-    setNotes(item.notes ?? ""); setCanonicalSearch(""); setCanonicalIngredientId(""); setMatchingOptions([]);
+    setNotes(item.notes ?? ""); setCanonicalIngredientId("");
   }, [item]);
   useEffect(() => { if (state.status === "success") { toast.success(state.message); onDone(); } else if (state.status === "error") toast.error(state.message); }, [state, onDone]);
-  useEffect(() => {
-    const query = canonicalSearch.trim();
-    if (!query) { setMatchingOptions([]); return; }
-    const controller = new AbortController();
-    const timeout = window.setTimeout(async () => {
-      try {
-        const response = await fetch(`/api/ingredients/search?q=${encodeURIComponent(query)}`, { signal: controller.signal });
-        if (!response.ok) throw new Error("Unable to search ingredients.");
-        const data = await response.json() as { items: CanonicalIngredientOption[] };
-        setMatchingOptions(data.items);
-      } catch (error) {
-        if ((error as { name?: string }).name !== "AbortError") setMatchingOptions([]);
-      }
-    }, 200);
-    return () => { controller.abort(); window.clearTimeout(timeout); };
-  }, [canonicalSearch]);
 
   return <form action={formAction} className="space-y-5">
     <input type="hidden" name="ingredientId" value={item.ingredientId} />
@@ -158,16 +140,14 @@ function IngredientReviewForm({ item, onDone }: {
         {measurements.map((measurement, index) => <div key={measurement.id} className="grid grid-cols-[1fr_1fr_auto] gap-2"><Input value={measurement.amountText} onChange={(event) => setMeasurements((current) => current.map((entry) => entry.id === measurement.id ? { ...entry, amountText: event.target.value } : entry))} placeholder="e.g. 2" /><MeasurementSearch value={measurement.unit} onChange={(unit) => setMeasurements((current) => current.map((entry) => entry.id === measurement.id ? { ...entry, unit } : entry))} /><Button type="button" variant="ghost" size="sm" onClick={() => setMeasurements((current) => current.filter((entry) => entry.id !== measurement.id))}>Remove</Button></div>)}
         <Button type="button" variant="outline" size="sm" onClick={() => setMeasurements((current) => [...current, { id: crypto.randomUUID(), amountText: "", amountValue: null, amountMaxValue: null, unit: "" }])}>Add measurement</Button>
       </div>
-      <Field label="What is the ingredient?" name="ingredientText" value={ingredientText} onChange={setIngredientText} placeholder="e.g. yellow onion" required />
+      <IngredientSearch
+        value={ingredientText}
+        canonicalIngredientId={canonicalIngredientId}
+        onChange={(value) => { setIngredientText(value); setCanonicalIngredientId(""); }}
+        onSelect={(option) => { setIngredientText(option.displayName); setCanonicalIngredientId(option.canonicalIngredientId); }}
+      />
       <Field label="Notes (optional)" name="notes" value={notes} onChange={setNotes} placeholder="e.g. finely chopped" />
     </div>
-    <details className="rounded-2xl border border-border p-4">
-      <summary className="cursor-pointer font-medium">Optional: use an existing ingredient or see related matches</summary>
-      <p className="mt-2 text-sm text-muted-foreground">Leave this alone to create a provisional ingredient you can organize later.</p>
-      <Input className="mt-3" value={canonicalSearch} onChange={(event) => setCanonicalSearch(event.target.value)} placeholder="Search existing ingredients" />
-      {matchingOptions.length ? <div className="mt-2 space-y-1">{matchingOptions.map((option) => <button key={option.canonicalIngredientId} type="button" onClick={() => { setCanonicalIngredientId(option.canonicalIngredientId); setIngredientText(option.displayName); }} className={`block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-secondary ${canonicalIngredientId === option.canonicalIngredientId ? "bg-secondary" : ""}`}>{option.displayName}{option.parentDisplayName ? ` · ${option.parentDisplayName}` : ""}</button>)}</div> : null}
-      {canonicalIngredientId ? <p className="mt-2 text-sm text-muted-foreground">This will be saved as a synonym of the selected existing ingredient.</p> : null}
-    </details>
     <div className="flex flex-wrap gap-3">
       <Button type="submit" name="action" value="accept">Accept{item.parsedIngredientText !== ingredientText || JSON.stringify(item.measurements.map(({ amountText, unit }) => ({ amountText, unit }))) !== JSON.stringify(measurements.map(({ amountText, unit }) => ({ amountText, unit })) || (item.notes ?? "") !== notes) ? " with changes" : ""}</Button>
       <Button type="submit" name="action" value="reject" variant="outline">Not an ingredient</Button>
@@ -177,6 +157,61 @@ function IngredientReviewForm({ item, onDone }: {
 
 function Field({ label, name, value, onChange, placeholder, required = false }: { label: string; name: string; value: string; onChange: (value: string) => void; placeholder: string; required?: boolean }) {
   return <label className="space-y-2"><span className="text-sm font-medium">{label}</span><Input name={name} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} required={required} /></label>;
+}
+
+function IngredientSearch({
+  value,
+  canonicalIngredientId,
+  onChange,
+  onSelect,
+}: {
+  value: string;
+  canonicalIngredientId: string;
+  onChange: (value: string) => void;
+  onSelect: (option: CanonicalIngredientOption) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [matches, setMatches] = useState<CanonicalIngredientOption[]>([]);
+
+  useEffect(() => {
+    const query = value.trim();
+    if (!query) { setMatches([]); return; }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/ingredients/search?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+        if (!response.ok) throw new Error("Unable to search ingredients.");
+        const data = await response.json() as { items: CanonicalIngredientOption[] };
+        setMatches(data.items);
+      } catch (error) {
+        if ((error as { name?: string }).name !== "AbortError") setMatches([]);
+      }
+    }, 200);
+    return () => { controller.abort(); window.clearTimeout(timeout); };
+  }, [value]);
+
+  return <label className="relative space-y-2">
+    <span className="text-sm font-medium">What is the ingredient?</span>
+    <Input
+      name="ingredientText"
+      value={value}
+      onChange={(event) => { onChange(event.target.value); setIsOpen(true); }}
+      onFocus={() => setIsOpen(true)}
+      onBlur={() => window.setTimeout(() => setIsOpen(false), 150)}
+      placeholder="Search ingredients, e.g. yellow onion"
+      required
+      role="combobox"
+      aria-autocomplete="list"
+      aria-expanded={isOpen}
+    />
+    {isOpen ? <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md">
+      {matches.map((option) => <button key={option.canonicalIngredientId} type="button" className={`block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-secondary ${canonicalIngredientId === option.canonicalIngredientId ? "bg-secondary" : ""}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { onSelect(option); setIsOpen(false); }}>
+        {option.displayName}{option.parentDisplayName ? <span className="text-muted-foreground"> · {option.parentDisplayName}</span> : null}
+      </button>)}
+      {!matches.length && value.trim() ? <p className="px-3 py-2 text-sm text-muted-foreground">No matching ingredient. “{value.trim()}” will be saved as a new ingredient.</p> : null}
+    </div> : null}
+    {canonicalIngredientId ? <span className="text-xs text-muted-foreground">Matches an existing ingredient</span> : null}
+  </label>;
 }
 
 function MeasurementSearch({ value, onChange }: { value: string; onChange: (value: string) => void }) {
