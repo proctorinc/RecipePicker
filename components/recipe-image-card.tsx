@@ -2,6 +2,7 @@
 
 import { Star } from "lucide-react";
 
+import { Icon } from "@/components/ui/icon";
 import { RecipeImage } from "@/components/recipe-image";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +33,8 @@ export function RecipeImageCard({
   imageClassName,
   titleClassName,
 }: RecipeImageCardProps) {
+  const hasPerfectRating = averageRating === 5;
+
   return (
     <div
       className={cn("relative overflow-hidden", className)}
@@ -62,9 +65,16 @@ export function RecipeImageCard({
       </p>
       <div className="absolute inset-0 bg-gradient-to-t from-primary/80 via-primary/10 to-transparent" />
       {reviewCount > 0 && averageRating !== null ? (
-        <div className="absolute right-0 top-3 flex items-center gap-1 bg-primary/90 py-1 pl-5 pr-3 text-sm text-amber-100/90 [clip-path:polygon(0_0,100%_0,100%_100%,0_100%,10px_50%)]">
+        <div
+          className={cn(
+            "absolute right-0 top-3 flex items-center gap-1 py-1 pl-5 pr-3 text-sm [clip-path:polygon(0_0,100%_0,100%_100%,0_100%,10px_50%)]",
+            hasPerfectRating
+              ? "border-y border-l border-amber-200/70 bg-[linear-gradient(135deg,#9c600c_0%,#f0c858_50%,#b77812_100%)] text-amber-950 shadow-[0_2px_6px_rgba(77,42,3,0.35)]"
+              : "bg-primary/90 text-amber-100/90",
+          )}
+        >
           <span className="font-bold">{averageRating}</span>
-          <Star className="size-3 fill-current" aria-hidden="true" />
+          <Icon icon={Star} size="xs" className="fill-current" />
         </div>
       ) : null}
     </div>

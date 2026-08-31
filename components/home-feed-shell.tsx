@@ -259,8 +259,8 @@ export function HomeFeedShell({
       <div
         className={
           filterSummary.length > 0
-            ? "pt-[calc(env(safe-area-inset-top)+7.875rem+var(--pinterest-sync-indicator-height))] md:pt-0"
-            : "pt-[calc(env(safe-area-inset-top)+6.25rem+var(--pinterest-sync-indicator-height))] md:pt-0"
+            ? "pt-[calc(env(safe-area-inset-top)+6.875rem+var(--pinterest-sync-indicator-height))] md:pt-0"
+            : "pt-[calc(env(safe-area-inset-top)+5.25rem+var(--pinterest-sync-indicator-height))] md:pt-0"
         }
       >
         {header ? <div className="mb-6">{header}</div> : null}
