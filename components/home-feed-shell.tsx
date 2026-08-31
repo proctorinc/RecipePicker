@@ -259,8 +259,8 @@ export function HomeFeedShell({
       <div
         className={
           filterSummary.length > 0
-            ? "pt-[calc(env(safe-area-inset-top)+6.875rem+var(--pinterest-sync-indicator-height))] md:pt-0"
-            : "pt-[calc(env(safe-area-inset-top)+5.25rem+var(--pinterest-sync-indicator-height))] md:pt-0"
+            ? "pt-[calc(env(safe-area-inset-top)+7.875rem+var(--pinterest-sync-indicator-height))] md:pt-0"
+            : "pt-[calc(env(safe-area-inset-top)+6.25rem+var(--pinterest-sync-indicator-height))] md:pt-0"
         }
       >
         {header ? <div className="mb-6">{header}</div> : null}
@@ -275,7 +275,7 @@ export function HomeFeedShell({
           onPageChange={setPage}
         />
       </div>
-      <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3.75rem+var(--pinterest-sync-indicator-height))] z-30 px-3 md:top-auto md:bottom-4 md:px-0">
+      <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+4.75rem+var(--pinterest-sync-indicator-height))] z-30 px-3 md:top-auto md:bottom-4 md:px-0">
         <div className="mx-auto max-w-md">
           <div
             className={

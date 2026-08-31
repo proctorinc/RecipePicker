@@ -1,10 +1,8 @@
-import { ArrowLeft, Bookmark, Hash } from "lucide-react";
+import { Bookmark, Hash } from "lucide-react";
 import { notFound } from "next/navigation";
 
-import { AppTransitionLink } from "@/components/app-transition-link";
 import { HomeFeedShell } from "@/components/home-feed-shell";
 import { PageShell } from "@/components/page-shell";
-import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { getFeedPinsPage, getRecipeTag } from "@/lib/server/queries";
 import { SAVE_FOR_LATER_TAG_NORMALIZED_NAME } from "@/lib/recipe-tags";
@@ -26,22 +24,14 @@ export default async function TagPage({ params }: { params: Promise<{ tagId: str
         initialQuery=""
         tagId={tagId}
         header={
-          <div className="flex items-center gap-3 px-2">
-            <Button asChild variant="outline">
-              <AppTransitionLink href="/tags" prefetch>
-                <ArrowLeft className="size-4" />
-                Back to tags
-              </AppTransitionLink>
-            </Button>
-            <div>
-              <h1 className="flex items-center gap-2 font-[family-name:var(--font-serif)] text-3xl font-semibold">
-                <Icon icon={CollectionIcon} size="md" />
-                {tag.name}
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Recipes in this collection
-              </p>
-            </div>
+          <div className="px-2">
+            <h1 className="flex items-center gap-2 font-[family-name:var(--font-serif)] text-3xl font-semibold">
+              <Icon icon={CollectionIcon} size="md" />
+              {tag.name}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Recipes in this collection
+            </p>
           </div>
         }
       />

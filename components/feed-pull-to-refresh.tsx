@@ -99,7 +99,7 @@ export function FeedPullToRefresh({
   return (
     <div
       aria-hidden={!isVisible}
-      className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+4.5rem+var(--pinterest-sync-indicator-height))] z-30 flex justify-center"
+      className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+5.5rem+var(--pinterest-sync-indicator-height))] z-30 flex justify-center"
       style={{
         opacity: isVisible ? Math.max(progress, 0.2) : 0,
         transform: `translateY(${pullDistance - REFRESH_INDICATOR_OFFSET_PX}px)`,

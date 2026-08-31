@@ -73,7 +73,7 @@ export function PinterestSyncIndicator({ initialRun }: { initialRun: SyncRun | n
 
   return (
     <>
-      <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3rem)] z-40 h-5 bg-primary text-primary-foreground shadow-sm md:top-[4.75rem]">
+      <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+4rem)] z-40 h-5 bg-primary text-primary-foreground shadow-sm md:top-[4.75rem]">
         <button
           aria-describedby="pinterest-sync-tooltip"
           aria-label={`Pinterest is syncing: ${progressLabel}. Show details.`}
