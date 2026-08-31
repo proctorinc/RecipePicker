@@ -6,6 +6,7 @@ import { Bookmark } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { toggleSaveForLaterAction } from "@/lib/actions/operations";
 import type { ActionState } from "@/lib/actions/types";
 
@@ -53,13 +54,13 @@ export function SaveForLaterButton({
       type="button"
       variant="ghost"
       size="icon"
-      className="size-10 rounded-full p-0 hover:bg-transparent"
+      className="rounded-full hover:bg-transparent"
       aria-label={isSaved ? "Remove from Saved for later" : "Save recipe for later"}
       aria-pressed={isSaved}
       title={isSaved ? "Remove from Saved for later" : "Save recipe for later"}
       onClick={toggle}
     >
-      <Bookmark className={isSaved ? "size-5 fill-current" : "size-5"} />
+      <Icon icon={Bookmark} size="lg" className={isSaved ? "fill-current" : undefined} />
     </Button>
   );
 }

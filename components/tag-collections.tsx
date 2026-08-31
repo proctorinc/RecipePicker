@@ -1,8 +1,9 @@
-import { Bookmark } from "lucide-react";
+import { Bookmark, Hash } from "lucide-react";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
 import { RecipeCollage } from "@/components/recipe-collage";
 import { Card } from "@/components/ui/card";
+import { Icon } from "@/components/ui/icon";
 import { SAVE_FOR_LATER_TAG_NORMALIZED_NAME } from "@/lib/recipe-tags";
 import type { RecipeTagCollectionView } from "@/types/view-models";
 
@@ -18,9 +19,11 @@ export function TagCollections({ collections }: { collections: RecipeTagCollecti
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/25" />
         <div className="absolute inset-x-0 bottom-0 p-3 text-white sm:p-4">
           <p className="flex items-center gap-1 truncate font-[family-name:var(--font-serif)] text-xl font-semibold leading-tight drop-shadow-sm sm:text-2xl">
-            {collection.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME ? (
-              <Bookmark className="size-4 shrink-0 fill-current" aria-hidden="true" />
-            ) : null}
+            <Icon
+              icon={collection.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME ? Bookmark : Hash}
+              size="sm"
+              className={collection.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME ? "fill-current" : undefined}
+            />
             <span className="truncate">{collection.name}</span>
           </p>
           <p className="mt-1 text-xs font-medium text-white/90 drop-shadow-sm sm:text-sm">{collection.recipeCount} {collection.recipeCount === 1 ? "recipe" : "recipes"}</p>

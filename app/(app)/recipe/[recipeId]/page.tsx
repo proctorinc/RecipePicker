@@ -1,5 +1,4 @@
-import type { ReactNode } from "react";
-import { CalendarPlus, Clock3, ExternalLink, ListChecks } from "lucide-react";
+import { CalendarPlus, ExternalLink } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
@@ -9,21 +8,19 @@ import { CopyPublicRecipeLink } from "@/components/copy-public-recipe-link";
 import { RecipeContent } from "@/components/recipe-content";
 import { RecipeMetadataEditor } from "@/components/recipe-metadata-editor";
 import { RecipeReviewLauncher } from "@/components/recipe-review-launcher";
-import { RecipeVersionHistory } from "@/components/recipe-version-history";
 import { RecipeFlagButton } from "@/components/recipe-flag-button";
 import { SaveForLaterButton } from "@/components/save-for-later-button";
 import { StatusBadge } from "@/components/status-badge";
 import { PublishPersonalRecipe } from "@/components/publish-personal-recipe";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Icon } from "@/components/ui/icon";
 import { RecipePageScrollToTop } from "@/app/(app)/recipe/[recipeId]/scroll-to-top";
 import {
   getCustomRecipeBoardOptions,
   getRecipeDetail,
   getRecipeTags,
 } from "@/lib/server/queries";
-import { formatIso8601Duration } from "@/lib/utils";
 import { getCurrentUserAccess } from "@/lib/server/access";
 import { getPublicRecipeUrl } from "@/lib/public-recipe-url";
 import { SAVE_FOR_LATER_TAG_NORMALIZED_NAME } from "@/lib/recipe-tags";
@@ -56,7 +53,7 @@ export default async function RecipePage({
         description={recipe.description}
         tags={recipe.tags}
         availableTags={availableTags}
-        byline={<RecipeByline author={recipe.author} siteName={recipe.siteName} />}
+        byline={<RecipeByline siteName={recipe.siteName} sourceUrl={recipe.sourceUrl} />}
         content={
           <RecipeContent
             recipe={recipe}
@@ -65,52 +62,51 @@ export default async function RecipePage({
           />
         }
         topContent={
-          <>
-            <div className="flex w-full flex-wrap gap-2">
-              <SaveForLaterButton
-                recipeId={recipe.recipeId}
-                initiallySaved={recipe.tags.some(
-                  (tag) => tag.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME,
-                )}
-              />
-              <Button asChild variant="secondary">
-                <AppTransitionLink
-                  href={`/history?recipeId=${encodeURIComponent(recipe.recipeId)}&from=recipe`}
-                  prefetch
-                >
-                  <CalendarPlus className="size-4" />
-                  Add
-                </AppTransitionLink>
-              </Button>
-              <CopyPublicRecipeLink
-                url={getPublicRecipeUrl(recipe.recipeId, recipe.primaryVersionNumber)}
-              />
-              {recipe.sourceUrl && (
-                <Button asChild>
-                  <a href={recipe.sourceUrl} target="_blank" rel="noreferrer">
-                    <ExternalLink className="size-4" />
-                    Original
-                  </a>
-                </Button>
+          <div className="flex w-full flex-wrap gap-2">
+            <SaveForLaterButton
+              recipeId={recipe.recipeId}
+              initiallySaved={recipe.tags.some(
+                (tag) => tag.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME,
               )}
-
-              {recipe.pin.pinterestPinId.startsWith("personal:") ? (
-                <PublishPersonalRecipe
-                  recipeId={recipe.recipeId}
-                  boards={publishOptions.boards}
-                  canPublish={publishOptions.canPublish}
-                />
-              ) : null}
-            </div>
-
+            />
+            <Button asChild variant="secondary">
+              <AppTransitionLink
+                href={`/history?recipeId=${encodeURIComponent(recipe.recipeId)}&from=recipe`}
+                prefetch
+              >
+                <CalendarPlus className="size-4" />
+                Add
+              </AppTransitionLink>
+            </Button>
+            <CopyPublicRecipeLink
+              url={getPublicRecipeUrl(recipe.recipeId, recipe.primaryVersionNumber)}
+            />
             <RecipeReviewLauncher
+              buttonOnly
               recipeId={recipe.recipeId}
               recipeTitle={recipe.title}
               averageRating={recipe.averageRating}
               reviewCount={recipe.reviewCount}
               reviews={recipe.reviews}
             />
-          </>
+
+            {recipe.pin.pinterestPinId.startsWith("personal:") ? (
+              <PublishPersonalRecipe
+                recipeId={recipe.recipeId}
+                boards={publishOptions.boards}
+                canPublish={publishOptions.canPublish}
+              />
+            ) : null}
+          </div>
+        }
+        afterDescriptionContent={
+          <RecipeReviewLauncher
+            recipeId={recipe.recipeId}
+            recipeTitle={recipe.title}
+            averageRating={recipe.averageRating}
+            reviewCount={recipe.reviewCount}
+            reviews={recipe.reviews}
+          />
         }
       >
         <section className="relative aspect-[16/10] overflow-hidden rounded-t-[36px] border border-white/70 bg-white/70 shadow-soft sm:aspect-[16/8]">
@@ -133,28 +129,6 @@ export default async function RecipePage({
             />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-black/25" />
-          <div className="absolute inset-x-0 bottom-0 p-4 text-white sm:p-8">
-            <div className="flex flex-wrap gap-1.5">
-              <RecipeVersionHistory versions={recipe.versions} />
-              {recipe.extractionProvenance ? (
-                <Badge variant="secondary" className="border border-white/40 bg-secondary/85 px-2 py-0.5 text-[11px] text-secondary-foreground">
-                  {recipe.extractionProvenance === "image" ? "Image recipe" : "Video recipe"}
-                </Badge>
-              ) : null}
-              {recipe.totalTime ? (
-                <MetaChip
-                  icon={<Clock3 className="size-3.5" />}
-                  label={formatIso8601Duration(recipe.totalTime) ?? recipe.totalTime}
-                />
-              ) : null}
-              {recipe.yieldText ? (
-                <MetaChip
-                  icon={<ListChecks className="size-3.5" />}
-                  label={`${recipe.yieldText} servings`}
-                />
-              ) : null}
-            </div>
-          </div>
         </section>
       </RecipeMetadataEditor>
 
@@ -212,42 +186,50 @@ export default async function RecipePage({
 }
 
 function RecipeByline({
-  author,
   siteName,
+  sourceUrl,
 }: {
-  author: string | null;
   siteName: string | null;
+  sourceUrl: string | null;
 }) {
-  if (!author && !siteName) {
+  if (!siteName && !sourceUrl) {
     return null;
   }
 
-  const showsDistinctSiteName = Boolean(
-    siteName && author && siteName.localeCompare(author, undefined, { sensitivity: "accent" }) !== 0,
-  );
-
   return (
-    <p className="px-4 pt-4 text-sm text-muted-foreground sm:px-0">
-      {author ? (
+    <p className="px-4 pb-2 text-sm text-muted-foreground sm:px-0">
+      {siteName ? (
         <>
-          By <strong><em>{author}</em></strong>
+          From{" "}
+          {sourceUrl ? (
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-semibold italic underline underline-offset-2"
+            >
+              {siteName}
+              <Icon icon={ExternalLink} size="sm" />
+            </a>
+          ) : (
+            <strong><em>{siteName}</em></strong>
+          )}
         </>
       ) : (
-        <>From <strong><em>{siteName}</em></strong></>
+        <>
+          View{" "}
+          <a
+            href={sourceUrl ?? undefined}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-semibold italic underline underline-offset-2"
+          >
+            original recipe
+            <Icon icon={ExternalLink} size="sm" />
+          </a>
+        </>
       )}
-      {showsDistinctSiteName ? (
-        <> · From <strong><em>{siteName}</em></strong></>
-      ) : null}
     </p>
-  );
-}
-
-function MetaChip({ icon, label }: { icon: ReactNode; label: string }) {
-  return (
-    <div className="inline-flex items-center gap-1.5 rounded-full border border-white/40 bg-secondary/85 px-2 py-0.5 text-[11px] font-medium text-secondary-foreground backdrop-blur">
-      {icon}
-      {label}
-    </div>
   );
 }
 

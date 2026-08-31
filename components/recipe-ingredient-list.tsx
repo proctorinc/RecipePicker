@@ -95,6 +95,9 @@ export function RecipeIngredientList({
             key={ingredient.id}
             className={`flex items-start gap-3 rounded-2xl ${needsReview ? "border border-yellow-400/60 bg-yellow-100/65 p-3" : ""}`}
           >
+            <span aria-hidden="true" className="mt-1.5 shrink-0 text-muted-foreground">
+              •
+            </span>
             {(() => {
               const parts = formatScaledIngredientParts(ingredient, multiplier);
               return parts.amount ? <span className="mt-0.5 shrink-0 rounded-lg bg-secondary px-2 py-1 text-sm font-semibold text-foreground">{parts.amount}</span> : null;

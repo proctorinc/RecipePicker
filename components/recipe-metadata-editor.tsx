@@ -9,7 +9,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import { Bookmark, Check, Pencil, Plus, X } from "lucide-react";
+import { Bookmark, Check, Hash, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -56,6 +56,7 @@ type RecipeMetadataEditorProps = {
   children: React.ReactNode;
   byline?: React.ReactNode;
   topContent?: React.ReactNode;
+  afterDescriptionContent?: React.ReactNode;
   content?: React.ReactNode;
   editBanner?: React.ReactNode;
 };
@@ -69,6 +70,7 @@ export function RecipeMetadataEditor({
   children,
   byline,
   topContent,
+  afterDescriptionContent,
   content,
   editBanner,
 }: RecipeMetadataEditorProps) {
@@ -186,7 +188,7 @@ export function RecipeMetadataEditor({
                 }}
               />
             </div>
-            <div className="absolute inset-x-0 bottom-0 z-10 p-4 pb-12 text-white sm:p-8 sm:pb-20">
+            <div className="absolute inset-x-0 bottom-0 z-10 p-4 text-white sm:p-8">
               <section>
                 {isEditing ? (
                   <Textarea
@@ -243,33 +245,36 @@ export function RecipeMetadataEditor({
 
         {editBanner}
 
-        <div className="mx-auto w-full max-w-4xl space-y-2">
+        <div className="-mt-4 mx-auto w-full max-w-4xl space-y-2">
           {byline}
+          {topContent}
           <RecipeTags
             recipeId={recipeId}
             initialTags={tags}
             availableTags={availableTags}
           />
 
-          <section>
-            {isEditing ? (
-              <Textarea
-                ref={descriptionRef}
-                form={formId}
-                name="description"
-                value={draftDescription}
-                onChange={(event) => setDraftDescription(event.target.value)}
-                placeholder="Add a short description for this recipe."
-                rows={4}
-                className="min-h-[7.5rem] resize-none overflow-hidden rounded-none border-0 bg-secondary/30 px-0 py-0 text-sm text-muted-foreground shadow-none focus-visible:ring-0 sm:text-base"
-              />
-            ) : displayDescription.trim() ? (
-              <RecipeDescription description={displayDescription} />
-            ) : null}
-          </section>
+          <div className="space-y-6">
+            <section>
+              {isEditing ? (
+                <Textarea
+                  ref={descriptionRef}
+                  form={formId}
+                  name="description"
+                  value={draftDescription}
+                  onChange={(event) => setDraftDescription(event.target.value)}
+                  placeholder="Add a short description for this recipe."
+                  rows={4}
+                  className="min-h-[7.5rem] resize-none overflow-hidden rounded-none border-0 bg-secondary/30 px-0 py-0 text-sm text-muted-foreground shadow-none focus-visible:ring-0 sm:text-base"
+                />
+              ) : displayDescription.trim() ? (
+                <RecipeDescription description={displayDescription} />
+              ) : null}
+            </section>
 
-          {topContent}
-          {content}
+            {afterDescriptionContent}
+            {content}
+          </div>
         </div>
       </div>
     </RecipeEditingContext.Provider>
@@ -359,9 +364,19 @@ function RecipeTags({
               selectedTag === tag ? `Remove ${tag} tag` : `Select ${tag} tag`
             }
           >
-            {tag.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME ? (
-              <Bookmark className="size-3 fill-current" aria-hidden="true" />
-            ) : null}
+            <Icon
+              icon={
+                tag.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME
+                  ? Bookmark
+                  : Hash
+              }
+              size="xs"
+              className={
+                tag.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME
+                  ? "fill-current"
+                  : undefined
+              }
+            />
             {tag}
             {selectedTag === tag ? <X className="size-3" /> : null}
           </button>
@@ -374,7 +389,7 @@ function RecipeTags({
           aria-label="Add tag"
         >
           <Icon icon={Plus} size="sm" />
-          Tags
+          Tag
         </button>
       </div>
       <Dialog
@@ -418,12 +433,24 @@ function RecipeTags({
                     key={tag.tagId}
                     type="button"
                     disabled={pending}
-                    className="inline-flex rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium transition hover:bg-secondary disabled:pointer-events-none disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/55 px-3 py-1 text-xs font-medium transition hover:bg-secondary disabled:pointer-events-none disabled:opacity-50"
                     onClick={() => addTag(tag.name)}
                   >
-                    {tag.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME ? (
-                      <Bookmark className="mr-1 inline size-3 fill-current" aria-hidden="true" />
-                    ) : null}
+                    <Icon
+                      icon={
+                        tag.name.toLocaleLowerCase() ===
+                        SAVE_FOR_LATER_TAG_NORMALIZED_NAME
+                          ? Bookmark
+                          : Hash
+                      }
+                      size="xs"
+                      className={
+                        tag.name.toLocaleLowerCase() ===
+                        SAVE_FOR_LATER_TAG_NORMALIZED_NAME
+                          ? "fill-current"
+                          : undefined
+                      }
+                    />
                     {tag.name}
                   </button>
                 ))}

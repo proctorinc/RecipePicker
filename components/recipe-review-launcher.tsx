@@ -2,18 +2,20 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { Star } from "lucide-react";
 
 import { ReviewDeleteButton } from "@/components/review-delete-button";
 import { RecipeReviewDialog } from "@/components/recipe-review-dialog";
 import { StarRating } from "@/components/star-rating";
 import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Icon } from "@/components/ui/icon";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import type { RecipeReviewView } from "@/types/view-models";
 import { formatDay, formatRatingValue, getTodayMonthString } from "@/lib/utils";
@@ -24,6 +26,7 @@ type RecipeReviewLauncherProps = {
   averageRating: number | null;
   reviewCount: number;
   reviews: RecipeReviewView[];
+  buttonOnly?: boolean;
 };
 
 export function RecipeReviewLauncher({
@@ -32,9 +35,11 @@ export function RecipeReviewLauncher({
   averageRating,
   reviewCount,
   reviews,
+  buttonOnly = false,
 }: RecipeReviewLauncherProps) {
   const [rateFlowOpen, setRateFlowOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [reviewsOpen, setReviewsOpen] = useState(false);
   const [selectedRating, setSelectedRating] = useState(3.5);
   const [editingReview, setEditingReview] = useState<RecipeReviewView | null>(
     null,
@@ -46,12 +51,43 @@ export function RecipeReviewLauncher({
 
   return (
     <>
-      <div className="rounded-[28px] border border-white/70 bg-white/85 p-5 shadow-soft">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      {buttonOnly ? (
+        <Button
+          type="button"
+          onClick={() => {
+            setSelectedRating(3.5);
+            setRateFlowOpen(true);
+          }}
+        >
+          <Icon icon={Star} size="sm" />
+          Review
+        </Button>
+      ) : (
+        <Card
+          className={reviewCount > 0
+            ? "cursor-pointer bg-white/85 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            : "bg-white/85"}
+          role={reviewCount > 0 ? "button" : undefined}
+          tabIndex={reviewCount > 0 ? 0 : undefined}
+          aria-label={reviewCount > 0 ? `View ${reviewCount} reviews` : undefined}
+          onClick={reviewCount > 0 ? () => setReviewsOpen(true) : undefined}
+          onKeyDown={reviewCount > 0 ? (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setReviewsOpen(true);
+            }
+          } : undefined}
+        >
+        <CardHeader>
           <div className="space-y-2">
-            <p className="text-sm uppercase tracking-[0.24em] text-muted-foreground">
-              Meal reviews
-            </p>
+            <div className="flex items-center gap-3">
+              <CardTitle>Reviews</CardTitle>
+              {reviewCount > 0 ? (
+                <span className="text-sm font-medium text-muted-foreground underline underline-offset-4">
+                  View reviews
+                </span>
+              ) : null}
+            </div>
             <div className="flex items-center gap-3">
               <StarRating value={averageRating ?? 0} />
               <p className="text-sm text-muted-foreground">
@@ -61,37 +97,8 @@ export function RecipeReviewLauncher({
               </p>
             </div>
           </div>
-          <div className="space-y-3">
-            {/*<div>
-              <p className="mb-2 text-sm font-medium">
-                How did this meal turn out?
-              </p>
-              <StarRating
-                value={selectedRating}
-                onChange={(value) => {
-                  setSelectedRating(value);
-                  setCreateOpen(true);
-                }}
-              />
-            </div>*/}
-            <div className="flex flex-wrap gap-3">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  setSelectedRating(3.5);
-                  setRateFlowOpen(true);
-                }}
-              >
-                Rate recipe
-              </Button>
-              {reviewCount > 0 ? (
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button type="button" variant="outline">
-                      See {reviewCount} review{reviewCount === 1 ? "" : "s"}
-                    </Button>
-                  </DialogTrigger>
+          {reviewCount > 0 ? (
+            <Dialog open={reviewsOpen} onOpenChange={setReviewsOpen}>
                   <DialogContent className="w-[min(92vw,48rem)] max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Reviews</DialogTitle>
@@ -151,12 +158,11 @@ export function RecipeReviewLauncher({
                       ))}
                     </div>
                   </DialogContent>
-                </Dialog>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </div>
+            </Dialog>
+          ) : null}
+        </CardHeader>
+        </Card>
+      )}
 
       <Dialog open={rateFlowOpen} onOpenChange={setRateFlowOpen}>
         <DialogContent className="w-[min(92vw,32rem)]">

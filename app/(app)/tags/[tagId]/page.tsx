@@ -1,4 +1,4 @@
-import { ArrowLeft, Bookmark, Tag } from "lucide-react";
+import { ArrowLeft, Bookmark, Hash } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { AppTransitionLink } from "@/components/app-transition-link";
@@ -18,7 +18,7 @@ export default async function TagPage({ params }: { params: Promise<{ tagId: str
   const page = await getFeedPinsPage({ tagId });
   const CollectionIcon = tag.name.toLocaleLowerCase() === SAVE_FOR_LATER_TAG_NORMALIZED_NAME
     ? Bookmark
-    : Tag;
+    : Hash;
   return (
     <PageShell>
       <HomeFeedShell

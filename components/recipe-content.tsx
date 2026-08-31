@@ -123,8 +123,8 @@ export function RecipeContent({
         ) : null}
 
         <Card className="bg-white/85">
-          <CardHeader><CardTitle>Ingredients</CardTitle></CardHeader>
-          <CardContent className="px-10">
+          <CardHeader className="px-4"><CardTitle>Ingredients</CardTitle></CardHeader>
+          <CardContent className="px-4">
             {isEditing ? (
               <section className="space-y-3">
                 <input form={formId} type="hidden" name="ingredientsJson" value={JSON.stringify(ingredients.filter((ingredient) => !ingredient.isPendingDeletion && ingredient.parsedText?.trim()).map(({ id, originalText, parsedText, notes, measurements }) => ({ id, originalText, ingredientText: parsedText, notes, measurements })))} />
