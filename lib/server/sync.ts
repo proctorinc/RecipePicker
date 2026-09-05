@@ -296,16 +296,12 @@ export async function runClaimedPinterestAutoSync(args: {
       selectedBoardIds,
     });
 
-    const titleFallbackRecipeIds = await findRecipesNeedingParsedTitle(args.householdId);
-    const recipeIdsToParse = uniqueRecipeIds([
-      ...syncResult.newRecipeIds,
-      ...titleFallbackRecipeIds,
-    ]);
+    const recipeIdsToParse = uniqueRecipeIds(syncResult.newRecipeIds);
     if (recipeIdsToParse.length > 0) {
       await extractRecipes({
         householdId: args.householdId,
         recipeIds: recipeIdsToParse,
-        rerun: titleFallbackRecipeIds.length > 0,
+        rerun: false,
       });
     }
 
@@ -501,16 +497,12 @@ export async function runManualSyncAllBoards(args: {
 
 export async function runForcePinterestResync(args: { householdId: string }) {
   const result = await runManualSyncAllBoards({ ...args, trigger: "force" });
-  const titleFallbackRecipeIds = await findRecipesNeedingParsedTitle(args.householdId);
-  const recipeIdsToParse = uniqueRecipeIds([
-    ...result.newRecipeIds,
-    ...titleFallbackRecipeIds,
-  ]);
+  const recipeIdsToParse = uniqueRecipeIds(result.newRecipeIds);
   if (recipeIdsToParse.length > 0) {
     await extractRecipes({
       householdId: args.householdId,
       recipeIds: recipeIdsToParse,
-      rerun: titleFallbackRecipeIds.length > 0,
+      rerun: false,
     });
   }
   return result;
@@ -1261,8 +1253,7 @@ async function queuePinterestSyncRecipeParseJob(
     const createdRecipeIds = changes
       .filter((change) => change.changeType === "created")
       .map((change) => change.recipeId);
-    const titleFallbackRecipeIds = await findRecipesNeedingParsedTitle(job.householdId, db);
-    const recipeIds = uniqueRecipeIds([...createdRecipeIds, ...titleFallbackRecipeIds]);
+    const recipeIds = uniqueRecipeIds(createdRecipeIds);
 
     if (recipeIds.length === 0) return;
     if (!requester) throw new Error("Pinterest sync completed without a user available to request recipe parsing.");
@@ -1271,9 +1262,10 @@ async function queuePinterestSyncRecipeParseJob(
       householdId: job.householdId,
       requestedByClerkUserId: requester,
       recipeIds,
-      rerun: titleFallbackRecipeIds.length > 0,
+      rerun: false,
       mode: "pinterest_sync",
     });
+    if (!parseJob.ok && parseJob.reason === "no_new_recipes") return;
     if (!parseJob.ok) throw new Error(`Unable to create the Pinterest recipe parse job: ${parseJob.message}`);
 
     parseJobId = parseJob.jobId;
@@ -1292,31 +1284,6 @@ async function queuePinterestSyncRecipeParseJob(
     .set({ recipeParseJobQueuedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
     .where(eq(pinterestSyncJobs.jobId, job.jobId))
     .run();
-}
-
-async function findRecipesNeedingParsedTitle(
-  householdId: string,
-  existingDb?: Awaited<ReturnType<typeof openDatabase>>["db"],
-) {
-  const handle = existingDb ? null : await openDatabase();
-  const db = existingDb ?? handle!.db;
-
-  try {
-    const recipes = await db.query.householdRecipes.findMany({
-      where: (table, { and: whereAnd, eq: whereEq, isNull: whereIsNull }) => whereAnd(
-        whereEq(table.householdId, householdId),
-        whereIsNull(table.removedAt),
-        whereEq(table.titleOverridden, false),
-      ),
-      columns: { recipeId: true, title: true },
-      with: { pin: { columns: { title: true, link: true } } },
-    });
-    return recipes
-      .filter((recipe) => Boolean(recipe.pin.link) && !recipe.title?.trim() && !recipe.pin.title?.trim())
-      .map((recipe) => recipe.recipeId);
-  } finally {
-    await handle?.sqlite.close();
-  }
 }
 
 function uniqueRecipeIds(recipeIds: string[]) {

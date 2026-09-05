@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import type { LibSQLDatabase } from "drizzle-orm/libsql";
+import type * as schema from "@/src/db/schema";
 
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 
@@ -6,6 +8,7 @@ import { openDatabase } from "@/lib/server/database";
 import {
   householdRecipeParseJobItems,
   householdRecipeParseJobs,
+  householdRecipeInstructions,
 } from "@/lib/server/db";
 import { extractSingleRecipe } from "@/lib/server/extract";
 import {
@@ -20,7 +23,7 @@ const ACTIVE_JOB_STATUSES = ["queued", "running", "cancelling"] as const;
 const TERMINAL_JOB_STATUSES = ["completed", "cancelled"] as const;
 const RECIPE_PARSE_CHUNK_SIZE = 4;
 const RECIPE_PARSE_CONCURRENCY = 2;
-const RECIPE_PARSE_LEASE_MS = 90 * 1000;
+const RECIPE_PARSE_LEASE_MS = 4 * 60 * 1000;
 const RECIPE_PARSE_STALE_HEARTBEAT_MS = 2 * 60 * 1000;
 const RECIPE_PARSE_JOB_QUEUEING_ERROR =
   "The parse job could not be queued in Inngest. Resume to continue parsing.";
@@ -94,7 +97,29 @@ export type CreateRecipeParseJobResult =
       ok: false;
       message: string;
       activeJobId?: string;
+      reason?: "no_new_recipes";
     };
+
+// Serialize eligibility checks and inserts across requests, including Turso workers.
+async function withQueueTransaction<T>(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  driver: "sqlite" | "turso",
+  work: (tx: Awaited<ReturnType<typeof openDatabase>>["db"]) => Promise<T>,
+): Promise<T> {
+  if (driver === "turso") {
+    return (db as LibSQLDatabase<typeof schema>).transaction(async (tx) => work(tx as unknown as typeof db));
+  }
+  // better-sqlite3's callback transaction cannot contain async work.
+  await db.run(sql`BEGIN IMMEDIATE`);
+  try {
+    const result = await work(db);
+    await db.run(sql`COMMIT`);
+    return result;
+  } catch (error) {
+    await db.run(sql`ROLLBACK`);
+    throw error;
+  }
+}
 
 export async function createRecipeParseJob(input: {
   householdId: string;
@@ -104,160 +129,177 @@ export async function createRecipeParseJob(input: {
   filters?: Record<string, unknown> | null;
   mode?: string;
 }) : Promise<CreateRecipeParseJobResult> {
-  const { db, sqlite } = await openDatabase();
+  const { db, sqlite, driver } = await openDatabase();
 
   try {
-    const existingActiveJob = await db.query.householdRecipeParseJobs.findFirst({
-      where: (table, { and, eq, inArray }) =>
-        and(eq(table.householdId, input.householdId), inArray(table.status, [...ACTIVE_JOB_STATUSES])),
-      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
-      columns: {
-        jobId: true,
-      },
-    });
+    return await withQueueTransaction(db, driver, async (db) => {
+      const existingActiveJob = await db.query.householdRecipeParseJobs.findFirst({
+        where: (table, { and, eq, inArray }) =>
+          and(eq(table.householdId, input.householdId), inArray(table.status, [...ACTIVE_JOB_STATUSES])),
+        orderBy: (table, { desc: orderDesc }) => [orderDesc(table.createdAt)],
+        columns: {
+          jobId: true,
+        },
+      });
 
-    // Pinterest syncs must not drop newly discovered recipes merely because a
-    // prior parse job is still active. Inngest serializes household workers,
-    // so this job will wait its turn without competing for extraction work.
-    if (existingActiveJob && input.mode !== "pinterest_sync") {
-      logRecipeParseJobEvent("warn", "recipe_parse_job.create_conflict", {
+      // Pinterest syncs must not drop newly discovered recipes merely because a
+      // prior parse job is still active. Inngest serializes household workers,
+      // so this job will wait its turn without competing for extraction work.
+      if (existingActiveJob && input.mode !== "pinterest_sync") {
+        logRecipeParseJobEvent("warn", "recipe_parse_job.create_conflict", {
+          householdId: input.householdId,
+          jobId: existingActiveJob.jobId,
+          data: {
+            result: {
+              status: "conflict",
+            },
+          },
+        });
+        return {
+          ok: false,
+          message: "A bulk parse job is already running for this kitchen.",
+          activeJobId: existingActiveJob.jobId,
+        };
+      }
+
+      const normalizedIds = Array.from(
+        new Set(input.recipeIds.map((recipeId) => recipeId.trim()).filter((recipeId) => recipeId.length > 0)),
+      );
+
+      if (normalizedIds.length === 0) {
+        logRecipeParseJobEvent("warn", "recipe_parse_job.create_rejected", {
+          householdId: input.householdId,
+          data: {
+            reason: "empty_selection",
+          },
+        });
+        return {
+          ok: false,
+          message: "Choose at least one recipe to re-parse.",
+        };
+      }
+
+      const recipes = await db.query.householdRecipes.findMany({
+        where: (table, { and, eq, inArray, isNull }) =>
+          and(
+            eq(table.householdId, input.householdId),
+            inArray(table.recipeId, normalizedIds),
+            isNull(table.removedAt),
+          ),
+        columns: {
+          recipeId: true,
+        },
+        with: { recipeInstructions: { columns: { recipeId: true } } },
+      });
+      const existingItems = await db.select()
+        .from(householdRecipeParseJobItems)
+        .innerJoin(householdRecipeParseJobs, eq(householdRecipeParseJobs.jobId, householdRecipeParseJobItems.jobId))
+        .where(and(
+          eq(householdRecipeParseJobs.householdId, input.householdId),
+          inArray(householdRecipeParseJobItems.recipeId, normalizedIds),
+          input.rerun
+            ? inArray(householdRecipeParseJobs.status, [...ACTIVE_JOB_STATUSES])
+            : ne(householdRecipeParseJobItems.status, "cancelled"),
+        ));
+      const reservedIds = new Set(existingItems.map((item) => item.household_recipe_parse_job_items.recipeId));
+      const allowedIds = recipes.filter((recipe) =>
+        !reservedIds.has(recipe.recipeId) && (input.rerun || !recipe.recipeInstructions),
+      ).map((recipe) => recipe.recipeId);
+
+      if (allowedIds.length === 0) {
+        logRecipeParseJobEvent("warn", "recipe_parse_job.create_rejected", {
+          householdId: input.householdId,
+          data: {
+            reason: "no_matching_recipes",
+            requestedRecipeCount: normalizedIds.length,
+          },
+        });
+        return {
+          ok: false,
+          message: "No new recipes need parsing.",
+          reason: "no_new_recipes",
+        };
+      }
+
+      const createdAt = new Date().toISOString();
+      const workerToken = crypto.randomUUID();
+      const jobId = crypto.randomUUID();
+
+      await db.insert(householdRecipeParseJobs)
+        .values({
+          jobId,
+          householdId: input.householdId,
+          status: "queued",
+          requestedByClerkUserId: input.requestedByClerkUserId,
+          mode: input.mode ?? "bulk_rerun_selection",
+          rerun: input.rerun,
+          filtersJson: input.filters ? JSON.stringify(input.filters) : null,
+          recipeIdsJson: JSON.stringify(allowedIds),
+          totalRecipes: allowedIds.length,
+          processedRecipes: 0,
+          succeededRecipes: 0,
+          reviewNeededRecipes: 0,
+          failedRecipes: 0,
+          cancelRequestedAt: null,
+          startedAt: null,
+          completedAt: null,
+          lastHeartbeatAt: null,
+          lastError: null,
+          workerToken,
+          createdAt,
+          updatedAt: createdAt,
+        })
+        .run();
+
+      try {
+        await db.insert(householdRecipeParseJobItems)
+          .values(
+            allowedIds.map((recipeId, index) => ({
+              jobItemId: crypto.randomUUID(),
+              jobId,
+              recipeId,
+              position: index + 1,
+              status: "queued",
+              attemptCount: 0,
+              startedAt: null,
+              completedAt: null,
+              lastError: null,
+              lastExtractionId: null,
+              createdAt,
+              updatedAt: createdAt,
+            })),
+          )
+          .run();
+      } catch (error) {
+        await db.delete(householdRecipeParseJobs)
+          .where(eq(householdRecipeParseJobs.jobId, jobId))
+          .run();
+        throw error;
+      }
+
+      logRecipeParseJobEvent("audit", "recipe_parse_job.created", {
         householdId: input.householdId,
-        jobId: existingActiveJob.jobId,
+        jobId,
         data: {
+          requestedRecipeCount: normalizedIds.length,
+          acceptedRecipeCount: allowedIds.length,
+          rerun: input.rerun,
+          mode: input.mode ?? "bulk_rerun_selection",
           result: {
-            status: "conflict",
+            status: "queued",
           },
         },
       });
+
       return {
-        ok: false,
-        message: "A bulk parse job is already running for this kitchen.",
-        activeJobId: existingActiveJob.jobId,
-      };
-    }
-
-    const normalizedIds = Array.from(
-      new Set(input.recipeIds.map((recipeId) => recipeId.trim()).filter((recipeId) => recipeId.length > 0)),
-    );
-
-    if (normalizedIds.length === 0) {
-      logRecipeParseJobEvent("warn", "recipe_parse_job.create_rejected", {
-        householdId: input.householdId,
-        data: {
-          reason: "empty_selection",
-        },
-      });
-      return {
-        ok: false,
-        message: "Choose at least one recipe to re-parse.",
-      };
-    }
-
-    const recipes = await db.query.householdRecipes.findMany({
-      where: (table, { and, eq, inArray, isNull }) =>
-        and(
-          eq(table.householdId, input.householdId),
-          inArray(table.recipeId, normalizedIds),
-          isNull(table.removedAt),
-        ),
-      columns: {
-        recipeId: true,
-      },
-    });
-    const allowedIds = normalizedIds.filter((recipeId) => recipes.some((recipe) => recipe.recipeId === recipeId));
-
-    if (allowedIds.length === 0) {
-      logRecipeParseJobEvent("warn", "recipe_parse_job.create_rejected", {
-        householdId: input.householdId,
-        data: {
-          reason: "no_matching_recipes",
-          requestedRecipeCount: normalizedIds.length,
-        },
-      });
-      return {
-        ok: false,
-        message: "No matching recipes were found.",
-      };
-    }
-
-    const createdAt = new Date().toISOString();
-    const workerToken = crypto.randomUUID();
-    const jobId = crypto.randomUUID();
-
-    await db.insert(householdRecipeParseJobs)
-      .values({
+        ok: true,
         jobId,
-        householdId: input.householdId,
-        status: "queued",
-        requestedByClerkUserId: input.requestedByClerkUserId,
-        mode: input.mode ?? "bulk_rerun_selection",
-        rerun: input.rerun,
-        filtersJson: input.filters ? JSON.stringify(input.filters) : null,
-        recipeIdsJson: JSON.stringify(allowedIds),
-        totalRecipes: allowedIds.length,
-        processedRecipes: 0,
-        succeededRecipes: 0,
-        reviewNeededRecipes: 0,
-        failedRecipes: 0,
-        cancelRequestedAt: null,
-        startedAt: null,
-        completedAt: null,
-        lastHeartbeatAt: null,
-        lastError: null,
         workerToken,
+        totalRecipes: allowedIds.length,
+        status: "queued",
         createdAt,
-        updatedAt: createdAt,
-      })
-      .run();
-
-    try {
-      await db.insert(householdRecipeParseJobItems)
-        .values(
-          allowedIds.map((recipeId, index) => ({
-            jobItemId: crypto.randomUUID(),
-            jobId,
-            recipeId,
-            position: index + 1,
-            status: "queued",
-            attemptCount: 0,
-            startedAt: null,
-            completedAt: null,
-            lastError: null,
-            lastExtractionId: null,
-            createdAt,
-            updatedAt: createdAt,
-          })),
-        )
-        .run();
-    } catch (error) {
-      await db.delete(householdRecipeParseJobs)
-        .where(eq(householdRecipeParseJobs.jobId, jobId))
-        .run();
-      throw error;
-    }
-
-    logRecipeParseJobEvent("audit", "recipe_parse_job.created", {
-      householdId: input.householdId,
-      jobId,
-      data: {
-        requestedRecipeCount: normalizedIds.length,
-        acceptedRecipeCount: allowedIds.length,
-        rerun: input.rerun,
-        mode: input.mode ?? "bulk_rerun_selection",
-        result: {
-          status: "queued",
-        },
-      },
+      };
     });
-
-    return {
-      ok: true,
-      jobId,
-      workerToken,
-      totalRecipes: allowedIds.length,
-      status: "queued",
-      createdAt,
-    };
   } finally {
     await sqlite.close();
   }
@@ -514,6 +556,53 @@ export async function markRecipeParseJobWorkflowFailure(input: {
   }
 }
 
+/** Recover the oldest outstanding job per kitchen without flooding Inngest. */
+export async function findStalledRecipeParseJobs(now = new Date()) {
+  const { db, sqlite } = await openDatabase();
+  try {
+    const jobs = await db.query.householdRecipeParseJobs.findMany({
+      where: (table, { inArray }) => inArray(table.status, [...ACTIVE_JOB_STATUSES]),
+      orderBy: (table, { asc }) => [asc(table.createdAt), asc(table.jobId)],
+    });
+    const seen = new Set<string>();
+    return jobs.filter((job) => {
+      if (seen.has(job.householdId)) return false;
+      seen.add(job.householdId);
+      const lastActivity = job.lastHeartbeatAt ?? job.updatedAt;
+      return now.getTime() - new Date(lastActivity).getTime() >= 5 * 60 * 1000;
+    }).map(({ jobId, householdId }) => ({ jobId, householdId }));
+  } finally {
+    await sqlite.close();
+  }
+}
+
+// Old sync jobs may already contain the same recipe many times. Keep the first
+// reservation, and retire later copies before they can start paid extraction.
+async function discardDuplicateSyncItems(
+  db: Awaited<ReturnType<typeof openDatabase>>["db"],
+  job: typeof householdRecipeParseJobs.$inferSelect,
+) {
+  if (job.mode !== "pinterest_sync") return;
+  await db.run(sql`
+    UPDATE household_recipe_parse_job_items SET status = 'cancelled',
+      completed_at = ${new Date().toISOString()}, updated_at = ${new Date().toISOString()},
+      last_error = 'Skipped: recipe already parsed or reserved by an earlier job.'
+    WHERE job_id = ${job.jobId} AND status = 'queued' AND (
+      EXISTS (SELECT 1 FROM ${householdRecipeInstructions} AS instructions
+        WHERE instructions.recipe_id = household_recipe_parse_job_items.recipe_id)
+      OR EXISTS (
+        SELECT 1 FROM ${householdRecipeParseJobItems} AS prior
+        JOIN ${householdRecipeParseJobs} AS prior_job ON prior_job.job_id = prior.job_id
+        WHERE prior.recipe_id = household_recipe_parse_job_items.recipe_id
+          AND prior_job.household_id = ${job.householdId}
+          AND prior.status != 'cancelled'
+          AND (prior_job.created_at < ${job.createdAt}
+            OR (prior_job.created_at = ${job.createdAt} AND prior_job.job_id < ${job.jobId}))
+      )
+    )
+  `);
+}
+
 export async function processRecipeParseJobChunk(input: {
   jobId: string;
 }) {
@@ -591,6 +680,7 @@ export async function processRecipeParseJobChunk(input: {
       return { status: "busy" as const };
     }
 
+    await discardDuplicateSyncItems(db, job);
     const claimedItems = await claimNextJobItems(db, job.jobId, now.toISOString());
 
     if (claimedItems.length === 0) {
@@ -676,7 +766,7 @@ export async function processRecipeParseJobChunk(input: {
           },
         });
       } catch (error) {
-        if (cancellationMonitor.signal.aborted || isAbortError(error)) {
+        if (cancellationMonitor.signal.aborted) {
           return;
         }
         await completeJobItem(db, {
@@ -699,7 +789,7 @@ export async function processRecipeParseJobChunk(input: {
         });
       } finally {
         if (!cancellationMonitor.signal.aborted) {
-          await markJobHeartbeat(db, job.jobId, "running", new Date().toISOString());
+          await rollupJobProgress(db, job.jobId, new Date().toISOString());
         }
       }
       });
@@ -1023,10 +1113,6 @@ function createJobCancellationMonitor(
       }
     },
   };
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof Error && error.name === "AbortError";
 }
 
 async function runWithConcurrency<T>(

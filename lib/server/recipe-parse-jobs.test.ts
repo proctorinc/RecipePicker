@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { eq } from "drizzle-orm";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openDatabase } from "@/lib/server/database";
@@ -15,6 +17,8 @@ import {
 } from "@/lib/server/db";
 import {
   cancelRecipeParseJob,
+  createRecipeParseJob,
+  findStalledRecipeParseJobs,
   markRecipeParseJobQueueingFailure,
   processRecipeParseJobChunk,
 } from "@/lib/server/recipe-parse-jobs";
@@ -342,6 +346,7 @@ describe("markRecipeParseJobQueueingFailure", () => {
 describe("runRecipeParseJobWorkflow", () => {
   it("loops chunks through step.run until the job completes", async () => {
     const step = {
+      sleep: vi.fn(),
       run: vi.fn()
         .mockResolvedValueOnce({ status: "continued", remaining: 25 })
         .mockResolvedValueOnce({ status: "continued", remaining: 5 })
@@ -362,6 +367,7 @@ describe("runRecipeParseJobWorkflow", () => {
 
   it("does not schedule another chunk after cancellation", async () => {
     const step = {
+      sleep: vi.fn(),
       run: vi.fn().mockResolvedValue({ status: "cancelled" }),
     };
 
@@ -371,5 +377,75 @@ describe("runRecipeParseJobWorkflow", () => {
       step,
     })).resolves.toEqual({ status: "cancelled" });
     expect(step.run).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("queue eligibility and recovery", () => {
+  it("queues only unreserved recipes and creates no empty job on repeat sync", async () => {
+    await withTestDatabase(async ({ sqlitePath }) => {
+      const { householdId } = await seedRecipeParseJob(sqlitePath, 2);
+      const { db, sqlite } = await openDatabase(sqlitePath);
+      await db.delete(householdRecipeParseJobItems).where(eq(householdRecipeParseJobItems.recipeId, "recipe-2")).run();
+      await sqlite.close();
+      const input = { householdId, requestedByClerkUserId: "user_123", recipeIds: ["recipe-1", "recipe-2", "recipe-2"], rerun: false, mode: "pinterest_sync" };
+      const first = await createRecipeParseJob(input);
+      expect(first).toMatchObject({ ok: true, totalRecipes: 1 });
+      expect(await createRecipeParseJob(input)).toMatchObject({ ok: false, reason: "no_new_recipes" });
+      const handle = await openDatabase(sqlitePath);
+      try {
+        const jobs = await handle.db.query.householdRecipeParseJobs.findMany({ where: (table, { eq }) => eq(table.householdId, householdId) });
+        expect(jobs).toHaveLength(2);
+        expect(jobs.find((job) => job.jobId !== "job-test")?.recipeIdsJson).toBe('["recipe-2"]');
+      } finally { await handle.sqlite.close(); }
+    });
+  });
+
+  it("does not automatically queue previously attempted recipes but permits an explicit reparse", async () => {
+    await withTestDatabase(async ({ sqlitePath }) => {
+      const { householdId, jobId } = await seedRecipeParseJob(sqlitePath, 1);
+      mockExtractSingleRecipe.mockResolvedValue({ outcome: "failed", extractionId: null });
+      await processRecipeParseJobChunk({ jobId });
+      const input = { householdId, requestedByClerkUserId: "user_123", recipeIds: ["recipe-1"], mode: "pinterest_sync" };
+      expect(await createRecipeParseJob({ ...input, rerun: false })).toMatchObject({ ok: false, reason: "no_new_recipes" });
+      expect(await createRecipeParseJob({ ...input, mode: "bulk_rerun_selection", rerun: true })).toMatchObject({ ok: true, totalRecipes: 1 });
+      expect(await findStalledRecipeParseJobs()).toHaveLength(0);
+    });
+  });
+
+  it("records abort failures and advances instead of leaving items processing", async () => {
+    await withTestDatabase(async ({ sqlitePath }) => {
+      const { jobId } = await seedRecipeParseJob(sqlitePath, 2);
+      mockExtractSingleRecipe.mockRejectedValue(new DOMException("Timed out", "AbortError"));
+      expect(await processRecipeParseJobChunk({ jobId })).toEqual({ status: "completed" });
+      const { db, sqlite } = await openDatabase(sqlitePath);
+      try {
+        const job = await db.query.householdRecipeParseJobs.findFirst({ where: (table, { eq }) => eq(table.jobId, jobId) });
+        expect(job).toMatchObject({ processedRecipes: 2, failedRecipes: 2 });
+      } finally { await sqlite.close(); }
+    });
+  });
+
+  it("retires legacy duplicate sync jobs without extracting again", async () => {
+    await withTestDatabase(async ({ sqlitePath }) => {
+      const { householdId, jobId } = await seedRecipeParseJob(sqlitePath, 1);
+      const { db, sqlite } = await openDatabase(sqlitePath);
+      try {
+        const original = await db.query.householdRecipeParseJobs.findFirst({ where: (table, { eq }) => eq(table.jobId, jobId) });
+        await db.insert(householdRecipeParseJobs).values({ ...original!, jobId: "duplicate-job", mode: "pinterest_sync", createdAt: "2026-06-18T00:00:00.000Z" }).run();
+        await db.insert(householdRecipeParseJobItems).values({ jobItemId: "duplicate-item", jobId: "duplicate-job", recipeId: "recipe-1", position: 1, status: "queued", attemptCount: 0, createdAt: "2026-06-18T00:00:00.000Z", updatedAt: "2026-06-18T00:00:00.000Z" }).run();
+      } finally { await sqlite.close(); }
+      expect(await findStalledRecipeParseJobs(new Date("2026-06-19T00:00:00Z"))).toContainEqual({ householdId, jobId });
+      expect((await findStalledRecipeParseJobs(new Date("2026-06-19T00:00:00Z")))).toHaveLength(1);
+      expect(await processRecipeParseJobChunk({ jobId: "duplicate-job" })).toEqual({ status: "completed" });
+      expect(mockExtractSingleRecipe).not.toHaveBeenCalled();
+    });
+  });
+
+  it("waits and retries a busy chunk", async () => {
+    const step = { sleep: vi.fn(), run: vi.fn().mockResolvedValueOnce({ status: "busy" }).mockResolvedValueOnce({ status: "completed" }) };
+    expect(await runRecipeParseJobWorkflow({ jobId: "job", householdId: "household", step })).toEqual({ status: "completed" });
+    expect(step.sleep).toHaveBeenCalledWith("wait-1", "30s");
+    expect(step.run).toHaveBeenNthCalledWith(2, "chunk-2", expect.any(Function));
   });
 });

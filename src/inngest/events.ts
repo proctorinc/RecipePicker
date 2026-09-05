@@ -26,6 +26,7 @@ export async function sendRecipeParseJobRequestedEvent(
 
   try {
     const result = await inngest.send({
+      ...(payload.trigger === "create" ? { id: `recipe-parse-create-${payload.jobId}` } : {}),
       name: RECIPE_PARSE_JOB_REQUESTED_EVENT,
       data: payload,
     });

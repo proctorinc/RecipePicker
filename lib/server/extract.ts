@@ -167,7 +167,7 @@ export async function extractSingleRecipe(args: {
 
     throwIfAborted(signal);
     stage = "extract";
-    return extractRecipeRow(db, args.householdId, row, args.rerun ?? false, signal);
+    return await extractRecipeRow(db, args.householdId, row, args.rerun ?? false, signal);
   } catch (error) {
     if (args.signal?.aborted) {
       throw error;

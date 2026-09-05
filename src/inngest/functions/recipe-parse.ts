@@ -5,10 +5,11 @@ import { RECIPE_PARSE_JOB_REQUESTED_EVENT } from "@/src/inngest/events";
 import { logInfo, runBackgroundJob } from "@/lib/server/logger";
 import {
   markRecipeParseJobWorkflowFailure,
+  findStalledRecipeParseJobs,
   processRecipeParseJobChunk,
 } from "@/lib/server/recipe-parse-jobs";
 
-type WorkflowStep = Pick<GetStepTools<typeof inngest>, "run">;
+type WorkflowStep = Pick<GetStepTools<typeof inngest>, "run" | "sleep">;
 
 export async function runRecipeParseJobWorkflow(input: {
   jobId: string;
@@ -40,6 +41,12 @@ export async function runRecipeParseJobWorkflow(input: {
       result,
     });
 
+    if (result.status === "busy") {
+      await input.step.sleep(`wait-${chunkNumber}`, "30s");
+      chunkNumber += 1;
+      continue;
+    }
+
     if (result.status === "continued") {
       chunkNumber += 1;
       continue;
@@ -52,6 +59,11 @@ export async function runRecipeParseJobWorkflow(input: {
 export const recipeParseJobRunner = inngest.createFunction(
   {
     id: "recipe-parse-job-runner",
+    // Give each extraction chunk its own serverless request budget.
+    checkpointing: false,
+    onFailure: async ({ event, error }) => {
+      await markRecipeParseJobWorkflowFailure({ jobId: event.data.event.data.jobId, error });
+    },
     triggers: { event: RECIPE_PARSE_JOB_REQUESTED_EVENT },
     concurrency: {
       limit: 1,
@@ -59,25 +71,31 @@ export const recipeParseJobRunner = inngest.createFunction(
     },
   },
   async ({ event, step }) => {
-    try {
-      return await runBackgroundJob({
-        name: "background.recipe_parse_job",
-        target: {
-          householdId: event.data.householdId,
-          jobId: event.data.jobId,
-        },
-        fn: async () => runRecipeParseJobWorkflow({
-          jobId: event.data.jobId,
-          householdId: event.data.householdId,
-          step,
-        }),
-      });
-    } catch (error) {
-      await markRecipeParseJobWorkflowFailure({
+    return await runBackgroundJob({
+      name: "background.recipe_parse_job",
+      target: {
+        householdId: event.data.householdId,
         jobId: event.data.jobId,
-        error,
-      });
-      throw error;
-    }
+      },
+      fn: async () => runRecipeParseJobWorkflow({
+        jobId: event.data.jobId,
+        householdId: event.data.householdId,
+        step,
+      }),
+    });
+  },
+);
+
+export const recipeParseJobRecovery = inngest.createFunction(
+  { id: "recipe-parse-job-recovery", triggers: { cron: "*/5 * * * *" }, concurrency: 1 },
+  async ({ step }) => {
+    const jobs = await step.run("find-stalled-jobs", () => findStalledRecipeParseJobs());
+    if (jobs.length === 0) return { recovered: 0 };
+    await step.sendEvent("recover-stalled-jobs", jobs.map((job) => ({
+      id: `recipe-parse-recovery-${job.jobId}-${Math.floor(Date.now() / 300_000)}`,
+      name: RECIPE_PARSE_JOB_REQUESTED_EVENT,
+      data: { ...job, trigger: "resume" as const },
+    })));
+    return { recovered: jobs.length };
   },
 );
